@@ -7,7 +7,7 @@ import { ViewHelper } from "three/addons/helpers/ViewHelper.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
-import { twoBone } from "../anim/clip";
+import { ikChain } from "../anim/clip";
 
 export const VIEW_MODES = ["pbr", "albedo", "normal", "ao", "roughness", "metallic", "uv"] as const;
 export type ViewMode = (typeof VIEW_MODES)[number];
@@ -24,20 +24,47 @@ export type SkeletonEdit = {
 };
 
 /** M37: the animation editor's pose mode: the skeleton drawn on the moving model, a click near a joint selects its bone, the
- * rotate gizmo (the bone's own axes) turns it; a finished turn reports the bone's new local rotation (x, y, z, w). */
+ * rotate gizmo (the bone's own axes) turns it; a finished turn reports the bone's new local rotation (x, y, z, w).
+ * M63: the skeleton drawn as Blender draws an armature (an octahedron per bone, head to tail, turning with the bone's roll;
+ * dashed lines to a parent it does not join), the IK controls' target and pole handles. */
 export type PoseEdit = {
   selected: string | null; // a bone's three.js name
   keyed?: string[]; // bones with a correction key at this frame: drawn in the key colour
-  mode?: "rotate" | "move" | "ik"; // M38: turn the bone; move it (the hips); drag it, the two bones above it solving (IK)
+  // M38: turn the bone; move it (the hips); drag it, `chain` bones above it solving (IK drag, keyed as turns);
+  // M63 target: drag its IK control's target (or, `handle` pole, swing the knee/elbow)
+  mode?: "rotate" | "move" | "ik" | "target";
+  chain?: number; // IK drag's chain: the bones above the dragged one that turn (2 by default)
+  ik?: IkShow[];
+  handle?: "target" | "pole";
   onSelect: (bone: string) => void;
   onPose: (bone: string, q: Q4) => void;
   onMove?: (bone: string, from: Vec3, to: Vec3) => void; // its local position before and after
-  onIK?: (turns: Record<string, Q4>) => void; // the bone and the two above it: their new local turns
+  onIK?: (turns: Record<string, Q4>) => void; // the bone and the chain above it: their new local turns
+  onHandle?: (bone: string, handle: "target" | "pole") => void; // a click on an IK control's handle
+  onTarget?: (bone: string, handle: Vec3, shown: Vec3) => void; // a target dragged: the handle and the bone as shown, in the control's space
+  onSwivel?: (bone: string, degrees: number) => void; // a pole dragged: how far the knee/elbow swung about the chain
 };
+/** M63: an IK control as the viewer draws it: three.js names; `p` the target in `space`'s frame (null: skeleton space)
+ * at this frame, null when no key weighs on it here (its handle then waits at the bone); `at` where the layer puts the
+ * bone at this frame, in the same frame (the handle is drawn as far from the bone as `p` is from `at`). */
+export type IkShow = { bone: string; chain: string[]; space: string | null; p: Vec3 | null; at: Vec3 | null };
 type Q4 = [number, number, number, number];
+// a Blender octahedral bone: head at 0, tail at +Y 1, the waist a tenth of the way up and a tenth wide
+function octahedron(): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 1, 0, 0.1, 0.1, 0, 0, 0.1, 0.1, -0.1, 0.1, 0, 0, 0.1, -0.1], 3));
+  g.setIndex([0, 3, 2, 0, 4, 3, 0, 5, 4, 0, 2, 5, 1, 2, 3, 1, 3, 4, 1, 4, 5, 1, 5, 2]);
+  return g;
+}
+const BONE = { solid: 0x6a707a, edge: 0xb4bac4 }; // Blender's pose mode: grey, the active bone blue, IK yellow, keys orange
+const ACTIVE = { solid: 0x3aa0ff, edge: 0xb8eeff };
+const IK = { solid: 0xc8a020, edge: 0xffe070 };
+const KEYED = 0xf0a030;
 
 const V = (p: Vec3) => new THREE.Vector3(...p);
 const arr = (v: THREE.Vector3): Vec3 => [v.x, v.y, v.z];
+const wq = (o: THREE.Object3D) => o.getWorldQuaternion(new THREE.Quaternion()).toArray() as Q4;
+const wp = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3()).toArray() as Vec3;
 export type Moved = Record<string, { position: Vec3; twist?: Vec3 }>;
 const boneLines = (joints: Joint[]) => joints.flatMap((j) => (at(joints, j.parent ?? "") ? [...at(joints, j.parent!)!.position, ...j.position] : []));
 // a twist tick from the middle of each bone (the hands' longer)
@@ -221,12 +248,25 @@ export class Viewer {
   private speed = 1;
   private bones: THREE.Bone[] = [];
   private pose: PoseEdit | null = null;
-  private poseGroup: THREE.Group | null = null; // a sphere per bone and the lines to their parents, redrawn every frame
+  // the armature overlay (M63): an octahedron per bone, the relationship lines, the IK handles; redrawn every frame
+  private poseGroup: THREE.Group | null = null;
+  private poseBones: { bone: THREE.Bone; mesh: THREE.Mesh; main: THREE.Bone | null; tip: THREE.Vector3 | null }[] = []; // tip: a leaf's tail in its own frame
+  private poseTag: { name: string; sprite: THREE.Sprite } | null = null; // the selected bone's name
+  private poseSize = 1;
+  private ikGroup: { key: string; group: THREE.Group } | null = null; // the IK controls' handles, rebuilt when the controls change
   private poseTc: TransformControls | null = null;
   private posing = false; // a gizmo turn in progress: the mixer leaves the bones alone
   private poseFrom = new THREE.Vector3(); // the moved bone's local position when the drag began
-  private ikTarget = new THREE.Object3D(); // the IK gizmo's handle, at the dragged bone
-  private ikStart: THREE.Quaternion[] | null = null; // the chain's turns when the IK drag began
+  private ikTarget = new THREE.Object3D(); // the IK gizmo's handle: at the dragged bone (IK drag) or the control's target
+  private poleHandle = new THREE.Object3D(); // the swivel gizmo's handle, at the knee/elbow's pole
+  private poleStart = new THREE.Vector3();
+  private shownStart = new THREE.Vector3(); // the dragged bone where it showed when the drag began (the preview moves it)
+  private ikStart: THREE.Quaternion[] | null = null; // the chain's turns when the drag began
+  private ikNow: THREE.Bone[] = []; // the chain being dragged, its top first
+  private swivelNow = 0; // degrees the pole drag swung the chain
+  private tails = new Map<string, THREE.Vector3>(); // each bone's tail in world space (picking)
+  private targets = new Map<string, THREE.Vector3>(); // each IK control's target handle in world space, by its bone
+  private poles = new Map<string, THREE.Vector3>(); // and its pole handle
   private path: { group: THREE.Group; pos: Float32Array; col: THREE.BufferAttribute; now: THREE.Points; frame: number } | null = null; // M38: the selected bone's track
   private ghosts: { root: THREE.Object3D; mixer: THREE.AnimationMixer; action: THREE.AnimationAction; frames: number }[] = []; // onion skins
   private dirty = true; // render on demand: set by anything that changes the picture
@@ -600,14 +640,31 @@ export class Viewer {
   testMove = (bone: string, to: Vec3) => this.pose?.onMove?.(bone, this.bones.find((b) => b.name === bone)!.position.toArray() as Vec3, to);
   testIK = (to: Vec3) => {
     const B = this.bones.find((b) => b.name === this.pose?.selected);
-    const L = B?.parent as THREE.Bone | undefined;
-    if (!B || !L) return;
-    this.ikStart = [L.parent!, L, B].map((b) => b.quaternion.clone());
+    const ch = B && this.chainOf(B, this.pose?.chain ?? 2);
+    if (!ch) return;
+    this.ikNow = ch;
+    this.ikStart = ch.map((b) => b.quaternion.clone());
     this.ikTarget.position.set(...to);
     this.solveIK();
-    const U = L.parent as THREE.Bone;
-    this.pose?.onIK?.(Object.fromEntries([U, L, B].map((b) => [b.name, b.quaternion.toArray() as Q4])));
+    this.pose?.onIK?.(Object.fromEntries(ch.map((b) => [b.name, b.quaternion.toArray() as Q4])));
   };
+  /** M63: an IK control's target dragged to a world position, its pole swung by degrees, as the gizmo would end them;
+   * the armature as drawn (each bone's head, tail and colour) and the handles. */
+  testTarget = (bone: string, to: Vec3) => {
+    const c = this.pose?.ik?.find((x) => x.bone === bone);
+    if (c) this.pose?.onTarget?.(bone, ...this.targetIn(bone, V(to)));
+  };
+  testSwivel = (bone: string, degrees: number) => this.pose?.onSwivel?.(bone, degrees);
+  testArmature = () => {
+    this.drawPose();
+    return this.poseBones.map(({ bone, mesh }) => ({
+      bone: bone.name,
+      head: arr(bone.getWorldPosition(new THREE.Vector3())),
+      tail: arr(this.tails.get(bone.name)!),
+      color: (mesh.material as THREE.MeshBasicMaterial).color.getHex(),
+    }));
+  };
+  testHandles = () => ({ targets: Object.fromEntries([...this.targets].map(([b, p]) => [b, arr(p)])), poles: Object.fromEntries([...this.poles].map(([b, p]) => [b, arr(p)])) });
   testPath = () => (this.path ? Array.from(this.path.pos) : null);
   testGhosts = () => this.ghosts.map((g) => g.frames);
   worldOf = (bone: string) => this.bones.find((b) => b.name === bone)?.getWorldPosition(new THREE.Vector3()).toArray() as Vec3 | undefined;
@@ -899,12 +956,7 @@ export class Viewer {
     let mesh: THREE.SkinnedMesh | undefined;
     this.model?.traverse((o) => (mesh ??= (o as THREE.SkinnedMesh).isSkinnedMesh ? (o as THREE.SkinnedMesh) : undefined));
     if (!mesh || !this.bones.length) return { names: [], rest: 0, heights: {} };
-    const saved = this.bones.map((b) => [b.position.clone(), b.quaternion.clone(), b.scale.clone()] as const);
-    mesh.skeleton.pose();
-    this.model!.updateMatrixWorld(true);
-    const ys = this.bones.map((b) => b.getWorldPosition(new THREE.Vector3()).y);
-    this.bones.forEach((b, i) => (b.position.copy(saved[i][0]), b.quaternion.copy(saved[i][1]), b.scale.copy(saved[i][2])));
-    this.model!.updateMatrixWorld(true);
+    const ys = this.restPose(() => this.bones.map((b) => b.getWorldPosition(new THREE.Vector3()).y));
     const lo = Math.min(...ys);
     const hi = Math.max(...ys);
     const heights = Object.fromEntries(this.bones.map((b, i) => [b.name, (ys[i] - lo) / (hi - lo || 1)]));
@@ -917,68 +969,191 @@ export class Viewer {
     if (!edit) {
       this.poseTc?.detach();
       this.ikTarget.removeFromParent();
+      this.poleHandle.removeFromParent();
       if (this.poseGroup) {
         this.scene.remove(this.poseGroup);
         this.poseGroup.traverse((o) => {
           (o as THREE.Mesh).geometry?.dispose();
+          ((o as THREE.Mesh).material as THREE.SpriteMaterial | undefined)?.map?.dispose();
           ((o as THREE.Mesh).material as THREE.Material | undefined)?.dispose();
         });
       }
-      this.poseGroup = null;
+      this.poseGroup = this.poseTag = this.ikGroup = null;
+      this.poseBones = [];
+      this.tails.clear();
+      this.targets.clear();
+      this.poles.clear();
       return;
     }
-    if (!this.poseGroup && this.model) {
-      const size = new THREE.Box3().setFromObject(this.model).getSize(new THREE.Vector3()).length() || 1;
-      const g = (this.poseGroup = new THREE.Group());
-      const geo = new THREE.SphereGeometry(size * 0.009, 10, 8);
-      for (const b of this.bones) {
-        const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x8fd46a, depthTest: false, transparent: true }));
-        m.renderOrder = 11;
-        m.userData.bone = b.name;
-        g.add(m);
+    if (!this.poseGroup && this.model) this.buildArmature();
+    // the IK handles: a box at each target, a diamond at each pole, dashed lines to them from the bone and the knee/elbow
+    const key = (edit.ik ?? []).map((c) => c.bone).join();
+    if (this.poseGroup && this.ikGroup?.key !== key) {
+      if (this.ikGroup) {
+        this.poseGroup.remove(this.ikGroup.group);
+        this.ikGroup.group.traverse((o) => ((o as THREE.Mesh).geometry?.dispose(), ((o as THREE.Mesh).material as THREE.Material | undefined)?.dispose()));
       }
-      const links = this.bones.filter((b) => (b.parent as THREE.Bone)?.isBone);
-      const lines = new THREE.LineSegments(
-        new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(links.length * 6), 3)),
-        new THREE.LineBasicMaterial({ color: 0xd8c25a, depthTest: false, transparent: true, opacity: 0.8 }),
-      );
-      Object.assign(lines, { renderOrder: 10, frustumCulled: false });
-      lines.userData.links = links;
-      g.add(lines);
-      this.scene.add(g);
+      const group = new THREE.Group();
+      const s = this.poseSize;
+      for (const c of edit.ik ?? []) {
+        const line = (geo: THREE.BufferGeometry, role: string, dashed = false) =>
+          Object.assign(
+            new THREE.LineSegments(
+              geo,
+              dashed
+                ? new THREE.LineDashedMaterial({ color: IK.edge, dashSize: 0.012 * s, gapSize: 0.008 * s, depthTest: false, transparent: true })
+                : new THREE.LineBasicMaterial({ color: IK.edge, depthTest: false, transparent: true }),
+            ),
+            { renderOrder: 13, frustumCulled: false, userData: { ik: c.bone, role } },
+          );
+        group.add(
+          line(new THREE.EdgesGeometry(new THREE.BoxGeometry(0.035 * s, 0.035 * s, 0.035 * s)), "target"),
+          line(new THREE.EdgesGeometry(new THREE.OctahedronGeometry(0.014 * s)), "pole"),
+          line(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3)), "dash", true),
+        );
+      }
+      this.poseGroup.add(group);
+      this.ikGroup = { key, group };
     }
+    // colours: the selected bone blue, the bones an IK control turns yellow, a key at this frame orange edges
     const keyed = new Set(edit.keyed ?? []);
-    this.poseGroup?.children.forEach((o) => {
-      const b = o.userData.bone as string | undefined;
-      if (b) ((o as THREE.Mesh).material as THREE.MeshBasicMaterial).color.set(b === edit.selected ? 0xffffff : keyed.has(b) ? 0xf0a030 : 0x8fd46a);
-    });
+    const inIk = new Set((edit.ik ?? []).flatMap((c) => c.chain.slice(0, -1)));
+    for (const { bone, mesh } of this.poseBones) {
+      const look = bone.name === edit.selected ? ACTIVE : inIk.has(bone.name) ? IK : BONE;
+      const m = mesh.material as THREE.MeshBasicMaterial;
+      m.color.set(look.solid);
+      m.opacity = bone.name === edit.selected ? 0.65 : 0.4;
+      ((mesh.children[0] as THREE.LineSegments).material as THREE.LineBasicMaterial).color.set(keyed.has(bone.name) ? KEYED : look.edge);
+    }
+    this.ikGroup?.group.children.forEach((o) => (((o as THREE.LineSegments).material as THREE.LineBasicMaterial).opacity = o.userData.ik === edit.selected ? 1 : 0.45));
+    if (this.poseGroup && (this.poseTag?.name ?? null) !== edit.selected) {
+      if (this.poseTag) {
+        this.poseGroup.remove(this.poseTag.sprite);
+        this.poseTag.sprite.material.map?.dispose();
+        this.poseTag.sprite.material.dispose();
+      }
+      this.poseTag = edit.selected ? { name: edit.selected, sprite: this.tag(edit.selected, [0, 0, 0], this.poseSize) } : null;
+      if (this.poseTag) this.poseGroup.add(this.poseTag.sprite);
+    }
+    this.drawPose();
     const bone = this.bones.find((b) => b.name === edit.selected);
     const mode = edit.mode ?? "rotate";
     const tc = this.poseGizmo();
     if (tc.dragging) return;
     tc.setMode(mode === "rotate" ? "rotate" : "translate");
     tc.setSpace(mode === "rotate" ? "local" : "world");
-    const chain = bone && (bone.parent as THREE.Bone)?.isBone && (bone.parent!.parent as THREE.Bone)?.isBone;
-    if (!bone || (mode === "ik" && !chain)) tc.detach();
-    else if (mode === "ik") {
-      bone.getWorldPosition(this.ikTarget.position);
-      if (!this.ikTarget.parent) this.scene.add(this.ikTarget);
-      tc.attach(this.ikTarget);
-    } else tc.attach(bone);
+    if (!bone || (mode === "ik" && !this.chainOf(bone, edit.chain ?? 2))) tc.detach();
+    else if (mode === "ik") this.attach(tc, this.ikTarget, bone.getWorldPosition(new THREE.Vector3()));
+    else if (mode === "target" && edit.handle === "pole" && this.poles.has(bone.name)) this.attach(tc, this.poleHandle, this.poles.get(bone.name)!);
+    else if (mode === "target") this.attach(tc, this.ikTarget, this.targets.get(bone.name) ?? bone.getWorldPosition(new THREE.Vector3()));
+    else tc.attach(bone);
   }
 
-  // the IK drag: the chain back where it began, then the two-bone solve putting the bone at the handle
+  private attach(tc: TransformControls, handle: THREE.Object3D, at: THREE.Vector3) {
+    handle.position.copy(at);
+    if (!handle.parent) this.scene.add(handle);
+    tc.attach(handle);
+  }
+
+  // the armature, built once per model: an octahedron (and its edges) per bone from its head to its main child's; a
+  // leaf's tail continues its parent's line by half that bone's length, measured in the rest pose and kept in the leaf's
+  // own frame, so a leaf the clip turns still points its own way
+  private buildArmature() {
+    const size = (this.poseSize = new THREE.Box3().setFromObject(this.model!).getSize(new THREE.Vector3()).length() || 1);
+    const g = (this.poseGroup = new THREE.Group());
+    const geo = octahedron();
+    const edges = new THREE.EdgesGeometry(geo);
+    const kids = (b: THREE.Object3D) => b.children.filter((c) => (c as THREE.Bone).isBone) as THREE.Bone[];
+    const count = (b: THREE.Object3D): number => kids(b).reduce((n, c) => n + 1 + count(c), 0);
+    // the main child: the template's (MAIN), else the one most of the skeleton hangs from (the spine, not a leg)
+    const mainOf = (b: THREE.Bone): THREE.Bone | null => kids(b).find((c) => c.name === MAIN[b.name]) ?? [...kids(b)].sort((x, y) => count(y) - count(x))[0] ?? null;
+    this.poseBones = this.restPose(() =>
+      this.bones.map((bone) => {
+        const head = bone.getWorldPosition(new THREE.Vector3());
+        let main = mainOf(bone);
+        if (main && main.getWorldPosition(new THREE.Vector3()).distanceTo(head) < 1e-4 * size) main = null; // a child on the head: no length
+        const up = (bone.parent as THREE.Bone)?.isBone ? bone.parent!.getWorldPosition(new THREE.Vector3()) : null;
+        const along = up && up.distanceTo(head) > 1e-6 ? head.clone().sub(up).multiplyScalar(0.5) : new THREE.Vector3(0, 0.03 * size, 0);
+        const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: BONE.solid, transparent: true, opacity: 0.4, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+        mesh.add(new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: BONE.edge, depthTest: false, transparent: true })));
+        mesh.matrixAutoUpdate = false;
+        mesh.renderOrder = 10;
+        mesh.children[0].renderOrder = 11;
+        mesh.frustumCulled = mesh.children[0].frustumCulled = false;
+        g.add(mesh);
+        return { bone, mesh, main, tip: main ? null : bone.worldToLocal(head.add(along)) };
+      }),
+    );
+    // dashed lines from a bone to a parent it does not join (to the nearer of the parent's head and tail)
+    const loose = this.poseBones.filter((p) => (p.bone.parent as THREE.Bone)?.isBone && this.poseBones.find((q) => q.bone === p.bone.parent)?.main !== p.bone).map((p) => p.bone);
+    const rel = new THREE.LineSegments(
+      new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(loose.length * 6), 3)),
+      new THREE.LineDashedMaterial({ color: BONE.edge, dashSize: 0.008 * size, gapSize: 0.006 * size, depthTest: false, transparent: true, opacity: 0.6 }),
+    );
+    Object.assign(rel, { renderOrder: 10, frustumCulled: false, userData: { loose } });
+    g.add(rel);
+    this.scene.add(g);
+  }
+
+  /** `fn` run with the skeleton in its rest pose, the pose put back after. */
+  private restPose<T>(fn: () => T): T {
+    let mesh: THREE.SkinnedMesh | undefined;
+    this.model?.traverse((o) => (mesh ??= (o as THREE.SkinnedMesh).isSkinnedMesh ? (o as THREE.SkinnedMesh) : undefined));
+    const saved = this.bones.map((b) => [b.position.clone(), b.quaternion.clone(), b.scale.clone()] as const);
+    mesh?.skeleton.pose();
+    this.model!.updateMatrixWorld(true);
+    try {
+      return fn();
+    } finally {
+      this.bones.forEach((b, i) => (b.position.copy(saved[i][0]), b.quaternion.copy(saved[i][1]), b.scale.copy(saved[i][2])));
+      this.model!.updateMatrixWorld(true);
+    }
+  }
+
+  /** A bone and the `n` bones above it, the top first; null if it has fewer. */
+  private chainOf(b: THREE.Bone, n: number): THREE.Bone[] | null {
+    const out = [b];
+    while (out.length <= n) {
+      const up = out[0].parent as THREE.Bone;
+      if (!up?.isBone) return null;
+      out.unshift(up);
+    }
+    return out;
+  }
+
+  // skeleton space (the layer's) is the root bone's parent's frame; an IK control's space a bone's
+  private spaceOf = (space: string | null): THREE.Object3D =>
+    (space && this.bones.find((b) => b.name === space)) || this.bones.find((b) => !(b.parent as THREE.Bone)?.isBone)?.parent || this.scene;
+  private toSpace = (w: THREE.Vector3, space: string | null): Vec3 => arr(this.spaceOf(space).worldToLocal(w.clone()));
+
+  // the IK drag (and a target drag's preview): the chain back where it began, then solved putting its last bone at the handle
   private solveIK() {
-    const B = this.bones.find((b) => b.name === this.pose?.selected);
-    const L = B?.parent as THREE.Bone | undefined;
-    const U = L?.parent as THREE.Bone | undefined;
-    if (!B || !L || !U || !this.ikStart) return;
-    [U, L, B].forEach((b, i) => b.quaternion.copy(this.ikStart![i]));
-    U.updateWorldMatrix(true, true);
-    const wq = (o: THREE.Object3D) => o.getWorldQuaternion(new THREE.Quaternion()).toArray() as Q4;
-    const wp = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3()).toArray() as Vec3;
-    const turns = twoBone(wq(U.parent!), wq(U), wq(L), wq(B), wp(U), wp(L), wp(B), this.ikTarget.position.toArray() as Vec3);
-    turns?.forEach((q, i) => [U, L, B][i].quaternion.fromArray(q));
+    const ch = this.ikNow;
+    if (!ch.length || !this.ikStart) return;
+    ch.forEach((b, i) => b.quaternion.copy(this.ikStart![i]));
+    ch[0].updateWorldMatrix(true, true);
+    const turns = ikChain(wq(ch[0].parent!), ch.map(wq), ch.map(wp), arr(this.ikTarget.position), 0);
+    turns?.forEach((q, i) => ch[i].quaternion.fromArray(q));
+    this.dirty = true;
+  }
+  // a pole drag: the chain swung about its root–tip line by the angle the handle went round that line
+  private solveSwivel() {
+    const ch = this.ikNow;
+    if (!ch.length || !this.ikStart) return;
+    ch.forEach((b, i) => b.quaternion.copy(this.ikStart![i]));
+    ch[0].updateWorldMatrix(true, true);
+    const a = ch[0].getWorldPosition(new THREE.Vector3());
+    const c = ch[ch.length - 1].getWorldPosition(new THREE.Vector3());
+    const ax = c.clone().sub(a).normalize();
+    const flat = (p: THREE.Vector3) => {
+      const v = p.clone().sub(a);
+      return v.addScaledVector(ax, -v.dot(ax));
+    };
+    const u = flat(this.poleStart);
+    const v = flat(this.poleHandle.position);
+    this.swivelNow = (Math.atan2(ax.dot(u.clone().cross(v)), u.dot(v)) * 180) / Math.PI;
+    const turns = ikChain(wq(ch[0].parent!), ch.map(wq), ch.map(wp), arr(c), this.swivelNow);
+    turns?.forEach((q, i) => ch[i].quaternion.fromArray(q));
     this.dirty = true;
   }
 
@@ -1088,59 +1263,157 @@ export class Viewer {
     tc.addEventListener("mouseDown", () => {
       this.cancelled = false;
       const o = tc.object;
-      if (o && o !== this.ikTarget) this.poseFrom.copy(o.position);
+      this.ikStart = null;
+      if (o !== this.ikTarget && o !== this.poleHandle) return void (o && this.poseFrom.copy(o.position));
+      // the chain a handle drags: its IK control's, else (IK drag, a first target drag) the panel's chain length
       const B = this.bones.find((b) => b.name === this.pose?.selected);
-      const L = B?.parent as THREE.Bone | undefined;
-      this.ikStart = o === this.ikTarget && B && L ? [L.parent!, L, B].map((b) => b.quaternion.clone()) : null;
+      const c = this.pose?.mode === "target" ? this.pose.ik?.find((x) => x.bone === B?.name) : undefined;
+      const ch = c ? c.chain.map((n) => this.bones.find((b) => b.name === n)!) : B && this.chainOf(B, this.pose?.chain ?? 2);
+      if (!ch || ch.some((b) => !b)) return;
+      this.ikNow = ch;
+      this.ikStart = ch.map((b) => b.quaternion.clone());
+      this.poleStart.copy(this.poleHandle.position);
+      ch[ch.length - 1].getWorldPosition(this.shownStart);
+      this.swivelNow = 0;
     });
-    tc.addEventListener("objectChange", () => tc.object === this.ikTarget && this.solveIK());
+    tc.addEventListener("objectChange", () => (tc.object === this.ikTarget ? this.solveIK() : tc.object === this.poleHandle && this.solveSwivel()));
     tc.addEventListener("dragging-changed", (e) => {
       this.controls.enabled = !e.value;
       this.posing = !!e.value;
       if (e.value || this.cancelled || !this.pose) return;
       const o = tc.object;
-      const B = this.bones.find((b) => b.name === this.pose!.selected);
-      if (o === this.ikTarget && B && this.ikStart) {
-        const L = B.parent as THREE.Bone;
-        const U = L.parent as THREE.Bone;
-        this.pose.onIK?.(Object.fromEntries([U, L, B].map((b) => [b.name, b.quaternion.toArray() as Q4])));
-      } else if (o && this.pose.mode === "move") this.pose.onMove?.(o.name, this.poseFrom.toArray() as Vec3, o.position.toArray() as Vec3);
+      const sel = this.pose.selected;
+      if ((o === this.ikTarget || o === this.poleHandle) && (!this.ikStart || !sel)) return;
+      if (o === this.ikTarget && this.pose.mode === "target") this.pose.onTarget?.(sel!, ...this.targetIn(sel!, this.ikTarget.position, this.shownStart));
+      else if (o === this.ikTarget) this.pose.onIK?.(Object.fromEntries(this.ikNow.map((b) => [b.name, b.quaternion.toArray() as Q4])));
+      else if (o === this.poleHandle) this.pose.onSwivel?.(sel!, this.swivelNow);
+      else if (o && this.pose.mode === "move") this.pose.onMove?.(o.name, this.poseFrom.toArray() as Vec3, o.position.toArray() as Vec3);
       else if (o) this.pose.onPose(o.name, (o as THREE.Bone).quaternion.toArray() as Q4);
     });
     return tc;
   }
 
+  // a target handle and its bone as shown, in the control's space: the editor keys the bone's place in the layer plus
+  // their difference (the clip tools after the IK, ground and in place, shift both alike)
+  private targetIn(bone: string, w: THREE.Vector3, shown = this.bones.find((b) => b.name === bone)!.getWorldPosition(new THREE.Vector3())): [Vec3, Vec3] {
+    const space = this.pose?.ik?.find((x) => x.bone === bone)?.space ?? null;
+    return [this.toSpace(w, space), this.toSpace(shown, space)];
+  }
+
+  // a click: a joint or an IK control's handle, then the body of the nearest bone
   private pickBone(e: PointerEvent) {
     const r = this.canvas.getBoundingClientRect();
-    const w = new THREE.Vector3();
+    const [mx, my] = [e.clientX - r.left, e.clientY - r.top];
+    const screen = (p: THREE.Vector3) => {
+      const q = p.clone().project(this.camera);
+      return q.z < 1 ? ([((q.x + 1) / 2) * r.width, ((1 - q.y) / 2) * r.height] as const) : null;
+    };
+    const near = (p: THREE.Vector3) => {
+      const s = screen(p);
+      return s ? Math.hypot(s[0] - mx, s[1] - my) : Infinity;
+    };
     let best: [number, string] | null = null;
     for (const b of this.bones) {
-      const p = b.getWorldPosition(w).project(this.camera);
-      const d = Math.hypot(((p.x + 1) / 2) * r.width - (e.clientX - r.left), ((1 - p.y) / 2) * r.height - (e.clientY - r.top));
-      if (p.z < 1 && d < 14 && (!best || d < best[0])) best = [d, b.name];
+      const d = near(b.getWorldPosition(new THREE.Vector3()));
+      if (d < 14 && (!best || d < best[0])) best = [d, b.name];
+    }
+    // the nearest handle, unless a joint is about as near (a target reached sits on its own joint: the joint wins)
+    let hit: [number, string, "target" | "pole"] | null = null;
+    for (const [handles, which] of [
+      [this.targets, "target"],
+      [this.poles, "pole"],
+    ] as const)
+      for (const [bone, p] of handles) {
+        const d = near(p);
+        if (d < 14 && (!hit || d < hit[0])) hit = [d, bone, which];
+      }
+    if (hit && (!best || hit[0] + 4 < best[0])) return this.pose?.onHandle?.(hit[1], hit[2]);
+    for (const b of best ? [] : this.bones) {
+      const a = screen(b.getWorldPosition(new THREE.Vector3()));
+      const t = this.tails.has(b.name) ? screen(this.tails.get(b.name)!) : null;
+      if (!a || !t) continue;
+      const [dx, dy] = [t[0] - a[0], t[1] - a[1]];
+      const u = Math.min(Math.max(((mx - a[0]) * dx + (my - a[1]) * dy) / (dx * dx + dy * dy || 1), 0), 1);
+      const d = Math.hypot(a[0] + u * dx - mx, a[1] + u * dy - my);
+      if (d < 8 && (!best || d < best[0])) best = [d, b.name];
     }
     if (best) this.pose?.onSelect(best[1]);
   }
 
-  // the pose overlay follows the moving bones (and the IK handle its bone, between drags)
+  // the armature follows the moving bones, the IK handles their targets and poles, the gizmo its handle between drags
   private drawPose() {
     const g = this.poseGroup;
-    if (!g) return;
-    if (this.poseTc?.object === this.ikTarget && !this.posing) this.bones.find((b) => b.name === this.pose?.selected)?.getWorldPosition(this.ikTarget.position);
-    const w = new THREE.Vector3();
-    const at = new Map(this.bones.map((b) => [b.name, b.getWorldPosition(new THREE.Vector3())]));
-    for (const o of g.children) {
-      const b = o.userData.bone as string | undefined;
-      if (b) o.position.copy(at.get(b) ?? w);
-      const links = o.userData.links as THREE.Bone[] | undefined;
-      if (!links) continue;
-      const pos = (o as THREE.LineSegments).geometry.attributes.position as THREE.BufferAttribute;
-      links.forEach((l, i) => {
-        pos.setXYZ(2 * i, ...(at.get(l.parent!.name) ?? w).toArray());
-        pos.setXYZ(2 * i + 1, ...(at.get(l.name) ?? w).toArray());
+    if (!g || !this.pose) return;
+    this.model?.updateMatrixWorld(true);
+    const head = (b: THREE.Object3D) => new THREE.Vector3().setFromMatrixPosition(b.matrixWorld);
+    const x = new THREE.Vector3();
+    const z = new THREE.Vector3();
+    for (const { bone, mesh, main, tip } of this.poseBones) {
+      const h = head(bone);
+      const t = main ? head(main) : bone.localToWorld(tip!.clone());
+      this.tails.set(bone.name, t);
+      const y = t.clone().sub(h);
+      const len = y.length();
+      const yn = y.clone().divideScalar(len || 1);
+      // the octahedron's flat sides follow the bone's own X (else Z): its roll shows as the bone twists
+      for (const col of [0, 2]) {
+        x.setFromMatrixColumn(bone.matrixWorld, col);
+        x.addScaledVector(yn, -x.dot(yn));
+        if (x.lengthSq() > 1e-12) break;
+      }
+      x.normalize();
+      z.crossVectors(x, yn);
+      mesh.matrix.makeBasis(x.multiplyScalar(len), y, z.multiplyScalar(len)).setPosition(h);
+      mesh.matrixWorldNeedsUpdate = true;
+    }
+    const rel = g.children.find((o) => o.userData.loose) as THREE.LineSegments | undefined;
+    if (rel) {
+      const pos = rel.geometry.attributes.position as THREE.BufferAttribute;
+      (rel.userData.loose as THREE.Bone[]).forEach((b, i) => {
+        const h = head(b);
+        const ph = head(b.parent!);
+        const pt = this.tails.get(b.parent!.name) ?? ph;
+        pos.setXYZ(2 * i, ...(h.distanceTo(ph) < h.distanceTo(pt) ? ph : pt).toArray());
+        pos.setXYZ(2 * i + 1, ...h.toArray());
       });
       pos.needsUpdate = true;
+      rel.computeLineDistances();
     }
+    const sel = this.bones.find((b) => b.name === this.pose!.selected);
+    if (this.poseTag && sel) this.poseTag.sprite.position.copy(head(sel)).addScalar(0.012 * this.poseSize);
+    // the IK controls: the target where the layer puts it (shifted as the bone is), the pole out from the knee/elbow
+    this.targets.clear();
+    this.poles.clear();
+    for (const c of this.pose.ik ?? []) {
+      const ch = c.chain.map((n) => this.bones.find((b) => b.name === n));
+      if (ch.some((b) => !b)) continue;
+      const [a, end, m] = [head(ch[0]!), head(ch[ch.length - 1]!), head(ch[Math.ceil((ch.length - 1) / 2)]!)];
+      const mine = this.posing && c.bone === this.pose.selected;
+      const toW = (v: Vec3) => this.spaceOf(c.space).localToWorld(V(v));
+      const target =
+        mine && this.pose.mode === "target" && this.poseTc?.object === this.ikTarget ? this.ikTarget.position.clone() : c.p && c.at ? end.clone().add(toW(c.p).sub(toW(c.at))) : null;
+      const ax = end.clone().sub(a).normalize();
+      const out = m.clone().sub(a);
+      out.addScaledVector(ax, -out.dot(ax));
+      const pole =
+        mine && this.poseTc?.object === this.poleHandle ? this.poleHandle.position.clone() : out.lengthSq() > 1e-12 ? m.clone().addScaledVector(out.normalize(), m.distanceTo(a)) : null;
+      if (target) this.targets.set(c.bone, target);
+      if (pole) this.poles.set(c.bone, pole);
+      for (const o of this.ikGroup?.group.children ?? []) {
+        if (o.userData.ik !== c.bone) continue;
+        if (o.userData.role === "target") o.position.copy(target ?? end);
+        else if (o.userData.role === "pole") (o.visible = !!pole) && o.position.copy(pole!);
+        else {
+          const pos = (o as THREE.LineSegments).geometry.attributes.position as THREE.BufferAttribute;
+          [end, target ?? end, m, pole ?? m].forEach((p, i) => pos.setXYZ(i, p.x, p.y, p.z));
+          pos.needsUpdate = true;
+          (o as THREE.LineSegments).computeLineDistances();
+        }
+      }
+    }
+    const o = this.poseTc?.object;
+    if (!this.posing && sel && o === this.poleHandle && this.poles.has(sel.name)) this.poleHandle.position.copy(this.poles.get(sel.name)!);
+    else if (!this.posing && sel && o === this.ikTarget) this.ikTarget.position.copy((this.pose.mode === "target" && this.targets.get(sel.name)) || head(sel));
   }
 
   setWireframe(on: boolean, quads = this.quads) {

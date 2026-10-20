@@ -1,32 +1,39 @@
-// M37b/c, M38: the animation editor on an animated version. The base clip (the nearest anim version's) stays as it is; the
+// M37b/c, M38, M63: the animation editor on an animated version. The base clip (the nearest anim version's) stays as it is; the
 // user's correction layer (docs/IMPLEMENTATION.md §3.2 anim_edit) is evaluated on top and played live in the viewer; the
 // dope sheet (or the curves) lies under the view (#timeline-slot), the selected bone's key, the foot locks and the clip
-// tools in the panel; Save makes an anim_edit version.
+// tools in the panel; Save makes an anim_edit version. M63: the skeleton drawn as Blender draws an armature, IK controls
+// (a hand or foot held on a keyed target, the knee or elbow swung by its pole) and an IK drag over any chain length.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { fileUrl, type Meta } from "../api";
 import { leave, useBusy, useHistory, useUnsaved } from "../hooks";
-import type { Viewer } from "../viewer/Viewer";
+import type { IkShow, Viewer } from "../viewer/Viewer";
 import {
   conj,
   contacts,
   delta,
+  chainOf,
   evaluate,
   fromDegrees,
+  ikAt,
   fromThree,
   I,
   mul,
   norm,
   offset,
+  pose,
   positive,
   smoothed,
   toDegrees,
   toThree,
+  turn,
   NAME_RULE,
   nameOk,
   type Clip,
+  type Ik,
+  type IkKey,
   type Key,
   type Layer,
   type Lock,
@@ -44,7 +51,8 @@ const MAX_LOCKS = 64; // anim_edit's limit
 type Layers = Record<string, Layer>;
 type Bone = { name: string; node: string; parent: string | null; rest: V3 }; // three.js name, glTF node name, parent's three.js name
 type Base = { fps: number; base: string; clips: Record<string, { data: Clip; keep: THREE.KeyframeTrack[] }>; bones: Bone[]; groups: [string, string[]][]; sides?: [string, string] };
-type Gizmo = "rotate" | "move" | "ik";
+type Gizmo = "rotate" | "move" | "ik" | "target";
+const MAX_CHAIN = 8; // anim_edit's longest IK chain
 
 export const hasEdits = (l?: Layer) =>
   !!l &&
@@ -56,7 +64,8 @@ export const hasEdits = (l?: Layer) =>
     !!l.ground ||
     !!l.in_place ||
     Object.values(l.smooth ?? {}).some((s) => s > 0) ||
-    !!l.feet?.length);
+    !!l.feet?.length ||
+    !!l.ik?.length);
 
 /** The dope sheet's groups of glTF node names: a person's body, arms, hands and legs; a creature's middle and sides. */
 export function animGroups(nodes: string[], template: string, sides?: [string, string]): [string, string[]][] {
@@ -77,29 +86,43 @@ export function animGroups(nodes: string[], template: string, sides?: [string, s
   return groups.filter(([, n]) => n.length);
 }
 
-// a key's id in the dope sheet: "node@frame" for a turn, "node:move@frame" for a move (an offset)
+// a key's id in the dope sheet: "node@frame" for a turn, "node:move@frame" for a move (an offset), "node:ik@frame" for
+// an IK control's key
 const parse = (id: string) => {
   const i = id.lastIndexOf("@");
   const n = id.slice(0, i);
   const move = n.endsWith(":move");
-  return { n: move ? n.slice(0, -5) : n, f: +id.slice(i + 1), move };
+  const ik = n.endsWith(":ik");
+  return { n: move ? n.slice(0, -5) : ik ? n.slice(0, -3) : n, f: +id.slice(i + 1), move, ik };
 };
+const tag = (move: boolean, ik: boolean) => (move ? ":move" : ik ? ":ik" : "");
 const setIn = <T extends { f: number }>(all: Record<string, T[]> | undefined, node: string, k: T) => ({
   ...all,
   [node]: [...(all?.[node] ?? []).filter((x) => x.f !== k.f), k].sort((a, b) => a.f - b.f),
 });
 const setKey = (l: Layer, node: string, k: Key): Layer => ({ ...l, keys: setIn(l.keys, node, k) });
 const setOffset = (l: Layer, node: string, o: Offset): Layer => ({ ...l, offsets: setIn(l.offsets, node, o) });
-const dropKeys = (l: Layer, picked: string[]): Layer => {
+// an IK key on the bone's control (made with `c`'s chain and space when the bone has none yet)
+const setIk = (l: Layer, c: Omit<Ik, "keys">, k: IkKey): Layer => {
+  const all = l.ik ?? [];
+  const had = all.find((x) => x.bone === c.bone);
+  const keys = [...(had?.keys ?? []).filter((x) => x.f !== k.f), k].sort((a, b) => a.f - b.f);
+  return { ...l, ik: had ? all.map((x) => (x === had ? { ...x, keys } : x)) : [...all, { ...c, keys }] };
+};
+// a control left without keys goes (anim_edit wants one at least); a move of keys keeps it, in its place, for a moment
+const dropKeys = (l: Layer, picked: string[], keepEmpty = false): Layer => {
   const keep = <T extends { f: number }>(all: Record<string, T[]> | undefined, tag: string) =>
     Object.fromEntries(
       Object.entries(all ?? {})
         .map(([n, ks]) => [n, ks.filter((k) => !picked.includes(`${n}${tag}@${k.f}`))] as const)
         .filter(([, ks]) => ks.length),
     );
-  return { ...l, keys: keep(l.keys, ""), offsets: keep(l.offsets, ":move") };
+  const ik = (l.ik ?? []).map((c) => ({ ...c, keys: c.keys.filter((k) => !picked.includes(`${c.bone}:ik@${k.f}`)) })).filter((c) => keepEmpty || c.keys.length);
+  return { ...l, keys: keep(l.keys, ""), offsets: keep(l.offsets, ":move"), ik: ik.length ? ik : undefined };
 };
 const cm = (m: number) => Math.round(m * 1000) / 10; // metres to cm, a millimetre's precision
+const r5 = (v: V3) => v.map((x) => Math.round(x * 1e5) / 1e5) as V3;
+const wrap = (d: number) => ((((d + 180) % 360) + 360) % 360) - 180;
 
 export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer; onSave: (clips: Layers) => Promise<unknown>; onClose: () => void }) {
   const v = props.viewer;
@@ -117,6 +140,9 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
   const [original, setOriginal] = useState(false);
   const [frame, setFrame] = useState(0); // the base frame under the playhead
   const [mode, setMode] = useState<Gizmo>("rotate");
+  const [chainN, setChainN] = useState(2); // IK drag's chain, and a new IK control's
+  const [handle, setHandle] = useState<"target" | "pole">("target"); // what the IK target gizmo holds
+  const [xray, setXray] = useState(false);
   const [curvesOn, setCurvesOn] = useState(false);
   const [path, setPath] = useState(false);
   const [onion, setOnion] = useState(false);
@@ -176,18 +202,31 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
   const trim = layer.trim ?? [0, F - 1];
   const speed = layer.speed ?? 1;
   const evaluated = useMemo(() => data && evaluate(data.data, layer), [data, layer]);
-  const three = (node: string) => ready?.bones.find((b) => b.name === node)?.name;
+  const three = (node: string) => ready?.bones.find((b) => b.node === node)?.name;
   const node = (name: string) => ready?.bones.find((b) => b.name === name)?.node ?? name;
   const track = (n: string) => data?.data.bones.find((b) => b.name === n);
-  // a move needs a moving translation (the hips); a lock or an IK drag a bone whose parent and grandparent turn
+  // a move needs a moving translation (the hips); a lock or an IK a turning bone whose parent and grandparent turn
   const canMove = (n: string | null) => !!n && !!track(n)?.translation;
-  const chain = (n: string | null) => {
-    const b = n ? track(n) : undefined;
-    const l = b?.parent ? track(b.parent) : undefined;
-    const u = l?.parent ? track(l.parent) : undefined;
-    return !!(b?.rotation && l?.rotation && u?.rotation);
+  const above = (n: string | null) => {
+    let b = n ? track(n) : undefined;
+    let k = 0;
+    if (!b?.rotation) return 0;
+    while (k < MAX_CHAIN && b?.parent && track(b.parent)?.rotation) (k++, (b = track(b.parent)));
+    return k; // the turning bones above it, in a row (an IK chain can take that many)
   };
-  const gizmo: Gizmo = (mode === "move" && !canMove(bone)) || (mode === "ik" && !chain(bone)) ? "rotate" : mode;
+  const chain = (n: string | null) => above(n) >= 2;
+  const gizmo: Gizmo = (mode === "move" && !canMove(bone)) || ((mode === "ik" || mode === "target") && !chain(bone)) ? "rotate" : mode;
+  const reach = Math.min(chainN, Math.max(above(bone), 2)); // the chain the IK drag (and a new control) takes here
+  const ctl = bone ? layer.ik?.find((c) => c.bone === bone) : undefined;
+  // M63: the clip in base frames with every correction up to the IK (trim, speed and the rest left out): where the layer
+  // puts each bone, what an IK target and a space change are measured in
+  const solved = useMemo(() => (data && (layer.ik?.length || gizmo === "target") ? evaluate(data.data, { keys: layer.keys, offsets: layer.offsets, smooth: layer.smooth, feet: layer.feet, ik: layer.ik }) : null), [data, layer, gizmo === "target"]);
+  const solvedPose = useMemo(() => solved && pose(solved.bones, Math.min(frame, F - 1)), [solved, frame]);
+  const atIn = (n: string, space?: string, m = solvedPose): V3 | null => {
+    const b = m?.get(n);
+    const s = space ? m?.get(space) : undefined;
+    return !b ? null : s ? turn(conj(s.W), [b.p[0] - s.p[0], b.p[1] - s.p[1], b.p[2] - s.p[2]]) : b.p;
+  };
 
   // the viewer plays the evaluated clip (or the original), from where it was; the motion path and the ghosts follow it
   useEffect(() => {
@@ -205,6 +244,10 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
   }, [layers]);
   useEffect(() => void (ready && v.setMotionPath(path && bone ? (three(bone) ?? null) : null)), [path, bone, evaluated, original, clip, ready]);
   useEffect(() => void (ready && v.setOnion(onion ? [-6, -3, 3, 6] : null)), [onion, evaluated, original, clip, ready]);
+  useEffect(() => {
+    v.setXray(xray);
+    return () => v.setXray(false);
+  }, [xray]);
   // put the viewer back as it was (unless it shows another model by now)
   useEffect(() => {
     const model = v.stats;
@@ -253,13 +296,69 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
     setBone(n);
     setSel([`${n}:move@${f}`]);
   };
+  // M63: an IK key at this frame: where the control's target is to be (or how far its knee/elbow swings); a bone without a
+  // control gets one, with the chain the panel says; what is not given stays as the control has it here
+  const keyIk = (n: string, k: { p?: V3; swivel?: number }) => {
+    const f = baseFrame();
+    const c = layer.ik?.find((x) => x.bone === n);
+    const here = c?.keys.find((x) => x.f === f);
+    const now = c && ikAt(c.keys, f);
+    const p = k.p ?? here?.p ?? now?.p ?? (solved && atIn(n, c?.space, pose(solved.bones, f))) ?? [0, 0, 0];
+    const swivel = k.swivel ?? here?.swivel ?? now?.swivel ?? 0;
+    commit((l) => setIk(l, c ?? { bone: n, chain: Math.min(chainN, Math.max(above(n), 2)) }, { f, p: r5(p), swivel: Math.round(swivel * 100) / 100, w: here?.w ?? 1, falloff: here?.falloff ?? FALLOFF }));
+    setBone(n);
+    setSel([`${n}:ik@${f}`]);
+  };
+  const onSwivel = (name: string, d: number) => {
+    const n = node(name);
+    const c = layer.ik?.find((x) => x.bone === n);
+    const f = baseFrame();
+    const here = c?.keys.find((x) => x.f === f);
+    // the evaluation swings by swivel × weight: a key that weighs less takes the more for the swing the drag showed
+    keyIk(n, { swivel: wrap((here?.swivel ?? (c && ikAt(c.keys, f))?.swivel ?? 0) + d / Math.max(here?.w ?? 1, 0.05)) });
+  };
   const keyed = useMemo(
-    () => [...Object.entries(layer.keys ?? {}), ...Object.entries(layer.offsets ?? {})].filter(([, ks]) => ks.some((k) => k.f === frame)).map(([n]) => three(n) ?? n),
+    () =>
+      [...Object.entries(layer.keys ?? {}), ...Object.entries(layer.offsets ?? {}), ...(layer.ik ?? []).map((c) => [c.bone, c.keys] as const)]
+        .filter(([, ks]) => ks.some((k) => k.f === frame))
+        .map(([n]) => three(n) ?? n),
     [layer, frame, ready],
   );
+  // the IK controls as the viewer draws them (and, in IK target, the one a drag would make on the selected bone)
+  const shows: IkShow[] = !data
+    ? []
+    : [...(layer.ik ?? []), ...(gizmo === "target" && bone && !ctl ? [{ bone, chain: reach, keys: [] as IkKey[] }] : [])].map((c) => ({
+        bone: three(c.bone) ?? c.bone,
+        chain: chainOf(data.data.bones, c.bone, c.chain).map((n) => three(n) ?? n),
+        space: c.space ? (three(c.space) ?? c.space) : null,
+        p: c.keys.length ? (ikAt(c.keys, frame)?.p ?? null) : null,
+        at: atIn(c.bone, c.space),
+      }));
   useEffect(() => {
     if (!ready) return;
-    v.setPoseEdit(original ? null : { selected: bone ? (three(bone) ?? null) : null, keyed, mode: gizmo, onSelect: (b) => setBone(node(b)), onPose, onMove, onIK: keyTurns });
+    v.setPoseEdit(
+      original
+        ? null
+        : {
+            selected: bone ? (three(bone) ?? null) : null,
+            keyed,
+            mode: gizmo,
+            chain: reach,
+            ik: shows,
+            handle,
+            onSelect: (b) => setBone(node(b)),
+            onPose,
+            onMove,
+            onIK: keyTurns,
+            onHandle: (b, h) => (setBone(node(b)), setMode("target"), setHandle(h)),
+            onTarget: (b, h, e) => {
+              const n = node(b);
+              const at = solved && atIn(n, layer.ik?.find((c) => c.bone === n)?.space, pose(solved.bones, baseFrame()));
+              keyIk(n, { p: at ? [at[0] + h[0] - e[0], at[1] + h[1] - e[1], at[2] + h[2] - e[2]] : h });
+            },
+            onSwivel,
+          },
+    );
   });
 
   // I keys the selected bone as it is now; X / Delete removes the selected keys; Ctrl+Z undoes
@@ -273,12 +372,21 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
       }
       if (e.key === "i" || e.key === "I") insertKey();
       else if (e.key === "x" || e.key === "Delete") deleteKeys();
+      // Blender's keys: R turns, G grabs (moves the hips, drags anything else by IK); Page Up/Down lengthen and shorten
+      // the IK chain
+      else if (e.key === "r" || e.key === "R") setMode("rotate");
+      else if ((e.key === "g" || e.key === "G") && bone) setMode(canMove(bone) ? "move" : "ik");
+      else if ((e.key === "PageUp" || e.key === "PageDown") && bone && (gizmo === "ik" || (gizmo === "target" && !ctl))) {
+        e.preventDefault();
+        setChainN(Math.min(Math.max(reach + (e.key === "PageUp" ? 1 : -1), 2), Math.max(above(bone), 2)));
+      }
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   });
   const insertKey = () => {
     if (!bone || original) return;
+    if (gizmo === "target") return keyIk(bone, {});
     const f = baseFrame();
     if (gizmo === "move") {
       const os = layer.offsets?.[bone];
@@ -295,18 +403,22 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
     commit((l) => dropKeys(l, sel));
     setSel([]);
   };
+  const dropIkKey = (n: string, f: number) => (commit((l) => dropKeys(l, [`${n}:ik@${f}`])), setSel([]));
   const moveKeys = (df: number) => {
     const moved: string[] = [];
-    let out = dropKeys(layer, sel);
+    let out = dropKeys(layer, sel, true);
     for (const s of sel) {
-      const { n, f, move } = parse(s);
+      const { n, f, move, ik } = parse(s);
       const to = Math.min(Math.max(f + df, 0), F - 1);
       const k = layer.keys?.[n]?.find((x) => x.f === f);
       const o = layer.offsets?.[n]?.find((x) => x.f === f);
+      const c = layer.ik?.find((x) => x.bone === n);
+      const ki = c?.keys.find((x) => x.f === f);
       if (move && o) out = setOffset(out, n, { ...o, f: to });
-      else if (!move && k) out = setKey(out, n, { ...k, f: to });
+      else if (ik && c && ki) out = setIk(out, c, { ...ki, f: to });
+      else if (!move && !ik && k) out = setKey(out, n, { ...k, f: to });
       else continue;
-      moved.push(`${n}${move ? ":move" : ""}@${to}`);
+      moved.push(`${n}${tag(move, ik)}@${to}`);
     }
     commit(() => out);
     setSel(moved);
@@ -319,6 +431,16 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
     const frames = Array.from({ length: F }, (_, f) => f);
     const ks = layer.keys?.[bone];
     const os = layer.offsets?.[bone];
+    // an IK control's target in its space (cm), held between its keys and beyond them (where its weight fades)
+    const held = ctl && ctl.keys.map((k) => ({ ...k, w: 1, falloff: Infinity }));
+    if (gizmo === "target")
+      return ctl
+        ? {
+            unit: "cm",
+            lines: ["X", "Y", "Z"].map((a, i) => ({ label: a, color: AXES[i], values: frames.map((f) => cm(ikAt(held!, f)!.p[i])) })),
+            points: ctl.keys.map((k) => ({ id: `${bone}:ik@${k.f}`, f: k.f, values: k.p.map(cm) })),
+          }
+        : null;
     return gizmo === "move"
       ? {
           unit: "cm",
@@ -330,7 +452,7 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
           lines: ["X", "Y", "Z"].map((a, i) => ({ label: a, color: AXES[i], values: frames.map((f) => (ks?.length ? toDegrees(delta(ks, f))[i] : 0)) })),
           points: (ks ?? []).map((k) => ({ id: `${bone}@${k.f}`, f: k.f, values: toDegrees(k.q) })),
         };
-  }, [curvesOn, bone, gizmo, layer, F]);
+  }, [curvesOn, bone, gizmo, layer, F, ctl]);
   // the bones the base clip moves (a strip on their rows)
   const movingSet = useMemo(
     () =>
@@ -349,20 +471,25 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
   const moving = (n: string) => movingSet.has(n);
   const keysOf = (n: string) => (layer.keys?.[n] ?? []).map((k) => k.f);
   const movesOf = (n: string) => (layer.offsets?.[n] ?? []).map((o) => o.f);
+  const ikOf = (n: string) => (layer.ik?.find((c) => c.bone === n)?.keys ?? []).map((k) => k.f);
   const locks = layer.feet ?? [];
   const spans: Record<string, [number, number][]> = {};
-  for (const [g, nodes] of ready.groups)
+  for (const [g, nodes] of ready.groups) {
     for (const lk of locks)
       if (nodes.includes(lk.bone)) {
         (spans[lk.bone] ??= []).push([lk.from, lk.to]);
         (spans[`g:${g}`] ??= []).push([lk.from, lk.to]);
       }
+    for (const c of layer.ik ?? []) // an IK control's bar: from its first key to its last
+      if (nodes.includes(c.bone) && c.keys.length > 1) (spans[`${c.bone}:ik`] ??= []).push([c.keys[0].f, c.keys[c.keys.length - 1].f]);
+  }
   const rows: Row[] = ready.groups.flatMap(([g, nodes]) => [
-    { id: `g:${g}`, label: g, group: true, open: open.has(g), keys: [...new Set(nodes.flatMap((n) => [...keysOf(n), ...movesOf(n)]))], moving: nodes.some(moving) },
+    { id: `g:${g}`, label: g, group: true, open: open.has(g), keys: [...new Set(nodes.flatMap((n) => [...keysOf(n), ...movesOf(n), ...ikOf(n)]))], moving: nodes.some(moving) },
     ...(open.has(g)
       ? nodes.flatMap((n) => [
-          { id: n, label: n, group: false, keys: keysOf(n), moving: moving(n), active: n === bone && gizmo !== "move" },
+          { id: n, label: n, group: false, keys: keysOf(n), moving: moving(n), active: n === bone && gizmo !== "move" && gizmo !== "target" },
           ...(canMove(n) ? [{ id: `${n}:move`, label: `${n} · move`, group: false, keys: movesOf(n), moving: true, active: n === bone && gizmo === "move" }] : []),
+          ...(ikOf(n).length ? [{ id: `${n}:ik`, label: `${n} · IK`, group: false, keys: ikOf(n), moving: true, active: n === bone && gizmo === "target" }] : []),
         ])
       : []),
   ]);
@@ -371,21 +498,27 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
     nodes.flatMap((n) => [
       { id: n, label: n, group: false, keys: keysOf(n), moving: false },
       ...(canMove(n) ? [{ id: `${n}:move`, label: `${n} · move`, group: false, keys: movesOf(n), moving: true }] : []),
+      ...(ikOf(n).length ? [{ id: `${n}:ik`, label: `${n} · IK`, group: false, keys: ikOf(n), moving: true }] : []),
     ]),
   );
-  const pick = (n: string, move: boolean) => {
+  const pick = (n: string, move: boolean, ik = false) => {
     setBone(n);
     if (move) setMode("move");
-    else if (mode === "move") setMode("rotate");
+    else if (ik) (setMode("target"), setHandle("target"));
+    else if (mode === "move" || mode === "target") setMode("rotate");
   };
   const onSelectKeys = (ids: string[], add: boolean) => {
     const keys = ids.flatMap((id) => {
       if (!id.startsWith("g:")) return [id];
       const [g, f] = [id.slice(2, id.lastIndexOf("@")), +id.slice(id.lastIndexOf("@") + 1)];
-      return (ready.groups.find(([name]) => name === g)?.[1] ?? []).flatMap((n) => [...(keysOf(n).includes(f) ? [`${n}@${f}`] : []), ...(movesOf(n).includes(f) ? [`${n}:move@${f}`] : [])]);
+      return (ready.groups.find(([name]) => name === g)?.[1] ?? []).flatMap((n) => [
+        ...(keysOf(n).includes(f) ? [`${n}@${f}`] : []),
+        ...(movesOf(n).includes(f) ? [`${n}:move@${f}`] : []),
+        ...(ikOf(n).includes(f) ? [`${n}:ik@${f}`] : []),
+      ]);
     });
     setSel((s) => (add ? [...new Set([...s, ...keys])] : keys));
-    if (keys[0]) pick(parse(keys[0]).n, parse(keys[0]).move);
+    if (keys[0]) pick(parse(keys[0]).n, parse(keys[0]).move, parse(keys[0]).ik);
   };
 
   const here = bone ? layer.keys?.[bone]?.find((k) => k.f === frame) : undefined;
@@ -395,6 +528,26 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
     const l = b?.parent ? track(b.parent) : undefined;
     return frame >= lk.from - lk.blend && frame <= lk.to + lk.blend && [lk.bone, b?.parent, l?.parent].includes(bone ?? undefined);
   });
+  // an IK control whose chain turns the selected bone here: a turn on it is redone by the IK while the control weighs
+  const drivenBy = bone ? layer.ik?.find((c) => c.bone !== bone && ikAt(c.keys, frame) && chainOf(data.data.bones, c.bone, c.chain).includes(bone)) : undefined;
+  const hereIk = ctl?.keys.find((k) => k.f === frame);
+  const setIkKey = (k: IkKey) => commit((l) => setIk(l, ctl!, k));
+  // a control's space changed: each key keeps its place at its own frame, re-expressed in the new space (between the
+  // keys the target now moves with the new space)
+  const setSpace = (c: Ik, space: string) => {
+    const conv = (k: IkKey): IkKey => {
+      const m = pose(solved!.bones, k.f);
+      const from = c.space ? m.get(c.space) : undefined;
+      const w: V3 = from ? (turn(from.W, k.p).map((x, i) => x + from.p[i]) as V3) : k.p;
+      const to = space ? m.get(space) : undefined;
+      return { ...k, p: r5(to ? turn(conj(to.W), [w[0] - to.p[0], w[1] - to.p[1], w[2] - to.p[2]]) : w) };
+    };
+    commit((l) => ({ ...l, ik: (l.ik ?? []).map((x) => (x.bone === c.bone ? { bone: x.bone, chain: x.chain, ...(space ? { space } : {}), keys: x.keys.map(conv) } : x)) }));
+  };
+  // n is `top` or hangs from it: the IK moves it, so it cannot carry the target
+  const below = (n: string, top: string): boolean => n === top || (!!track(n)?.parent && below(track(n)!.parent!, top));
+  const setChain = (c: Ik, n: number) => commit((l) => ({ ...l, ik: (l.ik ?? []).map((x) => (x.bone === c.bone ? { ...x, chain: n } : x)) }));
+  const dropIk = (c: Ik) => commit((l) => ({ ...l, ik: (l.ik ?? []).filter((x) => x.bone !== c.bone).length ? (l.ik ?? []).filter((x) => x.bone !== c.bone) : undefined }));
   const hereMove = bone ? layer.offsets?.[bone]?.find((o) => o.f === frame) : undefined;
   const deg = here ? toDegrees(here.q) : null;
   const setDeg = (i: number, x: number) => here && commit((l) => setKey(l, bone!, { ...here, q: fromDegrees(deg!.map((d, j) => (j === i ? x : d)) as V3) }));
@@ -478,25 +631,28 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
     const { n, f, move } = parse(id);
     const k = layer.keys?.[n]?.find((y) => y.f === f);
     const o = layer.offsets?.[n]?.find((y) => y.f === f);
+    const c = layer.ik?.find((y) => y.bone === n);
+    const ki = c?.keys.find((y) => y.f === f);
     if (move && o) commit((l) => setOffset(l, n, { ...o, v: o.v.map((d, j) => (j === i ? x / 100 : d)) as V3 }));
+    else if (parse(id).ik && c && ki) commit((l) => setIk(l, c, { ...ki, p: ki.p.map((d, j) => (j === i ? x / 100 : d)) as V3 }));
     else if (!move && k) commit((l) => setKey(l, n, { ...k, q: fromDegrees(toDegrees(k.q).map((d, j) => (j === i ? x : d)) as V3) }));
   };
 
   return (
     <div className="stack anim-editor">
+      <label>
+        Clip
+        <select aria-label="Clip to edit" value={clip} onChange={(e) => (setClip(e.target.value), setSel([]), setFound(null))}>
+          {[...Object.keys(ready.clips), ...Object.keys(layers).filter((c) => layers[c].from)].map((c) => (
+            <option key={c} value={c}>
+              {c}
+              {layers[c]?.from ? ` (copy of ${layers[c].from})` : ""}
+              {hasEdits(layers[c]) ? " (edited)" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
       <div className="row">
-        <label>
-          Clip{" "}
-          <select aria-label="Clip to edit" value={clip} onChange={(e) => (setClip(e.target.value), setSel([]), setFound(null))}>
-            {[...Object.keys(ready.clips), ...Object.keys(layers).filter((c) => layers[c].from)].map((c) => (
-              <option key={c} value={c}>
-                {c}
-                {layers[c]?.from ? ` (copy of ${layers[c].from})` : ""}
-                {hasEdits(layers[c]) ? " (edited)" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
         <button className="small" onClick={duplicate}>
           Duplicate
         </button>
@@ -510,24 +666,43 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
             </button>
           </>
         )}
-        <div role="group" aria-label="Compare" className="row">
-          <button aria-pressed={!original} onClick={() => setOriginal(false)}>
-            Edited
-          </button>
-          <button aria-pressed={original} onClick={() => setOriginal(true)}>
-            Original
-          </button>
-        </div>
+      </div>
+      <div role="group" aria-label="Compare" className="row">
+        <button aria-pressed={!original} onClick={() => setOriginal(false)}>
+          Edited
+        </button>
+        <button aria-pressed={original} onClick={() => setOriginal(true)}>
+          Original
+        </button>
       </div>
       <details>
         <summary>Help</summary>
         <ul className="muted">
         <li>Click a joint in the view (or a bone in the timeline) to select it, then turn it with the rings: that keys it at this frame.</li>
-        <li>Move shifts the hips with arrows; IK drag pulls a hand or foot, the arm or leg bending to follow.</li>
+        <li>Move shifts the hips with arrows.</li>
+        <li>
+          IK drag and IK target both bend an arm or a leg so the hand or foot reaches a place (Chain: how many bones above it bend, 2 for an arm or a leg; Page Up/Down). They differ in what they leave
+          behind:
+        </li>
+        <li>
+          IK drag poses this one frame: drag the hand or foot and the bones above it turn to follow; each of them gets an ordinary turn key here, as if you had turned them one by one. Nothing stays
+          attached: on other frames the hand goes where the clip takes it. Use it to fix a pose at a moment (a punch that falls short, an elbow too low).
+        </li>
+        <li>
+          IK target pins the hand or foot to a target (yellow box) that the IK reaches on every frame it covers. Select the bone, press IK target, then drag the box or press Pin it here (I): that
+          makes the bone's IK control with a key at this frame. Go to another frame and drag again (or Key it here) for a second key; between keys the target glides from one to the next, past the
+          first and last key it lets go over the falloff. Use it to hold a foot on the ground, a hand on a wall or a weapon on the other hand while the body moves.
+        </li>
+        <li>
+          On an IK control: the diamond (Pole) swings the knee or elbow around the line to the target, as Swivel does in degrees; Weight blends the clip (0 %) and the target (100 %) at each key;
+          Space keeps the target still in the world, or carries it on a bone (a hand resting on the hips moves with the hips). Remove IK control drops it and all its keys; Ctrl+Z brings it back.
+        </li>
+        <li>The skeleton is drawn as Blender draws an armature: the selected bone blue, the bones an IK control bends yellow, a key at this frame orange; dashed lines join a bone to a parent it does not touch. Click a joint or a bone.</li>
         <li>A key fades in and out over its falloff, so the motion around it stays smooth. Keys are diamonds; drag them in time, or switch the timeline to Curves.</li>
-        <li>Keys: Space plays, ←/→ a frame, I keys the bone as it is, X deletes the selected keys, Ctrl+Z undoes; Ctrl+wheel zooms the timeline.</li>
+        <li>Keys: Space plays, ←/→ a frame, I keys the bone as it is, X deletes the selected keys, R rotates, G grabs (moves the hips, IK-drags the rest), Ctrl+Z undoes; Ctrl+wheel zooms the timeline.</li>
         <li>Timeline: Keys shows where each bone is keyed; Curves, with a bone selected, draws its turn over the clip as lines whose points you drag.</li>
-        <li>Without a mouse: Keys as a list (below the Save button) selects a key, moves it a frame at a time, and in Curves edits its values.</li>
+        <li>Clip tools work on the whole clip: Trim keeps the frames from first to last, Loop match blends the last frames into the first so the clip loops without a jump, Ground lifts or lowers it.</li>
+        <li>Without a mouse: Keys as a list (under Clip tools) selects a key, moves it a frame at a time, and in Curves edits its values.</li>
         <li>Show: Motion path draws the selected bone's track over the clip; Onion skin shows the model a few frames before (blue) and after (green).</li>
         </ul>
       </details>
@@ -535,30 +710,173 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
         <h4>Bone {bone ? `· ${bone}` : ""}</h4>
         {!bone && <p className="muted">No bone selected.</p>}
         {bone && (
-          <div role="group" aria-label="Gizmo" className="row">
+          <div role="group" aria-label="Gizmo" className="modes">
             <button aria-pressed={gizmo === "rotate"} onClick={() => setMode("rotate")}>
               Rotate
             </button>
             <button aria-pressed={gizmo === "move"} disabled={!canMove(bone)} title={canMove(bone) ? "" : "This bone does not move in the clip"} onClick={() => setMode("move")}>
               Move
             </button>
-            <button aria-pressed={gizmo === "ik"} disabled={!chain(bone)} title={chain(bone) ? "" : "Needs two turning bones above it"} onClick={() => setMode("ik")}>
+            <button aria-pressed={gizmo === "ik"} disabled={!chain(bone)} title={chain(bone) ? "Pose this frame: drag the hand or foot, the bones above it get turn keys here" : "Needs two turning bones above it"} onClick={() => setMode("ik")}>
               IK drag
             </button>
+            <button aria-pressed={gizmo === "target"} disabled={!chain(bone)} title={chain(bone) ? "Pin the hand or foot to a target held over frames (an IK control)" : "Needs two turning bones above it"} onClick={() => (setMode("target"), setHandle("target"))}>
+              IK target
+            </button>
           </div>
+        )}
+        {bone && (gizmo === "ik" || (gizmo === "target" && !ctl)) && (
+          <label title="How many bones above it bend (Page Up/Down): 2 for an arm or a leg, more for a spine, a neck or a tail">
+            Chain{" "}
+            <input
+              type="number"
+              min={2}
+              max={Math.max(above(bone), 2)}
+              aria-label="Chain bones"
+              key={`ch${reach}${bone}`}
+              defaultValue={reach}
+              style={{ width: "4em" }}
+              onBlur={(e) => {
+                const x = num(e.target.value, 2, Math.max(above(bone), 2));
+                if (x !== null) setChainN(Math.round(x));
+              }}
+              onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            />{" "}
+            bones · {chainOf(data.data.bones, bone, reach).slice(0, -1).reverse().join(" ← ")}
+          </label>
         )}
         {/* why a tool is off, said where a keyboard and a touch screen see it too (UX-15) */}
         {bone && (!canMove(bone) || !chain(bone)) && (
           <p className="muted">
-            {[!canMove(bone) && "Move: this bone does not move in the clip.", !chain(bone) && "IK drag: needs two turning bones above it."].filter(Boolean).join(" ")}
+            {[!canMove(bone) && "Move: this bone does not move in the clip.", !chain(bone) && "IK drag and IK target: need two turning bones above it."].filter(Boolean).join(" ")}
           </p>
+        )}
+        {bone && drivenBy && gizmo !== "target" && (
+          <p className="note">
+            The IK control on {drivenBy.bone} bends this bone here: a turn or IK drag on it is redone by the IK while the control weighs (set its weight to 0 here, or work in IK target on {drivenBy.bone}).
+          </p>
+        )}
+        {bone && gizmo === "target" && !ctl && (
+          <p className="muted">
+            No IK control on this bone. Drag the yellow box in the view: the bone gets one keyed at frame {frame}, its {reach} bones above bending to reach it on every frame it covers (to pose
+            just this frame, use IK drag).{" "}
+            <button className="small" onClick={insertKey} disabled={original}>
+              Pin it here (I)
+            </button>
+          </p>
+        )}
+        {bone && gizmo === "target" && ctl && (
+          <>
+            <div className="row" role="group" aria-label="IK control">
+              <label>
+                Chain{" "}
+                <input
+                  type="number"
+                  min={2}
+                  max={Math.max(above(bone), 2)}
+                  aria-label="IK chain bones"
+                  key={`icn${ctl.chain}${bone}`}
+                  defaultValue={ctl.chain}
+                  style={{ width: "4em" }}
+                  onBlur={(e) => {
+                    const x = num(e.target.value, 2, Math.max(above(bone), 2));
+                    if (x !== null && Math.round(x) !== ctl.chain) setChain(ctl, Math.round(x));
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                />
+              </label>
+              <label title="World: the target stays put while the body moves. A bone: it rides on that bone (a hand on the hips or the chest).">
+                Space{" "}
+                <select aria-label="IK space" value={ctl.space ?? ""} onChange={(e) => setSpace(ctl, e.target.value)}>
+                  <option value="">World</option>
+                  {ready.bones
+                    .map((b) => b.node)
+                    .filter((n) => track(n) && !below(n, chainOf(data.data.bones, bone, ctl.chain)[0]))
+                    .map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <div role="group" aria-label="IK handle" className="row">
+                <button aria-pressed={handle === "target"} onClick={() => setHandle("target")} title="The gizmo on the target (yellow box)">
+                  Target
+                </button>
+                <button aria-pressed={handle === "pole"} onClick={() => setHandle("pole")} title="The gizmo on the pole (yellow diamond): swings the knee or elbow">
+                  Pole
+                </button>
+              </div>
+            </div>
+            {!hereIk && (
+              <p className="muted">
+                No IK key at frame {frame}.{" "}
+                <button className="small" onClick={insertKey} disabled={original}>
+                  Key it here (I)
+                </button>
+              </p>
+            )}
+            {hereIk && (
+              <>
+                <div className="row" role="group" aria-label="IK target at this key">
+                  {(["X", "Y", "Z"] as const).map((a, i) => (
+                    <label key={a + frame + bone + hereIk.p[i]}>
+                      {a}{" "}
+                      <input
+                        type="number"
+                        step="0.5"
+                        aria-label={`IK ${a} cm`}
+                        defaultValue={cm(hereIk.p[i])}
+                        style={{ width: "5em" }}
+                        onBlur={(e) => {
+                          const x = num(e.target.value, -1e5, 1e5);
+                          if (x !== null && Math.abs(x - cm(hereIk.p[i])) > 1e-3) setIkKey({ ...hereIk, p: hereIk.p.map((d, j) => (j === i ? x / 100 : d)) as V3 });
+                        }}
+                        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                      />
+                      cm
+                    </label>
+                  ))}
+                </div>
+                <div className="row">
+                  {(
+                    [
+                      ["Swivel", "°", "IK swivel degrees", hereIk.swivel, -180, 180, (x: number) => ({ swivel: x })],
+                      ["Weight", "%", "IK weight percent", Math.round(hereIk.w * 100), 0, 100, (x: number) => ({ w: x / 100 })],
+                      ["Falloff", "frames", "IK falloff frames", hereIk.falloff, 0, F, (x: number) => ({ falloff: Math.round(x) })],
+                    ] as const
+                  ).map(([label, unit, aria, value, lo, hi, set]) => (
+                    <label key={label + frame + bone + value}>
+                      {label}{" "}
+                      <input
+                        type="number"
+                        aria-label={aria}
+                        defaultValue={value}
+                        style={{ width: "4.5em" }}
+                        onBlur={(e) => {
+                          const x = num(e.target.value, lo, hi);
+                          if (x !== null && x !== value) setIkKey({ ...hereIk, ...set(x) });
+                        }}
+                        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                      />{" "}
+                      {unit}
+                    </label>
+                  ))}
+                </div>
+                <div className="row">
+                  <button onClick={() => dropIkKey(bone, frame)}>Delete IK key</button>
+                  <button onClick={() => dropIk(ctl)}>Remove IK control</button>
+                </div>
+              </>
+            )}
+          </>
         )}
         {bone && heldBy && (
           <p className="note">
             The foot lock on {heldBy.bone} (frames {heldBy.from}–{heldBy.to}) holds this leg here: a turn or IK drag on it is undone by the lock.
           </p>
         )}
-        {bone && gizmo !== "move" && !here && (
+        {bone && gizmo !== "move" && gizmo !== "target" && !here && (
           <p className="muted">
             No key at frame {frame}.{" "}
             <button className="small" onClick={insertKey} disabled={original}>
@@ -566,7 +884,7 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
             </button>
           </p>
         )}
-        {bone && gizmo !== "move" && here && deg && (
+        {bone && gizmo !== "move" && gizmo !== "target" && here && deg && (
           <>
             <div className="row" role="group" aria-label="Turn at this key">
               {(["X", "Y", "Z"] as const).map((a, i) => (
@@ -727,10 +1045,32 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
         </div>
       </details>
       <details>
+        <summary>IK controls{layer.ik?.length ? ` (${layer.ik.length})` : ""}</summary>
+        <div className="stack">
+          <p className="muted">A control holds a bone on a target keyed over time, the bones above it bending (select a hand or foot, IK target). Applied in this order, after the locks.</p>
+          {(layer.ik ?? []).map((c, i) => (
+            <div key={c.bone} className="row" role="group" aria-label={`IK control ${i + 1}`}>
+              <button className="small" onClick={() => (pick(c.bone, false, true), seekBase(c.keys[0].f))}>
+                {c.bone}
+              </button>
+              <span className="muted">
+                {c.chain} bones · {c.space ?? "world"} · {c.keys.length} key{c.keys.length > 1 ? "s" : ""} ({c.keys[0].f}
+                {c.keys.length > 1 ? `–${c.keys[c.keys.length - 1].f}` : ""})
+              </span>
+              <button aria-label={`Remove IK control ${i + 1}`} onClick={() => dropIk(c)}>
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      </details>
+      <details>
         <summary>Clip tools</summary>
         <div className="stack">
-          <div className="row" role="group" aria-label="Trim">
+          <div className="fields">
+          <label>
             Trim
+            <span className="row" role="group" aria-label="Trim">
             {[0, 1].map((i) => (
               <input
                 key={`t${i}${trim[i]}`}
@@ -746,9 +1086,11 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
                 }}
               />
             ))}
-          </div>
+            </span>
+          </label>
           <label>
-            Speed{" "}
+            Speed
+            <span className="row">
             <input
               type="number"
               step="0.05"
@@ -764,9 +1106,11 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
               }}
             />
             ×
+            </span>
           </label>
-          <label>
-            Loop match{" "}
+          <label title="The last frames blend into the first, so the clip loops without a jump">
+            Loop match
+            <span className="row">
             <input
               type="number"
               min={0}
@@ -778,12 +1122,13 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
                 const x = num(e.target.value, 0, trim[1] - trim[0]);
                 if (x !== null && Math.round(x) !== (layer.loop ?? 0)) commit((l) => ({ ...l, loop: Math.round(x) || undefined }));
               }}
-            />{" "}
-            frames (the end blends into the start)
+            />
+            frames
+            </span>
           </label>
-          <div className="row">
-            <label>
-              Ground{" "}
+          <label>
+            Ground
+            <span className="row">
               <input
                 type="number"
                 step="0.005"
@@ -795,10 +1140,13 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
                   const x = num(e.target.value, -10, 10);
                   if (x !== null && x !== (layer.ground ?? 0)) commit((l) => ({ ...l, ground: x || undefined }));
                 }}
-              />{" "}
+              />
               m
-            </label>
-            <button onClick={snap}>Snap to ground</button>
+            </span>
+          </label>
+          <button style={{ gridColumn: 2, justifySelf: "start" }} onClick={snap}>
+            Snap to ground
+          </button>
           </div>
           <label className="check">
             <input type="checkbox" checked={!!layer.in_place} onChange={(e) => commit((l) => ({ ...l, in_place: e.target.checked || undefined }))} />
@@ -815,6 +1163,7 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
           </fieldset>
         </div>
       </details>
+      <KeyList rows={keyRows} selected={sel} curves={curves} onSelect={onSelectKeys} onSeek={seekBase} onMove={moveKeys} onCurve={onCurve} />
       <div className="row">
         <button disabled={busy || !hist.h?.past.length} onClick={hist.undo}>
           Undo
@@ -846,7 +1195,6 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
         {dirty && <span className="muted">Unsaved changes</span>}
       </div>
       {edited.length > 0 && <p className="muted">Edited: {edited.join(", ")}. The original animation stays as it is.</p>}
-      <KeyList rows={keyRows} selected={sel} curves={curves} onSelect={onSelectKeys} onSeek={seekBase} onMove={moveKeys} onCurve={onCurve} />
       {document.getElementById("timeline-slot") &&
         createPortal(
           <EditorTimeline
@@ -865,7 +1213,7 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
             onCurve={onCurve}
             onTrim={(t) => commit((l) => ({ ...l, trim: t[0] === 0 && t[1] === F - 1 ? undefined : t }))}
             onRow={(id) => {
-              if (!id.startsWith("g:")) return pick(id.endsWith(":move") ? id.slice(0, -5) : id, id.endsWith(":move"));
+              if (!id.startsWith("g:")) return pick(parse(`${id}@0`).n, id.endsWith(":move"), id.endsWith(":ik"));
               const g = id.slice(2);
               setOpen((o) => new Set(o.has(g) ? [...o].filter((x) => x !== g) : [...o, g]));
             }}
@@ -890,6 +1238,10 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
                   <label className="check" title="Ghosts of the model a few frames before (blue) and after (green)">
                     <input type="checkbox" checked={onion} onChange={(e) => setOnion(e.target.checked)} />
                     Onion skin
+                  </label>
+                  <label className="check" title="The model see-through, so the skeleton inside it reads">
+                    <input type="checkbox" checked={xray} onChange={(e) => setXray(e.target.checked)} />
+                    X-ray
                   </label>
                 </div>
               </>

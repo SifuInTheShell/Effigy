@@ -3399,6 +3399,51 @@ above are the contract; each milestone's "As built" note lands here.
     ray along −n within a band, closest point as fallback). `clean` crashes in CuMesh `fill_holes` on a 50k-triangle
     import (CUDA error 9): a separate fix.
 
+- **M63 Character IK in the animation editor** (owner 2026-10-18: "I need to be able to really fine tune animations,
+  specifically for characters, so that body, limbs etc can be correctly edited ... how the IK is displayed and applied
+  ... bring in the Blender functionality on how it handles 3D character animations, directly showing how bones and
+  joints interact with each other"). Two PRs: the contract (`m63-ik-contract`, rule 8) and the editor (`m63-ik-editor`).
+  - **What was missing**: the pose overlay was a dot per joint and a line to its parent (no direction, no roll, no sign
+    of which bones a tool moves); IK was M38's transient drag of exactly two bones, baked into turn keys at one frame, the
+    knee or elbow going wherever the solve put it; a hand held on something over time took a turn key on three bones
+    at every frame.
+  - **Contract** (§3.2 `anim_edit`, step 3c): `ik: [{bone, chain, space?, keys: [{f, p, swivel, w, falloff}]}]`, Blender's
+    IK constraint with its target and pole made keyable in the layer: `chain` 2–8 bones above `bone` turn so it reaches
+    `p`; `space` a bone (the target rides on it, Blender's Child Of) or skeleton space; `swivel` degrees about the
+    chain's root–tip line (a pole angle relative to the clip's own bend, which survives an animated base better than a
+    pole point); `w` blends FK and IK; keys interpolate like offsets, the weight fading over the falloff. Two bones by
+    the foot lock's solve (lifted out of `_lock` unchanged), longer chains by FABRIK (16 rounds: a spine, a neck, a
+    tail bends along its length). Both evaluations and the fixture (a hand and a fingertip added, a FABRIK chain of
+    three and a two-bone chain in the hips' space).
+  - **Viewer** (`Viewer.ts` pose mode): the armature as Blender draws it in pose mode: an octahedron per bone from its
+    head to its main child's (the template's, else the child most of the skeleton hangs from), a leaf half its parent's
+    length on (measured in the rest pose, kept in its own frame), the flat sides along the bone's own X so its roll
+    shows; dashed relationship lines to a parent a bone does not join; grey, the selected bone blue with its name, the
+    bones an IK control bends yellow, keys at the frame orange edges; picking by joint, else by the bone's body. Per IK
+    control a box at the target, a diamond at the pole (out from the knee/elbow), dashed lines to both; IK target mode
+    puts the gizmo on the box (a drag previews the solve live and keys the target) or the diamond (previews the swing,
+    keys the swivel); IK drag takes any chain length (`ikChain`, the same solver). The target is reported with the bone
+    as it showed when the drag began, and the editor keys `at + (handle − shown)` with `at` the bone's place in the
+    layer at that frame, so ground, in place and the loop blend (applied after the IK) shift handle and bone alike.
+  - **Editor**: the IK target tool (a bone without a control shows the chain it would bend; the first drag or Pin it
+    here makes the control), the key's X/Y/Z cm, swivel, weight %, falloff; chain and space per control (a space change
+    re-expresses every key at its own frame, so the keys stay put; the space offered: bones the IK does not move); the IK controls list; an IK row per control in the dope
+    sheet and the key list (diamonds moved and deleted with the rest, a bar from the first key to the last); Curves of
+    the target; a note when a control bends the selected bone; Chain for the IK drag; X-ray; Blender's R and G, Page
+    Up/Down for the chain.
+  - **Acceptance**: `tests/test_anim_edit.py` (two and three bones reach, the hand keeps its turn, weight and falloff,
+    swivel 90° turns the elbow a quarter turn about shoulder–hand with the hand still, a target in Root's space follows
+    Root, validation); the fixture both sides (`anim.spec.ts`); Playwright `IK controls (M63)` (the armature's heads,
+    tails and colours, a target keyed at 8 and 16 with the head on it and halfway at 12, the pole swung 45° with the
+    head kept, weight 0 and undo, the list and the row, Save posts `ik`); the street brawler (a library copy, real
+    gizmo drags in the browser): the hand dragged 24.8 cm up lands there (keyed and re-evaluated), the pole swings the
+    elbow with the hand still, a chain-3 IK drag bends Neck, Spine2 and Spine1.
+  - **Not done** (ponytail): per-joint rotation limits (a FABRIK spine bends any way; add when a chain bends the wrong
+    way); the target's own rotation (the hand keeps its clip's world turn; add when hands must hold an angle on a
+    prop); a pole drag's preview swings about the shown chain, the bake about the clip's, so a big swing settles a
+    little on release; FABRIK's 16 rounds have no early stop; a target or pole dragged between keys whose weight is
+    below 1 makes a key of weight 1 (the hand goes where it was dragged; lower it in the Weight field).
+
 ## 5. Bench procedure (reference laptop)
 
 1. Plugged in, "max" power profile, hybrid graphics (iGPU drives the display), browser set to

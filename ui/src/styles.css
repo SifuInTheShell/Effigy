@@ -1136,6 +1136,21 @@ canvas {
 .anim-editor h4 {
   margin: 0;
 }
+/* the clip picker as every panel's field: its name above, the menu the panel's width (a long clip name squeezed
+   "Clip" off its row) */
+.anim-editor > label {
+  display: grid;
+}
+/* Clip tools: the names in one column, their fields lined up in the next */
+.anim-editor .fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: center;
+}
+.anim-editor .fields > label {
+  display: contents;
+}
 .anim-editor label.smooth-row {
   display: grid;
   grid-template-columns: 6.5em 1fr 4.5em;

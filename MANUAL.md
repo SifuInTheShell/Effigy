@@ -445,11 +445,28 @@ The animated model plays its clips from the view's **Animation** menu. A clip wh
 - **Clip**: pick the clip. **Duplicate** makes a copy to change (to make a variation); **Rename** and **Delete**
   work on copies. **Compare**: **Edited** / **Original**.
 - **Timeline**: **Keys** (a dope sheet) or **Curves** (for a selected bone). **Show**: **Motion path**, **Onion
-  skin** (ghosts a few frames before and after).
-- Select a bone in the view. **Rotate**, **Move** (for a bone that moves in the clip) or **IK drag** (drag a hand
-  or a foot and the arm or leg follows). **Key it here** (**I**) sets a key at the current frame; the key's angles
-  can be typed. **Falloff** blends a change into the frames around it; **Whole clip** changes every frame.
-  **Delete key**, **Reset bone**.
+  skin** (ghosts a few frames before and after), **X-ray** (the model see-through, the skeleton inside it clear).
+- The skeleton is drawn the way Blender draws an armature: a bone is a long diamond from its joint to the next, its
+  flat sides turning as the bone twists; the selected bone is blue, the bones an IK control bends are yellow, a bone
+  keyed at this frame has orange edges, and a dashed line joins a bone to a parent it does not touch (the hips to
+  the legs). Click a joint or anywhere on a bone to select it; its name shows next to it.
+- Select a bone in the view. **Rotate** (**R**), **Move** (for a bone that moves in the clip) or **IK drag** (drag a
+  hand or a foot and the arm or leg follows; **G** grabs: Move for the hips, IK drag for the rest). **Chain** says
+  how many bones above it bend: 2 for an arm or a leg, more for a spine, a neck or a tail (**Page Up** / **Page
+  Down**). **Key it here** (**I**) sets a key at the current frame; the key's angles can be typed. **Falloff**
+  blends a change into the frames around it; **Whole clip** changes every frame. **Delete key**, **Reset bone**.
+- **IK target** keeps a hand or a foot on a target that you key over time, the bones above it bending to reach it
+  (a hand on a table, a foot on a step): drag the yellow box; drag the yellow diamond (**Pole**) to swing the knee
+  or the elbow without moving the hand or foot. A key holds the target's place (X/Y/Z), the **Swivel** of the knee
+  or elbow, the **Weight** (0 %: the animation as it was, 100 %: on the target) and a **Falloff** over which the
+  weight fades before the first key and after the last. **Space**: **World** keeps the target still while the body
+  moves; a bone (the hips, the chest) carries it along. **IK controls** lists them; each has a row of its own in the
+  timeline. To make one, select the bone, press **IK target**, then drag the box or press **Pin it here** (**I**);
+  **Remove IK control** drops it with all its keys (**Ctrl+Z** brings it back).
+- **IK drag or IK target?** IK drag poses one frame: the bones above get ordinary turn keys there and nothing stays
+  attached, so on other frames the hand goes where the clip takes it (a punch that falls short). IK target holds the
+  hand or foot on its target on every frame the control covers, the IK solving each frame (a foot planted while the
+  body moves, a weapon in both hands).
 - **Foot locks**: **Find foot contacts** finds where a foot should stand still; **Lock … here** keeps it planted
   from one frame to another, with a blend in and out.
 - **Clip tools**: **Trim** (first and last frame), **Speed**, **Loop match** (the end blends into the start),
@@ -458,7 +475,8 @@ The animated model plays its clips from the view's **Animation** menu. A clip wh
 - **Undo**, **Redo**, **Keys as a list** (every key, reachable by keyboard).
 
 Keys: **Space** play, **←** **→** a frame, **Home** **End** first and last frame, **I** key, **X** or **Delete**
-delete keys, **Ctrl+Z** / **Ctrl+Shift+Z** undo and redo, **Ctrl+wheel** zooms the timeline.
+delete keys, **R** rotate, **G** grab, **Page Up** / **Page Down** a longer or shorter IK chain, **Ctrl+Z** /
+**Ctrl+Shift+Z** undo and redo, **Ctrl+wheel** zooms the timeline.
 
 ---
 

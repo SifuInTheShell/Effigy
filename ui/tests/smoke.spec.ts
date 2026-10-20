@@ -275,7 +275,7 @@ test("Animation: the time bar steps a clip; the editor keys a bone, retimes the 
   await expect(page.getByRole("spinbutton", { name: "X degrees" })).toHaveValue("30.0");
   await expect(page.getByRole("combobox", { name: "Clip to edit" }).locator("option", { hasText: "Walk (edited)" })).toHaveCount(1);
   // half speed: twice as long; Undo: as it was
-  await page.getByText("Clip tools").click();
+  await page.getByText("Clip tools", { exact: true }).click();
   await page.getByRole("spinbutton", { name: "Speed" }).fill("0.5");
   await page.getByRole("spinbutton", { name: "Speed" }).blur();
   await expect.poll(() => page.evaluate(() => (window as any).__viewer.duration())).toBeCloseTo(2, 3);
@@ -327,7 +327,7 @@ test("Animation editor: duplicate, rename, edit and save a copy (from), delete i
   answer = "Walk limp";
   await page.locator(".anim-editor").getByRole("button", { name: "Rename", exact: true }).click();
   await expect(sel).toHaveValue("Walk limp");
-  await page.getByText("Clip tools").click();
+  await page.getByText("Clip tools", { exact: true }).click();
   await page.getByRole("spinbutton", { name: "Speed" }).fill("0.5");
   await page.getByRole("spinbutton", { name: "Speed" }).blur();
   await page.getByRole("button", { name: "Save as a new version" }).click();
@@ -439,6 +439,86 @@ test("Animation tools: IK drag, a foot lock, a hips move, curves, motion path, o
   expect(walk.offsets.Hips).toMatchObject([{ f: 8, falloff: 10 }]);
   expect(walk.offsets.Hips[0].v[0]).toBeCloseTo(0.1, 4);
   expect(walk.feet).toEqual([{ bone: "Head", from: 6, to: 10, blend: 3 }]);
+  expect(errors).toEqual([]);
+});
+
+test("IK controls (M63): the armature drawn, a target keyed twice, the pole swung, the weight, undo, saved", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const posted = await mockAsset(page, "mock_anim_ik", [
+    { version: "010_upload", step: "upload", parent: null, outputs: { mesh: "mesh.glb" } },
+    { version: "020_rig_skin", step: "rig_skin", parent: "010_upload", outputs: { rigged: "rigged.glb", skeleton: "skeleton.json", qa: "qa.json" } },
+    { version: "030_anim", step: "anim", parent: "020_rig_skin", outputs: { rigged_anim: "rigged_anim.glb", clips: "clips.json", skeleton: "skeleton.json" } },
+  ]);
+  await page.route("**/files/mock_anim_ik/*/rigged_anim.glb", (r) => r.fulfill({ body: ANIM, contentType: "model/gltf-binary" }));
+  await page.route("**/files/mock_anim_ik/*/clips.json", (r) =>
+    r.fulfill({ json: { clips: [{ name: "Idle", frames: 12, seconds: 0.5 }, { name: "Walk", frames: 24, seconds: 1 }], fps: 24, missing: [] } }),
+  );
+  await page.route("**/files/mock_anim_ik/*/skeleton.json", (r) => r.fulfill({ json: { template: "mixamo52", joints: [] } }));
+  const world = (b: string) => page.evaluate((n) => (window as any).__viewer.worldOf(n) as number[], b);
+  // the playhead set through the viewer: a fill on the frame box can race its re-render every frame ("12" + "16")
+  const at = async (f: number) => (await page.evaluate((t) => ((window as any).__viewer.pause(), (window as any).__viewer.seek(t)), f / 24), world("Head"));
+  const near = (a: number[], b: number[], tol = 2e-3) => a.every((x, i) => Math.abs(x - b[i]) < tol);
+  const armature = () => page.evaluate(() => (window as any).__viewer.testArmature() as { bone: string; head: number[]; tail: number[]; color: number }[]);
+  await page.goto("/#/asset/mock_anim_ik?version=030_anim");
+  await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
+  await page.getByRole("combobox", { name: "Animation" }).selectOption({ label: "Play: Walk" });
+  await page.getByRole("button", { name: "Pause" }).click();
+  await page.getByRole("spinbutton", { name: "Frame number" }).fill("8");
+  await page.getByRole("button", { name: "Edit animation" }).click();
+  await expect(page.getByRole("combobox", { name: "Clip to edit" })).toHaveValue("Walk");
+  // the armature: an octahedron per bone from its head to its child's (the leaf half its parent's length on)
+  await page.evaluate(() => (window as any).__viewer.testPickBone("Head"));
+  await expect(page.getByRole("heading", { name: "Bone · Head" })).toBeVisible();
+  let bones = await armature();
+  const len = (b: { head: number[]; tail: number[] }) => Math.hypot(...b.head.map((x, i) => x - b.tail[i]));
+  const by = (n: string) => bones.find((b) => b.bone === n)!;
+  expect(near(by("Hips").tail, by("Spine").head, 1e-5) && near(by("Spine").tail, by("Head").head, 1e-5)).toBe(true);
+  expect(len(by("Head")) / len(by("Spine"))).toBeCloseTo(0.5, 2);
+  expect(by("Head").color).toBe(0x3aa0ff); // selected: blue
+  // IK target: the chain a drag would bend drawn yellow before any key; the target dragged keys a control at frame 8
+  await page.getByRole("button", { name: "IK target" }).click();
+  await expect(page.getByRole("button", { name: "Pin it here (I)" })).toBeVisible();
+  bones = await armature();
+  expect([by("Spine").color, by("Hips").color]).toEqual([0xc8a020, 0xc8a020]);
+  const t8 = (await world("Head")).map((x, i) => x + [0.2, -0.1, 0.05][i]);
+  await page.evaluate((t) => (window as any).__viewer.testTarget("Head", t), t8);
+  await expect.poll(async () => near(await world("Head"), t8)).toBe(true);
+  await expect(page.getByRole("group", { name: "IK target at this key" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).__viewer.testHandles().targets.Head as number[])).toBeTruthy();
+  expect(near(await page.evaluate(() => (window as any).__viewer.testHandles().targets.Head as number[]), t8)).toBe(true);
+  // a second key at 16; at 12 the target is halfway (smoothstep at the middle), the head on it
+  const t16 = (await at(16)).map((x, i) => x + [-0.1, -0.2, 0.1][i]);
+  await page.evaluate((t) => (window as any).__viewer.testTarget("Head", t), t16);
+  await expect.poll(async () => near(await world("Head"), t16)).toBe(true);
+  expect(near(await at(12), t8.map((x, i) => (x + t16[i]) / 2))).toBe(true);
+  // the pole swung 45° at 16: the head stays on its target, the spine swings, the key says 45
+  await at(16);
+  const spine = await world("Spine");
+  await page.evaluate(() => (window as any).__viewer.testSwivel("Head", 45));
+  await expect(page.getByRole("spinbutton", { name: "IK swivel degrees" })).toHaveValue("45");
+  await expect.poll(async () => near(await world("Spine"), spine)).toBe(false);
+  expect(near(await world("Head"), t16)).toBe(true);
+  // weight 0 at 16: the clip as it was there; undo puts the IK back
+  await page.getByRole("spinbutton", { name: "IK weight percent" }).fill("0");
+  await page.getByRole("spinbutton", { name: "IK weight percent" }).press("Enter");
+  await expect.poll(async () => near(await world("Head"), t16)).toBe(false);
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => near(await world("Head"), t16)).toBe(true);
+  // the control in its list and on a dope sheet row of its own
+  await page.getByText("IK controls (1)").click();
+  await expect(page.getByRole("group", { name: "IK control 1" })).toContainText("2 bones · world · 2 keys (8–16)");
+  await expect(page.getByText("Head · IK").first()).toBeAttached();
+  await page.screenshot({ path: "test-results/anim-ik.png", animations: "disabled" });
+  await page.getByRole("button", { name: "Save as a new version" }).click();
+  await expect.poll(() => posted.length).toBe(1);
+  const ik = posted[0][1].clips.Walk.ik;
+  expect(ik).toHaveLength(1);
+  expect(ik[0]).toMatchObject({ bone: "Head", chain: 2 });
+  expect(ik[0].keys.map((k: { f: number; swivel: number; w: number }) => [k.f, k.swivel, k.w])).toEqual([
+    [8, 0, 1],
+    [16, 45, 1],
+  ]);
   expect(errors).toEqual([]);
 });
 
@@ -2015,7 +2095,7 @@ test("Unsaved edits are guarded: Close, a link and a version switch ask first; a
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
   await page.getByRole("combobox", { name: "Animation" }).selectOption({ label: "Play: Walk" });
   await page.getByRole("button", { name: "Edit animation" }).click();
-  await page.getByText("Clip tools").click();
+  await page.getByText("Clip tools", { exact: true }).click();
   await page.getByRole("spinbutton", { name: "Speed" }).fill("0.5");
   await page.getByRole("spinbutton", { name: "Speed" }).blur();
   await expect(page.getByText("Unsaved changes")).toBeVisible();
@@ -2140,7 +2220,7 @@ test("A result that arrives during an unsaved edit is offered, not opened over t
   await page.locator("aside.panel").getByRole("button", { name: "Check model" }).click(); // a job on this version
   await page.getByRole("combobox", { name: "Animation" }).selectOption({ label: "Play: Walk" });
   await page.getByRole("button", { name: "Edit animation" }).click();
-  await page.getByText("Clip tools").click();
+  await page.getByText("Clip tools", { exact: true }).click();
   await page.getByRole("spinbutton", { name: "Speed" }).fill("0.5");
   await page.getByRole("spinbutton", { name: "Speed" }).blur();
   await expect(page.getByText("Unsaved changes")).toBeVisible();

@@ -13,8 +13,9 @@ checklist, done, is `docs/archive/LAPTOP.md`.
 
 ---
 
-## 1. Where things stand (2026-10-16: M61 and M62 built, their PRs pending; the rest merged)
+## 1. Where things stand (2026-10-18: M63 built, its two branches pending; M61 and M62 merged)
 
+- **M63 (branches `m63-ik-contract`, then `m63-ik-editor` on top; PRs pending)**: character IK in the animation editor. The armature drawn as Blender draws it (octahedral bones with their roll, relationship lines, the IK chain yellow); IK controls in the `anim_edit` layer (§3.2 step 3c: a hand or foot on a keyed target, chain 2–8, FABRIK past two, a swivel for the knee/elbow, weight, world or bone space) with target and pole handles in the view; IK drag over any chain length; R/G, Page Up/Down. The contract branch merges first.
 - **M62 (branch `m62-import-bake`, PR pending; contains M61)**: `bake` of an imported model reads its own materials (no volume needed); chain checked on two imported test models (`docs/bench/m62.md`). A skeleton that is not one of Effigy's templates is dropped and the model is rigged with Effigy's own.
 - **M61 (branch `m61-redraw`, PR pending)**: the 2D step `redraw` (upscale 2×/4× with Real-ESRGAN, or redraw at any size in overlapping windows with Z-Image-Turbo + Tile), in a picture's panel and the Tools menu; MCP `run_step redraw` and `import_file(asset_id=…)`.
 - **Open issue**: `clean` crashes on a 50k-triangle import (CuMesh `fill_holes`, CUDA error 9). Not diagnosed; a smaller import cleans.
