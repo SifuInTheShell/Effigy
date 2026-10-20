@@ -1,29 +1,25 @@
 # Run Effigy on an AMD GPU (Windows, ROCm)
 
-Developer setup for an AMD Radeon RX 9070 / 9070 XT (gfx1201) on native Windows. Tested with the Fast
-chain only; results and caveats in [docs/bench/amd-rocm.md](../bench/amd-rocm.md). The zip and `run.bat`
-stay NVIDIA-only.
+An AMD Radeon RX 9070 / 9070 XT (gfx1201) on native Windows. Tested with the Fast chain only; results and
+caveats in [docs/bench/amd-rocm.md](../bench/amd-rocm.md).
 
 ## Install
 
-From a Git checkout (SETUP.md appendix), in `C:\Effigy`:
+Same as on NVIDIA (SETUP.md): unzip, or clone, and start `run.bat`. It sees the card (no `nvidia-smi`, an
+"RX 9070" adapter: `python -m server.gpu_amd`) and sets up `.venv-ml` from `requirements-ml-rocm.txt`
+instead of `uv.lock`; the first start downloads several GB. It writes `run.log` next to itself: which GPU it
+found, and the whole output of the AMD install. Then install **Fast** in Setup as usual.
 
-```bat
-uv sync --frozen
-uv venv --python 3.12 .venv-ml
-uv pip install --python .venv-ml -r requirements-ml-rocm.txt
-uv pip uninstall --python .venv-ml triton-windows
-.venv-ml\Scripts\rocm-sdk init
-.venv\Scripts\python -m server.blender_install && .venv\Scripts\python -m server.gltfpack_install
-.venv-ml\Scripts\python -m tools.download_models fast
-set EFFIGY_NO_BROWSER=1 && .venv\Scripts\python -m server
-```
-
-- **Never `run.bat`** on AMD: it runs `uv sync --group ml`, which puts CUDA torch back into `.venv-ml`.
 - `requirements-ml-rocm.txt` replaces pyproject's `ml` group: torch from AMD's Windows ROCm repo
   (`repo.radeon.com/rocm/windows/rocm-rel-7.2.1`), the three kernel wheels from `wheels/rocm/`, no
   `triton-windows` (FlexGEMM runs its `EXPLICIT_GEMM` path), onnxruntime on the CPU.
-- DINOv3 is gated: accept its licence on Hugging Face before `download_models`.
+- `run.bat` installs it again only when that file changed (`.venv-ml\rocm-installed.txt` is the copy it
+  compares with). After replacing a wheel in `wheels/rocm/` under the same name, delete that copy.
+- Setup never syncs `.venv-ml` from `uv.lock` on such a card (`server/install.py`), which would put CUDA
+  torch back. `.venv-skin` isn't set up: the character chain doesn't run on ROCm yet.
+- DINOv3 is gated: accept its licence on Hugging Face before installing Fast.
+- Another AMD card: `run.bat` sets up the NVIDIA environment, which won't run; the wheels need building for
+  it (below) and `gpu_amd.rocm_fits` widening.
 
 Check the kernels: `.venv-ml\Scripts\python tools\smoke_amd.py` (9 checks, each against an independent
 reference).

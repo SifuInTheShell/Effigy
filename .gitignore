@@ -18,7 +18,8 @@ ui/dist/
 test-results/
 playwright-report/
 
-# portable zip (tools/package.py) and what its run.bat downloads into the app folder
+# portable zip (tools/package.py) and what its run.bat downloads into the app folder; run.bat's log
+/run.log
 /dist/
 /python/
 /cache/
