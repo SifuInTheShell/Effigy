@@ -6,13 +6,15 @@
 
 <p align="center">
   <b>Game-ready 3D assets and 2D sprites from a picture or a sentence, made on your own GPU.</b><br>
-  Generate, clean, retopologize, texture, rig, animate and export, offline, on one 16 GB NVIDIA card.
+  Generate, clean, retopologize, texture, rig, animate and export, offline, on one 16 GB NVIDIA card.<br>
+  New in 0.2.0: an AMD Radeon RX 9070 runs the <i>Fast</i> chain too.
 </p>
 
 <p align="center">
   <img alt="Licence MIT" src="https://img.shields.io/badge/licence-MIT-blue">
   <img alt="Windows 11" src="https://img.shields.io/badge/platform-Windows%2011-0078D4">
   <img alt="NVIDIA 16 GB" src="https://img.shields.io/badge/GPU-NVIDIA%2016%20GB-76B900">
+  <img alt="AMD RX 9070, Fast engine" src="https://img.shields.io/badge/GPU-AMD%20RX%209070%20(Fast)-ED1C24">
   <img alt="Runs offline" src="https://img.shields.io/badge/runs-offline-2EA44F">
   <img alt="Python 3.12" src="https://img.shields.io/badge/Python-3.12-3776AB">
   <img alt="Blender 5.2.2 LTS" src="https://img.shields.io/badge/Blender-5.2.2%20LTS-EA7600">
@@ -113,6 +115,7 @@
         <li>178 CC0 human clips and the creatures' own, retargeted onto your rig</li>
         <li>A new motion from a sentence (NVIDIA Kimodo) or from a video of a person (NVIDIA GEM-X)</li>
         <li>An editor with keys, foot locks, IK, trim, loop, speed, ground, in-place and duplicate clips</li>
+        <li>The armature drawn the way Blender draws it, with IK targets and poles: a hand kept on a table, a foot on a step, the knee swung where you want it</li>
       </ul>
     </td>
   </tr>
@@ -250,7 +253,7 @@ page. All of them allow commercial use of what they produce; three carry an attr
 | A-pose | FLUX.2-klein-4B; DWPose | Apache-2.0; Apache-2.0 |
 | 3D, *Fast* | TRELLIS.2-4B, TRELLIS-image-large | MIT |
 | 3D, *Faithful* | Pixal3D (+ NAF); DINOv3 | MIT (Apache-2.0); DINOv3 licence, "Built with DINOv3" |
-| Mesh kernels | TRELLIS.2's CuMesh, flex_gemm, o_voxel, built for sm_89 and sm_120 (`wheels/`) | MIT |
+| Mesh kernels | TRELLIS.2's CuMesh, flex_gemm, o_voxel, built for sm_89 and sm_120 (`wheels/`), and with HIP for AMD gfx1201 (`wheels/rocm/`) | MIT |
 | Face from the image | Real-ESRGAN (4× upscale; also picture upscale) + our projection | BSD-3-Clause |
 | Texture detail | Z-Image-Turbo + Fun-ControlNet-Union 2.1 (Tile; also picture redraw) | Apache-2.0 |
 | Parts | GeoSAM2 | Apache-2.0 |
@@ -270,13 +273,16 @@ you can't ship) is in [docs/PLAN.md §6](docs/PLAN.md#6-licence-policy).
 | | |
 |---|---|
 | **GPU** | An NVIDIA card with 16 GB (the reference is an RTX 5080 Laptop; 12 GB works for the *Fast* engine, best effort). The bundled CUDA kernels are built for the RTX 40 and 50 series; older cards need a rebuild (`.github/workflows/wheels.yml`). |
+| **AMD GPU** | An AMD Radeon RX 9070 or 9070 XT runs the *Fast* chain end to end, about as fast as the reference laptop ([bench](docs/bench/amd-rocm.md)). `run.bat` sees the card and installs the AMD (ROCm) environment by itself ([how-to](docs/howto/amd-rocm-windows.md)). Not on AMD yet: *Faithful*, the character chain, motion from text or video, and other AMD cards. |
 | **OS** | Windows 11, driver 575 or newer. Linux runs from source with the same `uv sync`, but the three kernel wheels are Windows builds: bring your own. |
 | **Disk** | 70–160 GB, mostly models; they can live on another drive. |
 | **RAM** | 32 GB recommended: the 3D engines peak at ~20 GB of host memory. |
 
 Install = download the zip from [Releases](https://github.com/SifuInTheShell/Effigy/releases/latest), unzip and
 double-click `run.bat`. It downloads Python, PyTorch, Blender and the models you pick into
-its own folder; nothing is installed system-wide, and uninstalling is deleting the folder. The step-by-step
+its own folder; nothing is installed system-wide, and uninstalling is deleting the folder. It writes
+`run.log` next to itself (which GPU it found, and on AMD the install's output). To update, unpack the newest
+zip into the same folder: your library, models, Python and Blender stay. The step-by-step
 guide, including the Hugging Face login for the gated models, is **[SETUP.md](SETUP.md)**. From a git
 checkout, `run.bat` (or `run.sh`) does the same.
 
@@ -303,10 +309,13 @@ becomes a new asset, nothing is overwritten).
 
 ## Status
 
-Effigy is young (started October 2026) and has been exercised on **one machine**. What's in the benches under
-[`docs/bench/`](docs/bench/) is real and measured; what isn't there hasn't been run. Known limits:
+Effigy is young (started October 2026) and has been exercised on **one machine**, plus a contributor's AMD
+card for the *Fast* chain. What's in the benches under [`docs/bench/`](docs/bench/) is real and measured; what
+isn't there hasn't been run. Known limits:
 
 - Windows first; Linux from source only. No macOS (no CUDA).
+- AMD: the RX 9070 / 9070 XT only (its kernel wheels are built for gfx1201) and the *Fast* chain only; the
+  rest of the app still needs an NVIDIA card.
 - Engine imports were checked headless for Godot 4.7 and Unreal 5.8; the Unity export is written to Unity's
   conventions but has not been import-checked yet. The 2D sprites were checked in Godot 4.7; Unreal's Paper2D
   import needs the editor and is not checked yet.
@@ -344,7 +353,7 @@ python tools/package.py                            # the Windows portable zip in
 | `tools/` | model downloads and the manifest, the benches, packaging |
 | `docs/` | plan, architecture, the user journey, setup, the implementation notes, research, benches |
 | `tests/` | pytest suites (backend, steps, Blender ops, exports) |
-| `wheels/` | the CUDA kernel wheels for Windows |
+| `wheels/` | the CUDA kernel wheels for Windows; `wheels/rocm/` the AMD (HIP) ones |
 
 Environment variables (never committed): `EFFIGY_MODELS` and `EFFIGY_LIBRARY` move the two big folders;
 `EFFIGY_BLENDER` and `EFFIGY_GLTFPACK` point at existing installs; `EFFIGY_BLENDER_MCP_PRO_DIR` and
