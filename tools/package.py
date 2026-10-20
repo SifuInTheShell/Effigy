@@ -23,6 +23,7 @@ KEEP = {
     "uv.lock",
     ".python-version",
     "run.bat",
+    "requirements-ml-rocm.txt",  # run.bat on an AMD card
     ".mcp.json",
     "licenses.yaml",
     "LICENSE",

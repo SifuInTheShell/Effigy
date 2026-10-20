@@ -15,7 +15,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-from server import jobs, models, settings
+from server import gpu_amd, jobs, models, settings
 from server.library import ApiError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,12 +94,20 @@ def _sync_cmd(venv: str, *extra: str) -> list[str]:
     return [jobs.uv(), "sync", "--frozen", "--group", jobs.VENV_GROUP[venv], *extra]
 
 
+def _rocm(venv: str) -> bool:
+    """AMD: run.bat installs .venv-ml from requirements-ml-rocm.txt, not from uv.lock; a sync here would put
+    CUDA torch back."""
+    return venv == ".venv-ml" and gpu_amd.rocm_fits()
+
+
 def venv_state(venv: str) -> str:
     """ok, missing, outdated (packages differ from uv.lock), installing, or unknown (no uv to ask)."""
     if venv in _syncing:
         return "installing"
     if not jobs.venv_python(venv).is_file():
         return "missing"
+    if _rocm(venv):
+        return "ok"
     try:  # 80 ms: compares the installed packages with the lock, changes nothing
         r = subprocess.run(
             _sync_cmd(venv, "--check"),
@@ -298,7 +306,8 @@ def _gpu(job: jobs.Job):
 
 def _environment(job: jobs.Job, venv: str, deep: bool) -> None:
     state = venv_state(venv)
-    if state in ("ok", "unknown") and not deep:  # unknown: no uv to ask, the environment is there
+    # unknown: no uv to ask, the environment is there
+    if state in ("ok", "unknown") and not deep or _rocm(venv):
         return
     _say(job, None, f"Setting up its Python environment ({venv})")
     with _gpu(job):

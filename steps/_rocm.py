@@ -62,10 +62,11 @@ def _rows(fn, kind: str):
 
     @functools.wraps(fn)
     def inner(*args, **kwargs):
+        # only the plain positional calls are split; anything else (input=, out=, beta=) goes through
         if kind == "addmm":
-            bias, a, b = args[:3]
-            if not (_big(a) and b.dim() == 2 and not kwargs and len(args) == 3):
+            if not (len(args) == 3 and not kwargs and _big(args[1]) and args[2].dim() == 2):
                 return fn(*args, **kwargs)
+            bias, a, b = args
             rows = bias.dim() == 2 and bias.shape[0] == a.shape[0]
             return torch.cat(
                 [
@@ -73,16 +74,18 @@ def _rows(fn, kind: str):
                     for s in range(0, a.shape[0], ROWS)
                 ]
             )
-        a, b = args[:2]
         if kind == "linear":  # linear(input, weight, bias=None): input [..., K]
-            rest, ok = args[2:], len(args) <= 3 and not kwargs.keys() - {"bias"}
+            ok = 2 <= len(args) <= 3 and not kwargs.keys() - {"bias"}
         else:  # matmul / mm: [..., K] times one 2-D matrix
-            rest, ok = (
-                (),
-                len(args) == 2 and not kwargs and isinstance(b, torch.Tensor) and b.dim() == 2,
+            ok = (
+                len(args) == 2
+                and not kwargs
+                and isinstance(args[1], torch.Tensor)
+                and args[1].dim() == 2
             )
-        if not (ok and _big(a)):
+        if not (ok and _big(args[0])):
             return fn(*args, **kwargs)
+        a, b, rest = args[0], args[1], args[2:]
         flat = a.reshape(-1, a.shape[-1])
         out = torch.cat(
             [fn(flat[s : s + ROWS], b, *rest, **kwargs) for s in range(0, flat.shape[0], ROWS)]

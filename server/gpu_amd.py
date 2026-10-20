@@ -49,8 +49,9 @@ def _call(obj, index, *args, argtypes=()):
 
 @functools.cache  # ponytail: once per app run, as machine.sm()
 def adapter() -> dict | None:
-    """{name, total_mib, driver, luid} of the AMD adapter with the most dedicated memory, or None."""
-    if os.name != "nt":
+    """{name, total_mib, driver, luid} of the AMD adapter with the most dedicated memory, or None. None beside
+    an NVIDIA card too: a failing nvidia-smi must not report an AMD iGPU as the GPU the steps run on."""
+    if os.name != "nt" or shutil.which("nvidia-smi"):
         return None
     try:
         factory = ctypes.c_void_p()
@@ -124,3 +125,17 @@ def smi(*fields: str) -> list[float | None] | None:
     total = g["total_mib"]
     have = {"memory.total": total, "memory.used": used, "memory.free": total - used}
     return [have.get(f) for f in fields]  # utilization.gpu: None
+
+
+def rocm_fits() -> bool:
+    """run.bat: install .venv-ml for ROCm. ponytail: an RX 9070 only, as wheels/rocm is built for gfx1201
+    alone; other cards when wheels for them exist."""
+    return active() and "RX 9070" in adapter()["name"]
+
+
+if __name__ == "__main__":  # run.bat: exit 0 = the ROCm environment, 1 = the NVIDIA one
+    g = adapter()
+    print(
+        f"AMD GPU: {g['name'] if g else 'none'}, nvidia-smi: {shutil.which('nvidia-smi') or 'none'}"
+    )
+    raise SystemExit(0 if rocm_fits() else 1)

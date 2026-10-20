@@ -7,6 +7,7 @@ def test_zip_manifest():
     files = manifest()
     for must in [
         "run.bat",
+        "requirements-ml-rocm.txt",
         "pyproject.toml",
         "uv.lock",
         "licenses.yaml",

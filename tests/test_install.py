@@ -175,9 +175,19 @@ def test_a_gated_download_says_so(fake, monkeypatch):
     assert job.status == "failed" and job.error["code"] == "gated"
 
 
+def test_amd_leaves_the_rocm_environment_to_run_bat(fake, monkeypatch):
+    """AMD: .venv-ml comes from requirements-ml-rocm.txt (run.bat); a uv sync would put CUDA torch back."""
+    _, synced, _ = fake
+    monkeypatch.setattr(install.gpu_amd, "rocm_fits", lambda: True)
+    monkeypatch.setattr(install, "venv_state", lambda v: "outdated")
+    assert wait(install.install("fx", repair=True)).status == "done"
+    assert [s[0] for s in synced] == [".venv-fx"]
+
+
 def test_environment_state_asks_uv(monkeypatch, tmp_path):
     exe = tmp_path / "python.exe"
     monkeypatch.setattr(jobs, "venv_python", lambda venv: exe)
+    monkeypatch.setattr(install.gpu_amd, "rocm_fits", lambda: False)  # an NVIDIA machine
     assert install.venv_state(".venv-ml") == "missing"
     exe.write_text("")
     for code, state in ((0, "ok"), (1, "outdated")):
@@ -187,6 +197,9 @@ def test_environment_state_asks_uv(monkeypatch, tmp_path):
             lambda venv, *x, c=code: [sys.executable, "-c", f"raise SystemExit({c})"],
         )
         assert install.venv_state(".venv-ml") == state
+    # AMD: not the lock's environment, uv not asked
+    monkeypatch.setattr(install.gpu_amd, "rocm_fits", lambda: True)
+    assert install.venv_state(".venv-ml") == "ok" and install.venv_state(".venv-skin") == "outdated"
     rows = install.environments()
     assert {r["name"] for r in rows} >= {".venv-ml", ".venv-kimodo", ".venv-gemx"}
     assert "mocap" in next(r for r in rows if r["name"] == ".venv-gemx")["groups"]

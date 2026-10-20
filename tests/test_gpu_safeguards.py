@@ -1,5 +1,6 @@
 """M45 GPU safeguards on the CPU: the VRAM table, the budget, the pre-flight, the OOM message, the cap."""
 
+import subprocess
 import sys
 import time
 from types import SimpleNamespace
@@ -396,10 +397,31 @@ def test_amd_gpu_without_nvidia_smi(monkeypatch):
     assert jobs._smi("utilization.gpu", "memory.used") == [None, 3600.0]
     assert jobs._pin_gpu() == {}  # HIP numbers the devices itself
     assert machine._gpu() == ("AMD Radeon RX 9070 XT", 16304.0 / 1024, "32.0.22042.14002")
-    assert jobs.gpu_amd.active()
+    assert jobs.gpu_amd.active() and jobs.gpu_amd.rocm_fits()  # run.bat: the ROCm .venv-ml
     assert "backend:native" in jobs._env()["PYTORCH_CUDA_ALLOC_CONF"]
+    monkeypatch.setitem(card, "name", "AMD Radeon RX 7900 XTX")
+    assert not jobs.gpu_amd.rocm_fits()  # wheels/rocm is gfx1201 only
     driver = next(i for i in machine.check() if i["id"] == "driver")
     assert driver["level"] == "ok"
+
+
+def test_failing_nvidia_smi_never_reports_an_amd_igpu(monkeypatch):
+    """An NVIDIA laptop with an AMD iGPU: nvidia-smi is there but fails; the iGPU is not the steps' GPU."""
+
+    def fails(*a, **k):
+        raise subprocess.SubprocessError("nvidia-smi failed")
+
+    monkeypatch.setattr(jobs.subprocess, "check_output", fails)
+    monkeypatch.setattr(machine.subprocess, "run", fails)
+    monkeypatch.setattr(
+        jobs.gpu_amd.shutil, "which", lambda exe: "C:/Windows/System32/nvidia-smi.exe"
+    )
+    jobs.gpu_amd.adapter.cache_clear()
+    try:
+        assert jobs.gpu_amd.adapter() is None and not jobs.gpu_amd.active()
+        assert jobs._smi("memory.total", "memory.free") is None and machine._gpu() is None
+    finally:
+        jobs.gpu_amd.adapter.cache_clear()  # the real machine's answer again for the other tests
 
 
 def test_ram_is_checked_like_vram(monkeypatch):

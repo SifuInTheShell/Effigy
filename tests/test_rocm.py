@@ -51,6 +51,16 @@ def test_other_shapes_pass_through(small_blocks):
     assert batched(torch.randn(9, 3, 3), torch.randn(9, 3, 3)) == "upstream"
     assert batched(torch.randn(3, 3), torch.randn(3, 3)) == "upstream"  # small
     assert len(calls) == 2
+    # keyword calls go through unsplit, they used to fail unpacking the positional ones
+    x, m, b = torch.randn(11, 5), torch.randn(5, 4), torch.randn(4)
+    F = torch.nn.functional
+    for fn, kind, args, kwargs in [
+        (torch.matmul, "matmul", (), {"input": x, "other": m}),
+        (torch.Tensor.mm, "mm", (x,), {"mat2": m}),
+        (torch.addmm, "addmm", (b,), {"mat1": x, "mat2": m}),
+        (F.linear, "linear", (), {"input": x, "weight": m.t()}),
+    ]:
+        assert torch.allclose(_rocm._rows(fn, kind)(*args, **kwargs), fn(*args, **kwargs)), kind
 
 
 def test_install_is_lazy_and_noop_without_hip():
