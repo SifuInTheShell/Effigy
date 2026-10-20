@@ -29,6 +29,7 @@ def prepare(cache_dir: str | os.PathLike | None = None):
     replace_rembg()
     fix_dinov3_features()
     skip_random_init(trellis2.models)
+    explicit_gemm_on_rocm("trellis2")
     return trellis2
 
 
@@ -228,6 +229,67 @@ def _flex_gemm_cache(cache_dir) -> None:
     os.environ.setdefault(
         "FLEX_GEMM_AUTOTUNE_CACHE_PATH", str(Path(cache_dir) / "flex_gemm_autotune_cache.json")
     )
+
+
+# --- 17. AMD/ROCm: FlexGEMM's explicit GEMM ---------------------------------------------------
+
+
+def explicit_gemm_on_rocm(package: str) -> None:
+    """AMD: on a ROCm torch (no Triton on Windows + AMD) FlexGEMM's implicit-GEMM kernels, which are
+    Triton, cannot run; its EXPLICIT_GEMM path is gather + torch matmul. No-op on CUDA."""
+    import importlib
+
+    import torch
+
+    # read by every sparse conv's forward, so setting it after import is enough
+    if torch.version.hip:
+        importlib.import_module(
+            f"{package}.modules.sparse.conv.config"
+        ).FLEX_GEMM_ALGO = "explicit_gemm"
+        chunk_explicit_gemm()
+
+
+IM2COL_CHUNK = 256 * 2**20  # bytes of gathered neighbour features per matmul
+
+
+def submconv_explicit_chunked(feats, neighbor_cache, weight, bias=None):
+    """FlexGEMM's explicit submanifold conv, a block of rows at a time: upstream gathers all N x 27 neighbour
+    features first (2.9 GB at the mesh decoder's resolution: the Fast anvil OOMed at 10.9 GB on the
+    9070 XT, peak 4.4 GB on the NVIDIA laptop's implicit GEMM). Same matmul per row, so the same result."""
+    import torch
+
+    n, (co, kw, kh, kd, ci) = feats.shape[0], weight.shape
+    v = kw * kh * kd
+    pad = torch.cat([feats, feats.new_zeros(1, ci)])  # row n: the missing neighbour (0xffffffff)
+    nmap = neighbor_cache["neighbor_map"]
+    w = weight.reshape(co, v * ci).t()
+    out = feats.new_empty(n, co)
+    # at most 2**18 rows too: ROCm's GEMMs go wrong above 2**19 (steps/_rocm.py)
+    rows = max(1, min(2**18, IM2COL_CHUNK // (v * ci * feats.element_size())))
+    for s in range(0, n, rows):
+        idx = nmap[s : s + rows].long()
+        idx[idx == 0xFFFFFFFF] = n
+        col = pad[idx.view(-1)].view(idx.shape[0], v * ci)
+        out[s : s + rows] = col @ w if bias is None else torch.addmm(bias, col, w)
+    return out
+
+
+def chunk_explicit_gemm() -> None:
+    """Route FlexGEMM's explicit forward through `submconv_explicit_chunked` (inference; backward untouched)."""
+    from flex_gemm.ops import spconv
+    from flex_gemm.ops.spconv.submanifold_conv3d import SubMConv3dFunction as F
+
+    if getattr(F._sparse_submanifold_conv_forward, "effigy_chunked", False):
+        return
+    upstream = F._sparse_submanifold_conv_forward
+
+    def forward(feats, neighbor_cache, weight, bias=None):
+        if spconv.ALGORITHM != spconv.Algorithm.EXPLICIT_GEMM:
+            return upstream(feats, neighbor_cache, weight, bias)
+        return submconv_explicit_chunked(feats, neighbor_cache, weight, bias)
+
+    forward.effigy_chunked = True
+    F._sparse_submanifold_conv_forward = staticmethod(forward)
 
 
 # --- 13. no random init before load_state_dict ----------------------------------------------------

@@ -12,7 +12,7 @@ import socket
 import subprocess
 from pathlib import Path
 
-from server import install, library, models, presets, settings, storage
+from server import gpu_amd, install, library, models, presets, settings, storage
 from server.library import ApiError
 
 MIN_DRIVER = 575  # SETUP.md step 1: CUDA 12.8 (torch cu128) on Blackwell
@@ -47,6 +47,7 @@ def sm() -> float | None:
         rows = [[float(x) for x in line.split(",")] for line in out.splitlines() if line.strip()]
         return max(rows)[1]
     except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        # no compute capability on AMD, so no gate (the HIP wheels are built for gfx1201 only)
         return None
 
 
@@ -69,6 +70,8 @@ def _gpu() -> tuple[str, float, str] | None:
         name, mib, driver = max(rows, key=lambda r: float(r[1]))
         return name, float(mib) / 1024, driver
     except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        if g := gpu_amd.adapter():  # AMD: no nvidia-smi, an AMD card
+            return g["name"], g["total_mib"] / 1024, g["driver"]
         return None
 
 
@@ -171,8 +174,8 @@ def check() -> list[dict]:
                 f"{allows}. Too big for it, so the app refuses: {names}.{fast}",
             )
         out[-1] |= {"budget_gb": round(budget, 1), "too_big": big}
-        try:
-            new = int(driver.split(".")[0]) >= MIN_DRIVER
+        try:  # AMD: MIN_DRIVER is NVIDIA's numbering; any AMD driver HIP runs on is fine
+            new = gpu_amd.active() or int(driver.split(".")[0]) >= MIN_DRIVER
         except ValueError:
             new = False
         if new:

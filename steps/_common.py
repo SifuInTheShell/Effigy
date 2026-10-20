@@ -150,6 +150,9 @@ def _cap_vram(gb: float | str | None = None) -> None:
 
 
 def main(run) -> None:
+    from steps import _rocm
+
+    _rocm.install()  # AMD: large GEMMs on ROCm/Windows, a block of rows at a time (no-op on CUDA)
     _cap_vram()  # once per process: a --serve worker keeps it for every request
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="in_dir")

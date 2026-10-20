@@ -25,3 +25,10 @@ patches are in `engine/geosam2/PATCHES.md`.
 
 Not here: natten (NAF's `na2d` runs on plain torch, `engine/pixal3d/patches.py`) and FlexGEMM's
 `autotune_cache.json` (only A100/MI300X entries; FlexGEMM tunes on the first laptop run and saves under `models/`).
+
+## `rocm/`: HIP wheels for AMD gfx1201
+
+`rocm/cumesh`, `rocm/flex_gemm` and `rocm/o_voxel` are the same three sources at the same pins, built by hand
+with HIP for the RX 9070 / 9070 XT (gfx1201) against torch 2.9.1+rocm7.2.1, with the
+`engine/trellis2/*-rocm-windows.patch` patches. Not from the workflow and not in `uv.lock`:
+`requirements-ml-rocm.txt` installs them. How to rebuild: `docs/howto/amd-rocm-windows.md`.

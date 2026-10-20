@@ -18,8 +18,10 @@ def load(device: str | None = None):
     model = AutoModelForImageSegmentation.from_pretrained(
         MODEL, revision=REVISION, trust_remote_code=True
     )
-    # fp16 on the GPU (half the VRAM); fp32 on the CPU, where fp16 convs are slow or missing
-    return model.to(device, torch.float16 if device == "cuda" else torch.float32).eval()
+    # fp16 on the GPU (half the VRAM); fp32 on the CPU, where fp16 convs are slow or missing.
+    # AMD: fp32 on ROCm too: in fp16 the matte comes back all zeros (gfx1201, torch 2.9.1+rocm7.2.1)
+    half = device == "cuda" and not torch.version.hip
+    return model.to(device, torch.float16 if half else torch.float32).eval()
 
 
 @torch.no_grad()

@@ -179,6 +179,8 @@ def test_the_machine_check_says_what_to_do(monkeypatch):
     monkeypatch.setattr(machine, "_gpu", lambda: ("RTX 4060", 8.0, "560.94"))
     monkeypatch.setattr(machine, "_ram_gb", lambda: 16.0)
     monkeypatch.setattr(machine, "_long_paths", lambda: False)
+    # an NVIDIA machine, even when the test runs on an AMD one
+    monkeypatch.setattr(machine.gpu_amd, "active", lambda: False)
     levels = {c["id"]: c["level"] for c in machine.check()}
     assert levels == {"gpu": "bad", "driver": "bad", "ram": "warn", "long_paths": "warn"}
     monkeypatch.setattr(machine, "_gpu", lambda: ("RTX 5080 Laptop GPU", 15.9, "617.42"))

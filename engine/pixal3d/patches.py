@@ -31,6 +31,7 @@ def prepare(models_dir: str | os.PathLike | None = None):
     from pixal3d.trainers.flow_matching.mixins import image_conditioned_proj as proj
 
     t2.skip_random_init(pixal3d.models)
+    t2.explicit_gemm_on_rocm("pixal3d")
     rembg.BiRefNet = t2.NoRembg
     proj.DINOv3ViTModel = SharedDinov3
     proj.DinoV3ProjFeatureExtractor.extract_features = t2.dinov3_features

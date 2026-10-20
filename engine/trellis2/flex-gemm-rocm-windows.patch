@@ -1,0 +1,78 @@
+diff --git a/flex_gemm/kernels/__init__.py b/flex_gemm/kernels/__init__.py
+index 5d58678..fb32dc9 100644
+--- a/flex_gemm/kernels/__init__.py
++++ b/flex_gemm/kernels/__init__.py
+@@ -1,2 +1,5 @@
+-from . import triton
++try:
++    from . import triton
++except ImportError:  # no Triton (e.g. Windows + ROCm): only Algorithm.EXPLICIT_GEMM is usable
++    triton = None
+ from . import cuda
+diff --git a/flex_gemm/kernels/cuda/spconv/sparse_neighbor_map.cu b/flex_gemm/kernels/cuda/spconv/sparse_neighbor_map.cu
+index d1346bb..2278c40 100644
+--- a/flex_gemm/kernels/cuda/spconv/sparse_neighbor_map.cu
++++ b/flex_gemm/kernels/cuda/spconv/sparse_neighbor_map.cu
+@@ -111,7 +111,7 @@ torch::Tensor hashmap_build_sparse_conv_out_coords(
+             Pw, Ph, Pd,
+             Dw, Dh, Dd,
+             in_coords.data_ptr<int32_t>(),
+-            hashmap_keys.data_ptr<T>(),
++            hashmap_keys.template data_ptr<T>(),
+             serialize_func
+         );
+ 
+@@ -125,7 +125,7 @@ torch::Tensor hashmap_build_sparse_conv_out_coords(
+         >>>(
+             valid_key.size(0),
+             Wo, Ho, Do,
+-            valid_key.data_ptr<T>(),
++            valid_key.template data_ptr<T>(),
+             out_coords.data_ptr<int32_t>(),
+             serialize_func
+         );
+@@ -324,7 +324,7 @@ torch::Tensor expand_unique_build_sparse_conv_out_coords(
+             Dw, Dh, Dd,
+             in_coords.data_ptr<int32_t>(),
+             expanded_start.data_ptr<int64_t>(),
+-            expanded_keys.data_ptr<T>(),
++            expanded_keys.template data_ptr<T>(),
+             serialize_func
+         );
+ 
+@@ -338,7 +338,7 @@ torch::Tensor expand_unique_build_sparse_conv_out_coords(
+         >>>(
+             valid_keys.size(0),
+             Wo, Ho, Do,
+-            valid_keys.data_ptr<T>(),
++            valid_keys.template data_ptr<T>(),
+             out_coords.data_ptr<int32_t>(),
+             serialize_func
+         );
+diff --git a/flex_gemm/utils/__init__.py b/flex_gemm/utils/__init__.py
+index bb0a47b..d733501 100644
+--- a/flex_gemm/utils/__init__.py
++++ b/flex_gemm/utils/__init__.py
+@@ -1 +1,6 @@
+-from .autotuner import autotune, save_autotune_cache, load_autotune_cache, get_autotune_cache
++try:
++    from .autotuner import autotune, save_autotune_cache, load_autotune_cache, get_autotune_cache
++except ImportError:  # no Triton
++    autotune = save_autotune_cache = get_autotune_cache = None
++    def load_autotune_cache(*a, **k):
++        pass
+diff --git a/setup.py b/setup.py
+index 998ccf6..32ef2ca 100644
+--- a/setup.py
++++ b/setup.py
+@@ -27,8 +27,8 @@ else:
+ 
+ if platform.system() == "Windows":
+     extra_compile_args = {
+-        "cxx": ["/O2", "/std:c++17", "/EHsc", "/openmp", "/permissive-", "/Zc:__cplusplus"],
+-        "nvcc": ["-O3", "-std=c++17", "-Xcompiler=/std:c++17", "-Xcompiler=/EHsc", "-Xcompiler=/permissive-", "-Xcompiler=/Zc:__cplusplus"] + cc_flag,
++        "cxx": ["/O2", "/std:c++17", "/EHsc", "/openmp", "/permissive-", "/Zc:__cplusplus"] + (["-Wno-c++11-narrowing"] if IS_HIP else []),
++        "nvcc": (["-O3", "-std=c++17"] if IS_HIP else ["-O3", "-std=c++17", "-Xcompiler=/std:c++17", "-Xcompiler=/EHsc", "-Xcompiler=/permissive-", "-Xcompiler=/Zc:__cplusplus"]) + cc_flag,
+     }
+ else:
+     # Match PyTorch's CXX11 ABI setting

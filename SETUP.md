@@ -258,3 +258,6 @@ cd C:\Effigy
 (The working code is on that branch until it's merged into `main`.) Everything from step 5 on is the
 same, run inside `C:\Effigy`. Update with `git pull`, then `run.bat`. Build the zip yourself with
 `python tools/package.py` → `dist\`.
+
+**AMD GPU (RX 9070 / 9070 XT):** a developer setup from Git, not the zip or `run.bat`:
+[docs/howto/amd-rocm-windows.md](docs/howto/amd-rocm-windows.md).

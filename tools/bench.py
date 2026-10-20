@@ -72,7 +72,21 @@ def gpu_query(fields: str) -> str | None:
         )
         return out.stdout.strip().splitlines()[0] if out.returncode == 0 else None
     except (OSError, IndexError, subprocess.SubprocessError):
+        return _amd_query(fields)
+
+
+def _amd_query(fields: str) -> str | None:
+    """AMD: nvidia-smi's CSV line from the AMD card (server/gpu_amd.py); blank for what it can't tell."""
+    from server import gpu_amd
+
+    if (g := gpu_amd.adapter()) is None:
         return None
+    have = {"name": g["name"], "driver_version": g["driver"]}
+    if (v := gpu_amd.smi(*(f for f in fields.split(",") if f.startswith("memory.")))) is not None:
+        have |= dict(
+            zip((f for f in fields.split(",") if f.startswith("memory.")), map(str, map(int, v)))
+        )
+    return ", ".join(have.get(f, "") for f in fields.split(","))
 
 
 def run_job(api: str, asset: str, step: str, parent: str | None, params: dict):

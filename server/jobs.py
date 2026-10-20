@@ -15,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from server import blender_install, gltfpack_install, library, presets, settings
+from server import blender_install, gltfpack_install, gpu_amd, library, presets, settings
 from server.library import ApiError
 from server.presets import LOWER
 
@@ -168,8 +168,14 @@ def _env(budget: float | None = None) -> dict:
             # import). torch's caching allocator fragmented in the sparse decoder: the bench crate reserved
             # 23.7 GB for an 8.1 GB peak and Windows spilled to shared memory (23 s, whole GPU 15.5/16 GB);
             # cudaMallocAsync: 9.0 GB reserved, 2 s, 10.3 GB. expandable_segments isn't supported on Windows.
+            # AMD: HIP on Windows hangs in its first allocation with cudaMallocAsync, and has no
+            # expandable_segments: the native allocator, kept from splitting big blocks (the mesh decode
+            # OOMed at 10.9 GB with 3.3 GB of it reserved but free)
             "PYTORCH_CUDA_ALLOC_CONF": os.environ.get(
-                "PYTORCH_CUDA_ALLOC_CONF", "backend:cudaMallocAsync"
+                "PYTORCH_CUDA_ALLOC_CONF",
+                "backend:native,max_split_size_mb:256,garbage_collection_threshold:0.6"
+                if gpu_amd.active()
+                else "backend:cudaMallocAsync",
             ),
             "EFFIGY_BLENDER": str(blender_install.blender_exe()),
             "EFFIGY_GLTFPACK": str(gltfpack_install.gltfpack_exe()),
@@ -280,7 +286,8 @@ def _smi(*fields: str) -> list[float] | None:
         rows = [[float(v) for v in line.split(",")] for line in out.splitlines() if line.strip()]
         return max(rows, key=lambda r: r[1])[2:]
     except (OSError, subprocess.SubprocessError, ValueError, IndexError):
-        return None
+        # AMD: no nvidia-smi; None for "index" (no pinning) or no AMD card
+        return gpu_amd.smi(*fields)
 
 
 def _free_gb() -> float | None:

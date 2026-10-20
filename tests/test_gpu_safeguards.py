@@ -368,10 +368,38 @@ def test_no_nvidia_gpu(monkeypatch):
 
     monkeypatch.setattr(jobs.subprocess, "check_output", missing)
     monkeypatch.setattr(machine.subprocess, "run", missing)
+    monkeypatch.setattr(jobs.gpu_amd, "adapter", lambda: None)  # no AMD card either
     assert jobs._smi("memory.free") is None and jobs._pin_gpu() == {}
     assert machine._gpu() is None
     job = SimpleNamespace(step="trellis2", params={"weights": "faithful"}, budget=None)
     assert jobs._preflight(job) is None  # nothing to ask: the step reports its own error
+
+
+def test_amd_gpu_without_nvidia_smi(monkeypatch):
+    """AMD: an AMD card answers what nvidia-smi would (server/gpu_amd.py); no pinning, no driver gate."""
+
+    def missing(*a, **k):
+        raise FileNotFoundError("nvidia-smi")
+
+    card = {
+        "name": "AMD Radeon RX 9070 XT",
+        "total_mib": 16304.0,
+        "driver": "32.0.22042.14002",
+        "luid": "x",
+    }
+    monkeypatch.setattr(jobs.subprocess, "check_output", missing)
+    monkeypatch.setattr(machine.subprocess, "run", missing)
+    monkeypatch.setattr(jobs.gpu_amd, "adapter", lambda: card)
+    monkeypatch.setattr(jobs.gpu_amd, "used_mib", lambda: 3600.0)
+    monkeypatch.setattr(jobs.gpu_amd.shutil, "which", lambda exe: None)
+    assert jobs._smi("memory.total", "memory.free") == [16304.0, 16304.0 - 3600.0]
+    assert jobs._smi("utilization.gpu", "memory.used") == [None, 3600.0]
+    assert jobs._pin_gpu() == {}  # HIP numbers the devices itself
+    assert machine._gpu() == ("AMD Radeon RX 9070 XT", 16304.0 / 1024, "32.0.22042.14002")
+    assert jobs.gpu_amd.active()
+    assert "backend:native" in jobs._env()["PYTORCH_CUDA_ALLOC_CONF"]
+    driver = next(i for i in machine.check() if i["id"] == "driver")
+    assert driver["level"] == "ok"
 
 
 def test_ram_is_checked_like_vram(monkeypatch):

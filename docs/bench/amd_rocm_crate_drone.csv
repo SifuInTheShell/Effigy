@@ -1,0 +1,10 @@
+# commit: 3c06eeb9609b2a61b48fb3be7231734d7bfba912
+# gpu, driver: AMD Radeon RX 9070 XT, 32.0.22042.14002
+# torch: 2.9.1+rocm7.2.1
+# blender: Blender 5.2.2 LTS
+# host: Windows-11-10.0.26200-SP0
+# preset: game-prop, weights: fast
+# date: 2026-10-15 21:29:46
+image,asset,ok,failed_step,error,s_prep,vram_prep,torch_prep,s_trellis2,vram_trellis2,torch_trellis2,s_clean,vram_clean,torch_clean,s_remesh,vram_remesh,torch_remesh,s_uv,vram_uv,torch_uv,s_bake,vram_bake,torch_bake,s_validate,vram_validate,torch_validate,s_export,vram_export,torch_export,trellis2_seed,faces,non_manifold_edges,components,texel_p10,texel_p90,checklist_fails,export
+crate.png,bench_fast_crate,True,,,14.8,8.48,,225.5,13.66,6.42,23.0,6.71,,8.6,6.61,,6.6,6.41,,30.3,10.59,,3.6,3.67,,4.7,3.55,,312749509,9782,0,1,0.993,1.032,0,
+drone.png,bench_fast_drone,True,,,17.4,8.36,,60.6,13.29,2.83,20.4,7.94,,7.1,6.64,,6.1,6.54,,19.4,9.36,,4.1,3.61,,4.6,3.73,,1201245343,9742,0,2,0.961,1.045,0,
