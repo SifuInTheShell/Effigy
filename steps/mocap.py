@@ -37,6 +37,7 @@ YOLOX = MODELS / "DWPose" / "yolox_l.onnx"
 DINOV3 = "dinov3-6876159"  # the pinned code zip in GX, unpacked where torch.hub looks
 MODES = ("best", "quick", "keypoints")
 CAMERAS = ("still", "panning")
+MAX_PEOPLE = 8  # `person` 0–7; the count offered to the UI is capped the same (a crowd, a poster)
 FPS = 30  # GEM-X's rate
 # the short and long side at most: GEM-X reads the whole clip into RAM (4K: ~10 GB); the spike's size
 SIDES = (720, 1280)
@@ -76,13 +77,14 @@ def params_of(params: dict) -> dict:
         p["mode"] not in MODES
         or p["start"] < 0
         or (p["end"] is not None and p["end"] <= p["start"])
-        or not 0 <= p["person"] < 8
+        or not 0 <= p["person"] < MAX_PEOPLE
         or p["camera"] not in CAMERAS
         or not 0 <= p["smooth"] <= 1
     ):
         raise StepError(
             "bad_params",
-            f"bad mocap params: {params} (mode {'|'.join(MODES)}; 0 ≤ start < end seconds; person 0–7; "
+            f"bad mocap params: {params} (mode {'|'.join(MODES)}; 0 ≤ start < end seconds; "
+            f"person 0–{MAX_PEOPLE - 1}; "
             f"camera {'|'.join(CAMERAS)}; smooth 0–1)",
         )
     return p
@@ -204,36 +206,56 @@ def track(dets: list[np.ndarray], person: int) -> np.ndarray:
     return out
 
 
-def camera_path(frames: np.ndarray, boxes: np.ndarray, K: np.ndarray) -> np.ndarray:
-    """R_w2c per frame (L, 3, 3) of a camera that turns on the spot: the background's motion from each frame
-    to the next (corners outside the person's box, followed by LK flow, a RANSAC homography) read through K as
-    the rotation GEM-X's `cam_angvel` is made of (R_w2c[t] = R @ R_w2c[t-1]). A frame too poor to read keeps
-    the turn. ponytail: pure rotation; a camera that walks (a dolly) reads as a turn, so the person drifts."""
+def camera_path(
+    frames: np.ndarray, boxes: list[np.ndarray], K: np.ndarray
+) -> tuple[np.ndarray, int]:
+    """R_w2c per frame (L, 3, 3) of a camera that turns on the spot, and the frames it could not read: the
+    background's motion from each frame to the next (corners outside every person's box (`boxes`: a frame's
+    (n, 4) detections), followed by LK flow, a RANSAC homography) read through K as the rotation GEM-X's
+    `cam_angvel` is made of (R_w2c[t] = R @ R_w2c[t-1]). A frame too poor to read (under 12 corners, tracks or
+    inliers) keeps the last turn; more than half of them unreadable fails the run. ponytail: pure rotation; a
+    camera that walks (a dolly) reads as a turn, so the person drifts; visual odometry (DPVO) if dolly shots
+    matter."""
     import cv2
 
     L = len(frames)
     R = np.tile(np.eye(3), (L, 1, 1))
     Ki = np.linalg.inv(K)
     prev = cv2.cvtColor(frames[0], cv2.COLOR_RGB2GRAY)
+    rel, unread = np.eye(3), 0
     for t in range(1, L):
         cur = cv2.cvtColor(frames[t], cv2.COLOR_RGB2GRAY)
         mask = np.full(prev.shape, 255, np.uint8)
-        x0, y0, x1, y1 = boxes[t - 1]
-        pad = 0.1 * max(x1 - x0, y1 - y0)  # the person's own motion is not the camera's
-        cv2.rectangle(mask, (int(x0 - pad), int(y0 - pad)), (int(x1 + pad), int(y1 + pad)), 0, -1)
-        rel = np.eye(3)
+        for x0, y0, x1, y1 in boxes[t - 1]:
+            pad = 0.1 * max(x1 - x0, y1 - y0)  # the people's own motion is not the camera's
+            cv2.rectangle(
+                mask, (int(x0 - pad), int(y0 - pad)), (int(x1 + pad), int(y1 + pad)), 0, -1
+            )
+        read = False
         pts = cv2.goodFeaturesToTrack(prev, 400, 0.01, 8, mask=mask)
         if pts is not None and len(pts) >= 12:
             nxt, ok, _ = cv2.calcOpticalFlowPyrLK(prev, cur, pts, None)
             ok = ok.reshape(-1) == 1
             if ok.sum() >= 12:
                 H, inl = cv2.findHomography(pts[ok], nxt[ok], cv2.RANSAC, 3.0)
-                if H is not None and inl.sum() >= 12 and np.linalg.det(M := Ki @ H @ K) > 0:
-                    U, _, Vt = np.linalg.svd(M / np.cbrt(np.linalg.det(M)))  # the nearest rotation
-                    rel = U @ np.diag([1, 1, np.sign(np.linalg.det(U @ Vt))]) @ Vt
+                if H is not None and inl.sum() >= 12:
+                    M = Ki @ H @ K
+                    if np.linalg.det(M) > 0:
+                        U, _, Vt = np.linalg.svd(
+                            M / np.cbrt(np.linalg.det(M))
+                        )  # the nearest rotation
+                        rel = U @ np.diag([1, 1, np.sign(np.linalg.det(U @ Vt))]) @ Vt
+                        read = True
+        unread += not read
         R[t] = rel @ R[t - 1]
         prev = cur
-    return R
+    if unread > (L - 1) / 2:
+        raise StepError(
+            "failed",
+            f"the camera's turn could not be read from the background on {unread} of {L - 1} frames "
+            "(too plain, too dark, or the people fill the frame): choose Camera: held still",
+        )
+    return R, unread
 
 
 # --- GEM-X -------------------------------------------------------------------------------------------
@@ -314,9 +336,9 @@ def _check_models(mode: str):
         )
 
 
-def gem(video: Path, mode: str, person: int, work: Path, camera: str = "still"):
+def gem(video: Path, mode: str, person: int, work: Path, camera: str):
     """GEM-X on the prepared clip: (its prediction, the 2D keypoints (L, 77, 3), the boxes (L, 4), peak VRAM,
-    the people at the start of the clip)."""
+    metrics: `people` at the start of the clip, a panning camera's `camera_unread` frames and `camera_turn_deg`)."""
     _engine()
     import cv2
     import onnxruntime
@@ -348,7 +370,9 @@ def gem(video: Path, mode: str, person: int, work: Path, camera: str = "still"):
     if len(dets) != L:  # OpenCV and PyAV read the prepared clip: they must agree on its frames
         raise StepError("failed", f"the clip reads as {len(dets)} frames in OpenCV, {L} in PyAV")
     xyxy = torch.from_numpy(track(dets, person)).float()
-    people = next(len(d) for d in dets if len(d))  # track() found a frame with people
+    info = {
+        "people": min(next(len(d) for d in dets if len(d)), MAX_PEOPLE)
+    }  # track() found such a frame
     xyxy = smooth_bbx_xyxy(xyxy, window=5)
     xyxy[:, [0, 2]] = xyxy[:, [0, 2]].clamp(0, W - 1)
     xyxy[:, [1, 3]] = xyxy[:, [1, 3]].clamp(0, H - 1)
@@ -360,7 +384,13 @@ def gem(video: Path, mode: str, person: int, work: Path, camera: str = "still"):
     T_w2c = eye.clone()
     if camera == "panning":
         progress(0.25, "the camera's turn")
-        T_w2c[:, :3, :3] = torch.from_numpy(camera_path(frames, xyxy.numpy(), K.numpy())).float()
+        from scipy.spatial.transform import Rotation
+
+        R, info["camera_unread"] = camera_path(frames, [d[:, :4] for d in dets], K.numpy())
+        info["camera_turn_deg"] = round(
+            float(np.degrees(Rotation.from_matrix(R[-1]).magnitude())), 1
+        )
+        T_w2c[:, :3, :3] = torch.from_numpy(R).float()
     progress(0.3, "2D keypoints")
     vitpose = VitPoseExtractor(device="cuda:0", pose_type="soma").extract(
         frames, bbx_xys, img_ds=1.0, path_type="np"
@@ -394,6 +424,7 @@ def gem(video: Path, mode: str, person: int, work: Path, camera: str = "still"):
                 f"video_name={video.stem}",
                 f"video_path={video.as_posix()}",
                 f"output_root={work.as_posix()}",
+                # this release reads neither flag: `cam_angvel` is the camera (get_body_params_w_Rt_v2)
                 f"static_cam={'true' if camera == 'still' else 'false'}",
                 "use_wandb=false",
                 "task=test",
@@ -433,7 +464,7 @@ def gem(video: Path, mode: str, person: int, work: Path, camera: str = "still"):
     with torch.no_grad():
         pred = detach_to_cpu(model.predict(data, static_cam=camera == "still", postproc=True))
     peak = torch.cuda.max_memory_allocated() / 2**30
-    return pred, np.asarray(vitpose), xyxy.numpy(), round(peak, 2), people
+    return pred, np.asarray(vitpose), xyxy.numpy(), round(peak, 2), info
 
 
 # --- SOMA → an upright-rest BVH, and the cleanup ------------------------------------------------------
@@ -652,9 +683,7 @@ def run(op, in_dir, out_dir, params):
     work.mkdir(parents=True, exist_ok=True)
     progress(0.05, "preparing the clip")
     frames, w, h = prepare_video(video, work / "clip.mp4", p["start"], p["end"])
-    pred, kp2d, boxes, peak, people = gem(
-        work / "clip.mp4", p["mode"], p["person"], work, p["camera"]
-    )
+    pred, kp2d, boxes, peak, cam = gem(work / "clip.mp4", p["mode"], p["person"], work, p["camera"])
     t_gem = time.time() - t0
 
     progress(0.8, "cleanup and the BVH")
@@ -691,7 +720,7 @@ def run(op, in_dir, out_dir, params):
             "mode": p["mode"],
             "camera": p["camera"],
             "person": p["person"],
-            "people": people,
+            **cam,
             "frames": frames,
             "seconds": round(frames / FPS, 2),
             "size": [w, h],

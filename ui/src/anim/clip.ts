@@ -266,21 +266,24 @@ function solveIk(bones: Track[], c: Ik, F: number) {
 }
 /** M38 Find foot contacts: each foot's still stretches (slower than 15 % of the body's height a second, at most half its
  * height range, 2 % of the body's height at least, above its lowest; 3 frames or more), a lock each with a blend of 3.
- * M64 hands: the same stillness within 10 % of the body's height above the clip's floor (the lowest any bone gets), so
- * a palm on the floor locks and a hand held still in the air does not. ponytail: floor support only; a raised support
- * (a table, a rail) would need its height. */
+ * M64 hands: the same stillness within 10 % of the body's size above the clip's floor (the lowest any bone gets), so a
+ * palm on the floor locks and a hand held still in the air does not. The size is the skeleton's longest extent over the
+ * clip (its height when it stands, its length in a plank), not frame 0's height, which a push-up clip would make a
+ * fifth of it. ponytail: floor support only; a raised support (a table, a rail) would need its height. */
 export function contacts(clip: Clip, feet: string[], hands: string[] = []): Lock[] {
   const F = clip.frames;
   const poses = Array.from({ length: F }, (_, f) => pose(clip.bones, f));
   const ys = [...poses[0].values()].map((x) => x.p[1]);
   const H = Math.max(...ys) - Math.min(...ys) || 1;
+  const extent = (m: Map<string, { p: V3 }>, i: number) => Math.max(...[...m.values()].map((x) => x.p[i])) - Math.min(...[...m.values()].map((x) => x.p[i]));
+  const size = Math.max(...poses.flatMap((m) => [0, 1, 2].map((i) => extent(m, i)))) || 1;
   const floor = Math.min(...poses.map((m) => Math.min(...[...m.values()].map((x) => x.p[1]))));
   const out: Lock[] = [];
   for (const foot of [...feet, ...hands]) {
     const p = poses.map((m) => m.get(foot)!.p);
     const h = p.map((x) => x[1]);
     const lo = Math.min(...h);
-    const top = hands.includes(foot) ? floor + 0.1 * H : lo + Math.max(0.5 * (Math.max(...h) - lo), 0.02 * H);
+    const top = hands.includes(foot) ? floor + 0.1 * size : lo + Math.max(0.5 * (Math.max(...h) - lo), 0.02 * H);
     const still = p.map((_, f) => {
       const [a, b] = [Math.max(f - 1, 0), Math.min(f + 1, F - 1)];
       return h[f] <= top && (len3(sub3(p[b], p[a])) * clip.fps) / (b - a) < 0.15 * H;

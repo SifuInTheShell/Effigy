@@ -608,13 +608,13 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
       return m ? (heights[b.name] + heights[m.name]) / 2 : heights[b.name];
     };
     const near = new Set(ready.bones.filter((b) => height(b) <= 0.2).map((b) => b.name));
-    const feet =
+    const bones =
       kind === "hands"
         ? ready.bones.filter((b) => /hand$/i.test(b.node) && chain(b.node)).map((b) => b.node)
         : ready.bones.filter((b) => near.has(b.name) && !(b.parent && near.has(b.parent)) && !/tail/i.test(b.node) && chain(b.node)).map((b) => b.node);
     const pre = evaluate(data.data, { keys: layer.keys, offsets: layer.offsets, smooth: layer.smooth });
-    const others = (layer.feet ?? []).filter((lk) => !feet.includes(lk.bone));
-    const all = kind === "hands" ? contacts(pre, [], feet) : contacts(pre, feet);
+    const others = (layer.feet ?? []).filter((lk) => !bones.includes(lk.bone));
+    const all = kind === "hands" ? contacts(pre, [], bones) : contacts(pre, bones);
     const room = Math.max(MAX_LOCKS - others.length, 0); // anim_edit takes 64: the longest stretches first
     const hits = [...all]
       .sort((a, b) => b.to - b.from - (a.to - a.from))
@@ -622,15 +622,15 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
       .sort((a, b) => a.bone.localeCompare(b.bone) || a.from - b.from);
     commit(() => ({ ...layer, feet: [...others, ...hits] }));
     setFound(
-      !feet.length
+      !bones.length
         ? kind === "hands"
           ? "No hands found (bones named Hand with an arm above them)."
           : "No feet found near the floor."
         : all.length
-          ? `${all.length} still stretches on ${feet.join(", ")}${hits.length < all.length ? `; the ${hits.length} longest locked (${MAX_LOCKS} at most)` : ""}.`
+          ? `${all.length} still stretches on ${bones.join(", ")}${hits.length < all.length ? `; the ${hits.length} longest locked (${MAX_LOCKS} at most)` : ""}.`
           : kind === "hands"
-            ? `No hand rests on the floor in this clip (${feet.join(", ")}).`
-            : `No foot stands still in this clip (${feet.join(", ")}): a walk or run in place slides its feet on purpose.`,
+            ? `No hand rests on the floor in this clip (${bones.join(", ")}).`
+            : `No foot stands still in this clip (${bones.join(", ")}): a walk or run in place slides its feet on purpose.`,
     );
   };
   const setLock = (i: number, lk: Lock | null) => commit((l) => ({ ...l, feet: (l.feet ?? []).flatMap((x, j) => (j !== i ? [x] : lk ? [lk] : [])) }));

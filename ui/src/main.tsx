@@ -3975,17 +3975,17 @@ function MotionInfo(props: { asset: string; version: Meta; versions: Meta[]; cha
     );
   }
   if (v.step === "mocap") {
-    // M64: the people at the start of the video; the ones no motion of this video has yet (the largest is person 0)
-    const people = Number(m.people ?? 1);
-    const made = new Set(props.versions.filter((x) => x.step === "mocap" && x.parent === v.parent).map((x) => Number(x.params?.person ?? 0)));
-    const others = Array.from({ length: people }, (_, i) => i).filter((i) => !made.has(i));
+    // M64: the people at the start of the video (mocap takes person 0–7); the ones no motion of this video has yet
+    const people = Math.min(Number(m.people ?? 1), 8);
+    const have = new Set(props.versions.filter((x) => x.step === "mocap" && x.parent === v.parent).map((x) => Number(x.params?.person ?? 0)));
+    const others = Array.from({ length: people }, (_, i) => i).filter((i) => !have.has(i));
     return (
       <section>
         <h3>Motion from video</h3>
         <p>
           "{String(m.name ?? "")}", {String(m.seconds ?? "?")} s, {MOCAP_MODES.find(([k]) => k === m.mode)?.[1].split(":")[0] ?? String(m.mode)} quality
           {m.total_seconds != null && `, made in ${Number(m.total_seconds).toFixed(0)} s`}
-          {m.camera === "panning" && ", the camera's turn taken out"}.
+          {m.camera === "panning" && `, the camera's turn (${String(m.camera_turn_deg ?? "?")}° in all) taken out`}.
         </p>
         {v.outputs.preview && <video src={fileUrl(props.asset, v.version, v.outputs.preview)} controls muted loop style={{ maxWidth: "100%", maxHeight: 360 }} />}
         <p className="muted">
@@ -3998,7 +3998,7 @@ function MotionInfo(props: { asset: string; version: Meta; versions: Meta[]; cha
               {people} people at the start of the video; this is person {Number(v.params?.person ?? 0) + 1} (the largest first).
             </span>
             {others.length > 0 && (
-              <button disabled={busy} onClick={() => run(async () => void others.forEach((i) => void props.chain(props.asset, v.parent!, [["mocap", { ...v.params, person: i }]])))}>
+              <button disabled={busy} onClick={() => run(() => Promise.all(others.map((i) => props.chain(props.asset, v.parent!, [["mocap", { ...v.params, person: i }]]))))}>
                 Make the {others.length === 1 ? "other one's" : `other ${others.length}'s`} motion too
               </button>
             )}
