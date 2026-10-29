@@ -1133,8 +1133,9 @@ test("Animate: a video becomes a motion (uploaded, then mocap on the upload), an
       version: "050_mocap",
       step: "mocap",
       parent: "040_upload",
+      params: { mode: "best", person: 0, for: "030_rig_skin" },
       outputs: { clip: "clip.glb", preview: "preview.mp4" },
-      metrics: { name: "dance", seconds: 14.2, mode: "best", foot_slide_mps: 0.11 },
+      metrics: { name: "dance", seconds: 14.2, mode: "best", foot_slide_mps: 0.11, people: 2, person: 0 }, // M64: a second person in the video
     },
   ]);
   await page.route("**/files/mock_video/030_rig_skin/qa.json", (r) => r.fulfill({ json: { items: {} } }));
@@ -1155,13 +1156,20 @@ test("Animate: a video becomes a motion (uploaded, then mocap on the upload), an
   await expect(page.getByLabel("Chosen video")).toBeVisible(); // a small preview of the file, before any upload
   await expect(page.getByRole("button", { name: "Start here" })).toBeVisible();
   await page.getByLabel("Video motion quality").selectOption("quick");
+  await page.getByLabel("Camera").selectOption("panning"); // M64
   await page.getByLabel("End second").fill("8");
   await make.click();
   await expect.poll(() => posted.length).toBe(1);
-  expect(posted[0]).toEqual(["mocap", { mode: "quick", foot_lock: true, in_place: false, smooth: 0.5, for: "030_rig_skin", end: 8 }]);
+  expect(posted[0]).toEqual(["mocap", { mode: "quick", camera: "panning", foot_lock: true, in_place: false, smooth: 0.5, for: "030_rig_skin", end: 8 }]);
   expect(parent).toBe("060_upload"); // the step runs on the uploaded video, not on the rig
   await page.goto("/#/asset/mock_video?version=050_mocap");
   await expect(page.getByRole("heading", { name: "Motion from video" })).toBeVisible();
+  // M64: the other person in the video gets a mocap job of their own, on the same upload with the same params
+  await expect(page.getByText("2 people at the start of the video; this is person 1")).toBeVisible();
+  await page.getByRole("button", { name: "Make the other one's motion too" }).click();
+  await expect.poll(() => posted.length).toBe(2);
+  expect(posted[1]).toEqual(["mocap", { mode: "best", person: 1, for: "030_rig_skin" }]);
+  expect(parent).toBe("040_upload");
   // the next step is on the motion's page: back onto the skinned model it was made for
   let animParent = "";
   await page.route("**/api/assets/mock_video/steps/anim", (r) => {
@@ -1169,8 +1177,8 @@ test("Animate: a video becomes a motion (uploaded, then mocap on the upload), an
     return r.fallback();
   });
   await page.getByRole("button", { name: "Put this motion on the model" }).click();
-  await expect.poll(() => posted.length).toBe(2);
-  expect(posted[1]).toEqual(["anim", { clips: ["050_mocap"] }]);
+  await expect.poll(() => posted.length).toBe(3);
+  expect(posted[2]).toEqual(["anim", { clips: ["050_mocap"] }]);
   expect(animParent).toBe("030_rig_skin");
 });
 

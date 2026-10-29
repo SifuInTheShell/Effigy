@@ -3749,6 +3749,7 @@ function VideoMotion(props: { asset: string; rig: string; onRun: (params: object
   const [mode, setMode] = useState("best");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
+  const [camera, setCamera] = useState("still");
   const [footLock, setFootLock] = useState(true);
   const [inPlace, setInPlace] = useState(false);
   const [smooth, setSmooth] = useState(0.5);
@@ -3774,6 +3775,7 @@ function VideoMotion(props: { asset: string; rig: string; onRun: (params: object
       const up = { version };
       const params = {
         mode,
+        camera,
         foot_lock: footLock,
         in_place: inPlace,
         smooth,
@@ -3790,8 +3792,9 @@ function VideoMotion(props: { asset: string; rig: string; onRun: (params: object
     <div className="stack">
       <h4>Make an animation from a video</h4>
       <p className="muted">
-        Film one person from head to toe with the camera held still, then choose the video (MP4, MOV or WebM). A 15-second clip takes about two minutes. When
-        the motion is ready, its page opens: click Put this motion on the model there to see your character do it.
+        Film one person from head to toe with the camera held still (or turning on the spot to follow: say so under Camera), then choose the video (MP4, MOV or
+        WebM). A 15-second clip takes about two minutes. When the motion is ready, its page opens: click Put this motion on the model there to see your character
+        do it. Several people in the video: the largest comes first, the motion's page offers the others.
       </p>
       <input
         type="file"
@@ -3829,6 +3832,13 @@ function VideoMotion(props: { asset: string; rig: string; onRun: (params: object
               {t}
             </option>
           ))}
+        </select>
+      </label>
+      <label>
+        Camera{" "}
+        <select aria-label="Camera" value={camera} onChange={(e) => setCamera(e.target.value)}>
+          <option value="still">held still</option>
+          <option value="panning">turning on the spot to follow (panning)</option>
         </select>
       </label>
       <div className="row">
@@ -3964,22 +3974,40 @@ function MotionInfo(props: { asset: string; version: Meta; versions: Meta[]; cha
       </section>
     );
   }
-  if (v.step === "mocap")
+  if (v.step === "mocap") {
+    // M64: the people at the start of the video; the ones no motion of this video has yet (the largest is person 0)
+    const people = Number(m.people ?? 1);
+    const made = new Set(props.versions.filter((x) => x.step === "mocap" && x.parent === v.parent).map((x) => Number(x.params?.person ?? 0)));
+    const others = Array.from({ length: people }, (_, i) => i).filter((i) => !made.has(i));
     return (
       <section>
         <h3>Motion from video</h3>
         <p>
           "{String(m.name ?? "")}", {String(m.seconds ?? "?")} s, {MOCAP_MODES.find(([k]) => k === m.mode)?.[1].split(":")[0] ?? String(m.mode)} quality
-          {m.total_seconds != null && `, made in ${Number(m.total_seconds).toFixed(0)} s`}.
+          {m.total_seconds != null && `, made in ${Number(m.total_seconds).toFixed(0)} s`}
+          {m.camera === "panning" && ", the camera's turn taken out"}.
         </p>
         {v.outputs.preview && <video src={fileUrl(props.asset, v.version, v.outputs.preview)} controls muted loop style={{ maxWidth: "100%", maxHeight: 360 }} />}
         <p className="muted">
           The dots show the body points it followed. Feet sliding while planted: {m.foot_slide_mps_before_lock != null && `${m.foot_slide_mps_before_lock} m/s, then `}
           {String(m.foot_slide_mps ?? "?")} m/s.
         </p>
+        {people > 1 && v.parent && (
+          <div className="row">
+            <span className="muted">
+              {people} people at the start of the video; this is person {Number(v.params?.person ?? 0) + 1} (the largest first).
+            </span>
+            {others.length > 0 && (
+              <button disabled={busy} onClick={() => run(async () => void others.forEach((i) => void props.chain(props.asset, v.parent!, [["mocap", { ...v.params, person: i }]])))}>
+                Make the {others.length === 1 ? "other one's" : `other ${others.length}'s`} motion too
+              </button>
+            )}
+          </div>
+        )}
         {putOn}
       </section>
     );
+  }
   return (
     <section>
       <h3>Motion from text</h3>

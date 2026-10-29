@@ -7,7 +7,7 @@ export type Q = [number, number, number, number];
 export type V3 = [number, number, number];
 // a bone without a moving translation carries its constant one (`offset`): the skeleton's shape for the foot locks' FK
 export type Track = { name: string; parent: string | null; rotation?: Q[]; translation?: V3[]; offset?: V3 };
-export type Lock = { bone: string; from: number; to: number; blend: number }; // M38: a foot held still over base frames
+export type Lock = { bone: string; from: number; to: number; blend: number }; // M38: a foot (M64: or a hand on the floor) held still over base frames
 export type Clip = { fps: number; frames: number; bones: Track[] };
 export type Key = { f: number; q: Q; falloff: number };
 export type Offset = { f: number; v: V3; falloff: number };
@@ -265,18 +265,22 @@ function solveIk(bones: Track[], c: Ik, F: number) {
   }
 }
 /** M38 Find foot contacts: each foot's still stretches (slower than 15 % of the body's height a second, at most half its
- * height range, 2 % of the body's height at least, above its lowest; 3 frames or more), a lock each with a blend of 3. */
-export function contacts(clip: Clip, feet: string[]): Lock[] {
+ * height range, 2 % of the body's height at least, above its lowest; 3 frames or more), a lock each with a blend of 3.
+ * M64 hands: the same stillness within 10 % of the body's height above the clip's floor (the lowest any bone gets), so
+ * a palm on the floor locks and a hand held still in the air does not. ponytail: floor support only; a raised support
+ * (a table, a rail) would need its height. */
+export function contacts(clip: Clip, feet: string[], hands: string[] = []): Lock[] {
   const F = clip.frames;
   const poses = Array.from({ length: F }, (_, f) => pose(clip.bones, f));
   const ys = [...poses[0].values()].map((x) => x.p[1]);
   const H = Math.max(...ys) - Math.min(...ys) || 1;
+  const floor = Math.min(...poses.map((m) => Math.min(...[...m.values()].map((x) => x.p[1]))));
   const out: Lock[] = [];
-  for (const foot of feet) {
+  for (const foot of [...feet, ...hands]) {
     const p = poses.map((m) => m.get(foot)!.p);
     const h = p.map((x) => x[1]);
     const lo = Math.min(...h);
-    const top = lo + Math.max(0.5 * (Math.max(...h) - lo), 0.02 * H);
+    const top = hands.includes(foot) ? floor + 0.1 * H : lo + Math.max(0.5 * (Math.max(...h) - lo), 0.02 * H);
     const still = p.map((_, f) => {
       const [a, b] = [Math.max(f - 1, 0), Math.min(f + 1, F - 1)];
       return h[f] <= top && (len3(sub3(p[b], p[a])) * clip.fps) / (b - a) < 0.15 * H;

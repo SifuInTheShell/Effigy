@@ -13,8 +13,13 @@ checklist, done, is `docs/archive/LAPTOP.md`.
 
 ---
 
-## 1. Where things stand (2026-10-18: M63 built, its two branches pending; M61 and M62 merged)
+## 1. Where things stand (2026-10-29: M64 built blind in the cloud, to validate on the laptop; M61–M63 merged, 0.2.0 out)
 
+- **M64 (branch `ccr-3bd14478-pui9wd`, the cloud session, 2026-10-29; not run on a GPU)**: motion from video gets the
+  other people in the clip (`metrics.people`, "Make the other N's motion too" on the motion's page), the editor's
+  Find hand contacts (a palm on the floor locked like a foot), and a panning camera (`camera: "panning"`: the camera's
+  turn read off the background with OpenCV and given to GEM-X). What to run: IMPLEMENTATION M64 "Needs the laptop".
+  Came out of the assessment of toyxyz/toyxyz_RGBMoCap (its models are SMPL-family and noncommercial: not used).
 - **M63 (branches `m63-ik-contract`, then `m63-ik-editor` on top; PRs pending)**: character IK in the animation editor. The armature drawn as Blender draws it (octahedral bones with their roll, relationship lines, the IK chain yellow); IK controls in the `anim_edit` layer (§3.2 step 3c: a hand or foot on a keyed target, chain 2–8, FABRIK past two, a swivel for the knee/elbow, weight, world or bone space) with target and pole handles in the view; IK drag over any chain length; R/G, Page Up/Down. The contract branch merges first.
 - **M62 (branch `m62-import-bake`, PR pending; contains M61)**: `bake` of an imported model reads its own materials (no volume needed); chain checked on two imported test models (`docs/bench/m62.md`). A skeleton that is not one of Effigy's templates is dropped and the model is rigged with Effigy's own.
 - **M61 (branch `m61-redraw`, PR pending)**: the 2D step `redraw` (upscale 2×/4× with Real-ESRGAN, or redraw at any size in overlapping windows with Z-Image-Turbo + Tile), in a picture's panel and the Tools menu; MCP `run_step redraw` and `import_file(asset_id=…)`.
@@ -220,6 +225,9 @@ Done and recorded elsewhere: the 2D roadmap (M54–M57) and the bigger GPUs (M46
 `docs/bench/m46.md`, research 16; what is left there is the users' GPU reports for the 24/32 GB thresholds), the
 agent's hoarding findings 1–22 (4 built as Setup's Start Blender; 5 decided: the port stays 8000).
 
+0. **Validate M64** (built in the cloud, 2026-10-29, never run on a GPU): the four laptop checks in IMPLEMENTATION
+   M64's acceptance (two people, a push-up clip's hand locks, a panned walk in "still" and "panning", the numbers into
+   `docs/bench/m34.md`). The panning camera is the one to doubt first: a camera that also walks reads as a turn.
 0. **Merge M61 and M62** (PRs pending): M61 was smoke-tested 2026-10-16; the full 33408 x 9600 redraw job (IMPLEMENTATION M61
    acceptance 3) is the maintainer's to run. Then the `clean` crash above.
 1. **M60 The held weapon as a separate prop on the hand bone** (the maintainer's pick, 2026-10-13: the standing-pose redraw

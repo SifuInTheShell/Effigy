@@ -1,16 +1,19 @@
 """Motion from video (IMPLEMENTATION.md M34): NVIDIA GEM-X (engine/gemx) in .venv-gemx, one-shot.
 
 in: a version with a video (an upload: video.mp4|mov|webm); params: {"mode": "best"|"quick"|"keypoints",
-"start": 0.0, "end": null (seconds), "person": 0, "smooth": 0.5, "foot_lock": true, "in_place": false,
-"name": the clip's name (else the video's)} → motion.bvh (SOMA, 78 joints with Root, an upright rest as Kimodo's
-BVHs), clip.glb (blender_ops/bvh_clip, as M26), preview.mp4 (the 2D keypoints on the clip). anim takes the
-version like a motion version, so it lands among "Your motions".
+"start": 0.0, "end": null (seconds), "person": 0, "camera": "still"|"panning", "smooth": 0.5, "foot_lock": true,
+"in_place": false, "name": the clip's name (else the video's)} → motion.bvh (SOMA, 78 joints with Root, an upright
+rest as Kimodo's BVHs), clip.glb (blender_ops/bvh_clip, as M26), preview.mp4 (the 2D keypoints on the clip). anim
+takes the version like a motion version, so it lands among "Your motions". `metrics.people` counts the people at
+the start of the clip: one run makes one person's motion (`person`: 0 the largest), the others are more runs (M64).
+A "panning" camera turns on the spot to follow (M64): its turn is read off the background and given to GEM-X.
 
 The pipeline is GEM-X's demo (research 12), driven here: the clip at 30 fps, at most 720 px → the person
 (YOLOX-L from DWPose's repo, tracked by overlap: `person` = 0 the largest at the start) → 77 2D keypoints
 (GEM-X's ViTPose) → SAM 3D Body's image features (not for "keypoints") → GEM-X, one regression pass ("quick")
-or 50 DDIM steps ("best", "keypoints"); a still camera (GEM-X's camera tracking is not in its release). Then the
-SOMA pose becomes a BVH with an upright rest (`bvh_text`), after the cleanup (`clean`).
+or 50 DDIM steps ("best", "keypoints"); a still camera, or a panning one's rotation from the background
+(`camera_path`; GEM-X's own camera tracking is not in its release). Then the SOMA pose becomes a BVH with an
+upright rest (`bvh_text`), after the cleanup (`clean`).
 """
 
 import json
@@ -33,6 +36,7 @@ GX = MODELS / "GEM-X"  # GEM-X's inputs/ layout (tools/download_models.py, group
 YOLOX = MODELS / "DWPose" / "yolox_l.onnx"
 DINOV3 = "dinov3-6876159"  # the pinned code zip in GX, unpacked where torch.hub looks
 MODES = ("best", "quick", "keypoints")
+CAMERAS = ("still", "panning")
 FPS = 30  # GEM-X's rate
 # the short and long side at most: GEM-X reads the whole clip into RAM (4K: ~10 GB); the spike's size
 SIDES = (720, 1280)
@@ -60,6 +64,7 @@ def params_of(params: dict) -> dict:
             "start": float(params.get("start") or 0),
             "end": None if params.get("end") in (None, "") else float(params["end"]),
             "person": int(params.get("person", 0)),
+            "camera": str(params.get("camera", "still")),
             "smooth": float(params.get("smooth", 0.5)),
             "foot_lock": bool(params.get("foot_lock", True)),
             "in_place": bool(params.get("in_place", False)),
@@ -72,12 +77,13 @@ def params_of(params: dict) -> dict:
         or p["start"] < 0
         or (p["end"] is not None and p["end"] <= p["start"])
         or not 0 <= p["person"] < 8
+        or p["camera"] not in CAMERAS
         or not 0 <= p["smooth"] <= 1
     ):
         raise StepError(
             "bad_params",
             f"bad mocap params: {params} (mode {'|'.join(MODES)}; 0 ≤ start < end seconds; person 0–7; "
-            "smooth 0–1)",
+            f"camera {'|'.join(CAMERAS)}; smooth 0–1)",
         )
     return p
 
@@ -198,6 +204,38 @@ def track(dets: list[np.ndarray], person: int) -> np.ndarray:
     return out
 
 
+def camera_path(frames: np.ndarray, boxes: np.ndarray, K: np.ndarray) -> np.ndarray:
+    """R_w2c per frame (L, 3, 3) of a camera that turns on the spot: the background's motion from each frame
+    to the next (corners outside the person's box, followed by LK flow, a RANSAC homography) read through K as
+    the rotation GEM-X's `cam_angvel` is made of (R_w2c[t] = R @ R_w2c[t-1]). A frame too poor to read keeps
+    the turn. ponytail: pure rotation; a camera that walks (a dolly) reads as a turn, so the person drifts."""
+    import cv2
+
+    L = len(frames)
+    R = np.tile(np.eye(3), (L, 1, 1))
+    Ki = np.linalg.inv(K)
+    prev = cv2.cvtColor(frames[0], cv2.COLOR_RGB2GRAY)
+    for t in range(1, L):
+        cur = cv2.cvtColor(frames[t], cv2.COLOR_RGB2GRAY)
+        mask = np.full(prev.shape, 255, np.uint8)
+        x0, y0, x1, y1 = boxes[t - 1]
+        pad = 0.1 * max(x1 - x0, y1 - y0)  # the person's own motion is not the camera's
+        cv2.rectangle(mask, (int(x0 - pad), int(y0 - pad)), (int(x1 + pad), int(y1 + pad)), 0, -1)
+        rel = np.eye(3)
+        pts = cv2.goodFeaturesToTrack(prev, 400, 0.01, 8, mask=mask)
+        if pts is not None and len(pts) >= 12:
+            nxt, ok, _ = cv2.calcOpticalFlowPyrLK(prev, cur, pts, None)
+            ok = ok.reshape(-1) == 1
+            if ok.sum() >= 12:
+                H, inl = cv2.findHomography(pts[ok], nxt[ok], cv2.RANSAC, 3.0)
+                if H is not None and inl.sum() >= 12 and np.linalg.det(M := Ki @ H @ K) > 0:
+                    U, _, Vt = np.linalg.svd(M / np.cbrt(np.linalg.det(M)))  # the nearest rotation
+                    rel = U @ np.diag([1, 1, np.sign(np.linalg.det(U @ Vt))]) @ Vt
+        R[t] = rel @ R[t - 1]
+        prev = cur
+    return R
+
+
 # --- GEM-X -------------------------------------------------------------------------------------------
 
 
@@ -276,8 +314,9 @@ def _check_models(mode: str):
         )
 
 
-def gem(video: Path, mode: str, person: int, work: Path):
-    """GEM-X on the prepared clip: (its prediction, the 2D keypoints (L, 77, 3), the boxes (L, 4), peak VRAM)."""
+def gem(video: Path, mode: str, person: int, work: Path, camera: str = "still"):
+    """GEM-X on the prepared clip: (its prediction, the 2D keypoints (L, 77, 3), the boxes (L, 4), peak VRAM,
+    the people at the start of the clip)."""
     _engine()
     import cv2
     import onnxruntime
@@ -309,20 +348,27 @@ def gem(video: Path, mode: str, person: int, work: Path):
     if len(dets) != L:  # OpenCV and PyAV read the prepared clip: they must agree on its frames
         raise StepError("failed", f"the clip reads as {len(dets)} frames in OpenCV, {L} in PyAV")
     xyxy = torch.from_numpy(track(dets, person)).float()
+    people = next(len(d) for d in dets if len(d))  # track() found a frame with people
     xyxy = smooth_bbx_xyxy(xyxy, window=5)
     xyxy[:, [0, 2]] = xyxy[:, [0, 2]].clamp(0, W - 1)
     xyxy[:, [1, 3]] = xyxy[:, [1, 3]].clamp(0, H - 1)
     bbx_xys = get_bbx_xys_from_xyxy(xyxy, base_enlarge=1.2).float()
+    K = estimate_K(W, H)
 
-    progress(0.3, "2D keypoints")
     frames = read_video_np(str(video))
+    eye = torch.eye(4)[None].repeat(L, 1, 1)
+    T_w2c = eye.clone()
+    if camera == "panning":
+        progress(0.25, "the camera's turn")
+        T_w2c[:, :3, :3] = torch.from_numpy(camera_path(frames, xyxy.numpy(), K.numpy())).float()
+    progress(0.3, "2D keypoints")
     vitpose = VitPoseExtractor(device="cuda:0", pose_type="soma").extract(
         frames, bbx_xys, img_ds=1.0, path_type="np"
     )
     vitpose = vitpose[0] if isinstance(vitpose, tuple) else vitpose
     del frames
     torch.cuda.empty_cache()
-    K = estimate_K(W, H).repeat(L, 1, 1)
+    K = K.repeat(L, 1, 1)
     if mode == "keypoints":
         f_imgseq, pred_cam, has_img = torch.zeros(L, 1024), None, torch.zeros(L).bool()
     else:
@@ -348,7 +394,7 @@ def gem(video: Path, mode: str, person: int, work: Path):
                 f"video_name={video.stem}",
                 f"video_path={video.as_posix()}",
                 f"output_root={work.as_posix()}",
-                "static_cam=true",
+                f"static_cam={'true' if camera == 'still' else 'false'}",
                 "use_wandb=false",
                 "task=test",
             ],
@@ -362,17 +408,16 @@ def gem(video: Path, mode: str, person: int, work: Path):
         for m in model.modules():
             if hasattr(m, "regression_only"):
                 m.regression_only = False
-    eye = torch.eye(4)[None].repeat(L, 1, 1)
     data = {
         "meta": [{"vid": video.stem}],
         "length": torch.tensor(L),
         "bbx_xys": bbx_xys,
         "kp2d": vitpose,
         "K_fullimg": K,
-        "cam_angvel": compute_cam_angvel(eye[:, :3, :3]),
-        "cam_tvel": compute_cam_tvel(eye[:, :3, 3]),
-        "R_w2c": eye[:, :3, :3],
-        "T_w2c": eye,
+        "cam_angvel": compute_cam_angvel(T_w2c[:, :3, :3]),
+        "cam_tvel": compute_cam_tvel(eye[:, :3, 3]),  # a panning camera stays where it is
+        "R_w2c": T_w2c[:, :3, :3],
+        "T_w2c": T_w2c,
         "f_imgseq": f_imgseq,
         "noisy_pred_cam": pred_cam,
         "has_text": torch.tensor([False]),
@@ -386,9 +431,9 @@ def gem(video: Path, mode: str, person: int, work: Path):
         },
     }
     with torch.no_grad():
-        pred = detach_to_cpu(model.predict(data, static_cam=True, postproc=True))
+        pred = detach_to_cpu(model.predict(data, static_cam=camera == "still", postproc=True))
     peak = torch.cuda.max_memory_allocated() / 2**30
-    return pred, np.asarray(vitpose), xyxy.numpy(), round(peak, 2)
+    return pred, np.asarray(vitpose), xyxy.numpy(), round(peak, 2), people
 
 
 # --- SOMA → an upright-rest BVH, and the cleanup ------------------------------------------------------
@@ -607,7 +652,9 @@ def run(op, in_dir, out_dir, params):
     work.mkdir(parents=True, exist_ok=True)
     progress(0.05, "preparing the clip")
     frames, w, h = prepare_video(video, work / "clip.mp4", p["start"], p["end"])
-    pred, kp2d, boxes, peak = gem(work / "clip.mp4", p["mode"], p["person"], work)
+    pred, kp2d, boxes, peak, people = gem(
+        work / "clip.mp4", p["mode"], p["person"], work, p["camera"]
+    )
     t_gem = time.time() - t0
 
     progress(0.8, "cleanup and the BVH")
@@ -642,6 +689,9 @@ def run(op, in_dir, out_dir, params):
         "metrics": {
             "name": name,
             "mode": p["mode"],
+            "camera": p["camera"],
+            "person": p["person"],
+            "people": people,
             "frames": frames,
             "seconds": round(frames / FPS, 2),
             "size": [w, h],

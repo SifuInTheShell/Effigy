@@ -597,8 +597,9 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
   };
 
   // the foot locks: found on the clip as edited so far, before the locks (the space they work in); a bone's rest height is
-  // its own and its mirror's mean, so both sides pick the same bone of a skeleton fitted a little unevenly
-  const findContacts = () => {
+  // its own and its mirror's mean, so both sides pick the same bone of a skeleton fitted a little unevenly. M64 hands: the
+  // bones named Hand with an arm above them, locked where a palm rests on the floor
+  const findContacts = (kind: "feet" | "hands" = "feet") => {
     const { heights } = v.feet();
     const mirror = (n: string) =>
       n.startsWith("Left") ? "Right" + n.slice(4) : n.startsWith("Right") ? "Left" + n.slice(5) : ready.sides?.map((s, i) => (n.endsWith(s) ? n.slice(0, -s.length) + ready.sides![1 - i] : "")).find(Boolean);
@@ -607,10 +608,13 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
       return m ? (heights[b.name] + heights[m.name]) / 2 : heights[b.name];
     };
     const near = new Set(ready.bones.filter((b) => height(b) <= 0.2).map((b) => b.name));
-    const feet = ready.bones.filter((b) => near.has(b.name) && !(b.parent && near.has(b.parent)) && !/tail/i.test(b.node) && chain(b.node)).map((b) => b.node);
+    const feet =
+      kind === "hands"
+        ? ready.bones.filter((b) => /hand$/i.test(b.node) && chain(b.node)).map((b) => b.node)
+        : ready.bones.filter((b) => near.has(b.name) && !(b.parent && near.has(b.parent)) && !/tail/i.test(b.node) && chain(b.node)).map((b) => b.node);
     const pre = evaluate(data.data, { keys: layer.keys, offsets: layer.offsets, smooth: layer.smooth });
     const others = (layer.feet ?? []).filter((lk) => !feet.includes(lk.bone));
-    const all = contacts(pre, feet);
+    const all = kind === "hands" ? contacts(pre, [], feet) : contacts(pre, feet);
     const room = Math.max(MAX_LOCKS - others.length, 0); // anim_edit takes 64: the longest stretches first
     const hits = [...all]
       .sort((a, b) => b.to - b.from - (a.to - a.from))
@@ -619,10 +623,14 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
     commit(() => ({ ...layer, feet: [...others, ...hits] }));
     setFound(
       !feet.length
-        ? "No feet found near the floor."
+        ? kind === "hands"
+          ? "No hands found (bones named Hand with an arm above them)."
+          : "No feet found near the floor."
         : all.length
           ? `${all.length} still stretches on ${feet.join(", ")}${hits.length < all.length ? `; the ${hits.length} longest locked (${MAX_LOCKS} at most)` : ""}.`
-          : `No foot stands still in this clip (${feet.join(", ")}): a walk or run in place slides its feet on purpose.`,
+          : kind === "hands"
+            ? `No hand rests on the floor in this clip (${feet.join(", ")}).`
+            : `No foot stands still in this clip (${feet.join(", ")}): a walk or run in place slides its feet on purpose.`,
     );
   };
   const setLock = (i: number, lk: Lock | null) => commit((l) => ({ ...l, feet: (l.feet ?? []).flatMap((x, j) => (j !== i ? [x] : lk ? [lk] : [])) }));
@@ -997,10 +1005,13 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
       <details>
         <summary>Foot locks{locks.length ? ` (${locks.length})` : ""}</summary>
         <div className="stack">
-          <p className="muted">A lock holds a foot still over its frames (stops sliding); the leg bends to keep it there.</p>
+          <p className="muted">A lock holds a foot still over its frames (stops sliding); the leg bends to keep it there. A hand resting on the floor the same way.</p>
           <div className="row">
-            <button onClick={findContacts} disabled={original}>
+            <button onClick={() => findContacts()} disabled={original}>
               Find foot contacts
+            </button>
+            <button onClick={() => findContacts("hands")} disabled={original}>
+              Find hand contacts
             </button>
             {bone && chain(bone) && (
               <button

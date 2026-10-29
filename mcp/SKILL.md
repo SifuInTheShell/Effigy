@@ -36,9 +36,11 @@ flat as a cardboard standee.
 **From a file.** `import_file("<abs path>.glb|.fbx|.obj|.zip ...")` uploads and runs `import_model`
 (`{"rig": true, "scale": 1}`): a known skeleton is kept (use `still=true` to drop it), the result has
 `mesh.glb` or `rigged.glb` (+ clips). Then continue below at the step you need: an imported rigged model can
-go straight to `anim_edit` or `export`. A video is only uploaded: `run_step mocap` on it makes a clip. An
-imported file is a new asset with no lineage: its credits start empty. To edit a generated model and keep its
-licences, go through Blender (`open_in_blender`, edit, `pull_from_blender`), not through a file. With no Blender
+go straight to `anim_edit` or `export`. A video is only uploaded: `run_step mocap` on it makes a clip of the
+largest person (`metrics.people` counts the people at the start; `{"person": 1}` makes the next; `{"camera":
+"panning"}` when the camera turned to follow). An imported file is a new asset with no lineage: its credits start
+empty. To edit a generated model and keep its licences, go through Blender (`open_in_blender`, edit,
+`pull_from_blender`), not through a file. With no Blender
 running, `open_in_blender` starts the owner's when Setup's "Start Blender when it is needed" is on; otherwise it
 answers `blender_not_connected`: ask the owner, and never start a Blender yourself (two Blenders race for the
 add-on's port, and the one the owner sees may lose). A move needs no
@@ -114,7 +116,8 @@ to the base `anim` (edits never compound), baked into that clip; other clips sta
 - `ground: metres` added to the top-most translated bones (Hips); `in_place: true` removes the X/Z drift
   (walk in place).
 - `smooth: {bone: sigma_frames}` Gaussian smoothing of a jittery bone.
-- `feet: [{"bone": "LeftFoot", "from": 4, "to": 11, "blend": 3}]` locks a foot to the ground over those frames.
+- `feet: [{"bone": "LeftFoot", "from": 4, "to": 11, "blend": 3}]` locks a foot to the ground over those frames (a hand
+  resting on the floor the same way: the bone, its parent and grandparent turn).
 - `ik: [{"bone": "LeftHand", "chain": 2, "space": "Hips", "keys": [{"f": 10, "p": [x, y, z], "swivel": 0, "w": 1,
   "falloff": 4}]}]` an IK control: the hand reaches `p` (metres, skeleton space, or in the `space` bone's frame so it
   rides on that bone), the 2 bones above it bending; `swivel` degrees swings the elbow/knee, `w` 0–1 the weight;
