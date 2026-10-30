@@ -76,6 +76,29 @@ def test_hits_and_mid_depth():
     assert _rig.mid_depth(v, f, 0.9, 0.0) is None  # beside the box
 
 
+def test_a_hollow_limb_is_one_span():
+    """A generated limb can be two 1 mm walls round a hollow: its middle is the limb's, not the front
+    wall's, and a joint in the wall reads as on the skin."""
+    v, f = _box((0.1, 0.6, 0.1))
+    vi, fi = _box((0.098, 0.598, 0.098))
+    # the inner wall faces in
+    v, f = np.concatenate([v, vi]), np.concatenate([f, fi[:, ::-1] + len(v)])
+    assert abs(_rig.mid_depth(v, f, 0.0, 0.0)) < 1e-9
+    joints = [
+        {"name": "Hips", "parent": None, "position": [0, 0.2, 0]},
+        {"name": "Spine", "parent": "Hips", "position": [0, 0, 0.0495]},  # in the front wall
+        {"name": "Spine1", "parent": "Spine", "position": [0, -0.2, 0]},
+    ]
+    c = _rig.fit_quality(v, f, joints)["centred"]
+    assert c["Spine"] < 0.05 and c["Hips"] > 0.95
+    # air between two limbs stays two spans: the viewer's (+Z) limb first, or the one nearest `near`
+    v2, f2 = _box((0.1, 0.6, 0.1), (0, 0, 0.3))
+    v, f = np.concatenate([v, v2]), np.concatenate([f, f2 + len(v)])
+    assert len(_rig.spans(v, f, np.zeros(3))) == 2
+    assert abs(_rig.mid_depth(v, f, 0.0, 0.0) - 0.3) < 1e-9
+    assert abs(_rig.mid_depth(v, f, 0.0, 0.0, near=0.0)) < 1e-9
+
+
 def test_inside_survives_flipped_and_open_meshes():
     v, f = _box()
     pts = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 2.0]])
