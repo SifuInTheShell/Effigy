@@ -9,6 +9,7 @@ ponytail: proportions are fixed fractions (an average adult); MHR/SOMA-X priors 
 """
 
 import re
+from itertools import pairwise
 
 import numpy as np
 
@@ -121,14 +122,40 @@ def hits(v: np.ndarray, f: np.ndarray, p: np.ndarray, axis: int = 2) -> np.ndarr
     )  # a ray through a shared edge hits twice
 
 
+def spans(v, f, p: np.ndarray, axis: int = 2, from_top: bool = False) -> list[list[float]]:
+    """The solid [lo, hi] spans along the line through p parallel to `axis`: pairs of hits (paired from
+    the high end with `from_top`: an open mesh's odd hit count drops the far one), two of them joined
+    where `inside` holds in the gap between (the cavity of a hollow shell: a generated limb can be two
+    1 mm walls round a hollow, and the middle of the first pair put its elbows, knees and hips in the
+    front wall, which fit_quality then read as centred)."""
+    z = hits(v, f, p, axis)
+    z = z[len(z) % 2 :] if from_top else z
+    pairs = [[z[i], z[i + 1]] for i in range(0, len(z) - 1, 2)]
+    if len(pairs) < 2:
+        return pairs
+    gaps = np.repeat(np.asarray(p, float)[None], len(pairs) - 1, 0)
+    gaps[:, axis] = [(a[1] + b[0]) / 2 for a, b in pairwise(pairs)]
+    out = pairs[:1]
+    # ponytail: an air gap with surfaces round it on 2 axes (a hand held in front of the belly) joins
+    # too; rig_fit reads an A-pose, hands out to the sides. A gap-width or wall-thickness test if it bites.
+    for nxt, joined in zip(pairs[1:], inside(v, f, gaps)):
+        if joined:
+            out[-1] = [out[-1][0], nxt[1]]
+        else:
+            out.append(nxt)
+    return out
+
+
 def mid_depth(v, f, x: float, y: float, near: float | None = None, facing: int = 1) -> float | None:
     """The middle of the first solid span a ray from the viewer crosses at (x, y) (facing +1: the
     character faces +Z and the viewer is in front), or of the span nearest `near`; None on a miss."""
-    z = hits(v, f, np.array([x, y, 0.0]))[::-facing]  # the viewer's side first
-    if len(z) < 2:
+    p = np.array([x, y, 0.0])
+    s = spans(v, f, p, from_top=facing > 0)[::-facing]  # the viewer's side first
+    if not s:
+        z = hits(v, f, p)
         return float(z[0]) if len(z) else None
-    spans = [(z[i] + z[i + 1]) / 2 for i in range(0, len(z) - 1, 2)]
-    return float(spans[0] if near is None else min(spans, key=lambda s: abs(s - near)))
+    mids = [(a + b) / 2 for a, b in s]
+    return float(mids[0] if near is None else min(mids, key=lambda m: abs(m - near)))
 
 
 def winding(v: np.ndarray, f: np.ndarray, pts: np.ndarray) -> np.ndarray:
@@ -190,13 +217,19 @@ def fit_quality(v, f, joints: list[dict]) -> dict:
             n in ends and held[n]
         ):  # an end joint only says where the last bone stops: a toe tip
             continue
-        spans = []
-        for axis in range(3):
-            z, c = hits(v, f, at[n], axis), at[n][axis]
-            lo, hi = z[z <= c], z[z >= c]
-            if held[n] and len(lo) and len(hi) and hi[0] > lo[-1]:
-                spans.append((hi[0] - lo[-1], min(c - lo[-1], hi[0] - c) / ((hi[0] - lo[-1]) / 2)))
-        centred[n] = round(float(min(b for _, b in sorted(spans)[:2])), 2) if spans else 0.0
+        across = []
+        for axis in range(3) if held[n] else ():
+            c = at[n][axis]
+            # the solid span round the joint (a hollow limb's whole width, not one wall); else the
+            # surfaces either side (an open mesh's odd hit count leaves the joint between spans)
+            s = next((s for s in spans(v, f, at[n], axis) if s[0] <= c <= s[1]), None)
+            if s is None:
+                z = hits(v, f, at[n], axis)
+                lo, hi = z[z <= c], z[z >= c]
+                s = [lo[-1], hi[0]] if len(lo) and len(hi) else None
+            if s and s[1] > s[0]:
+                across.append((s[1] - s[0], min(c - s[0], s[1] - c) / ((s[1] - s[0]) / 2)))
+        centred[n] = round(float(min(b for _, b in sorted(across)[:2])), 2) if across else 0.0
     out = {
         f"{a} > {b}": round(float(1 - ok[len(names) + 9 * i : len(names) + 9 * (i + 1)].mean()), 2)
         for i, (a, b) in enumerate(bones)
@@ -234,8 +267,7 @@ def snap_inside(v, f, p, reach: float):
     cands = []
     for start in (p, q):
         for axis in range(3):
-            z = hits(v, f, start, axis)
-            for c in [(z[i] + z[i + 1]) / 2 for i in range(0, len(z) - 1, 2)]:
+            for c in [(a + b) / 2 for a, b in spans(v, f, start, axis)]:
                 x = start.copy()
                 x[axis] = c
                 if np.linalg.norm(x - p) < reach:
