@@ -4,13 +4,16 @@ Fun-ControlNet Tile 2.1 and painted back into the asset's own UVs (research 14).
 Input: any version with a UV-mapped, textured .glb (bake, project, refine). The views are orthographic, unlit
 renders of the base colour, one after another, each drawn from the texture as the earlier views left it; each
 generated view is colour-matched to its render at low frequency and back-projected (cos × z-test × eroded
-silhouette, the best view per texel wins by weight⁴). Mesh, UVs, ORM and normal map stay the input's.
+silhouette, none next to a depth step inside the view; the best view per texel wins by weight⁴). Mesh, UVs,
+ORM and normal map stay the input's. M66: with views "auto", up to `coverage` more views where the planned ones
+leave surface poorly seen (`coverage_views`).
 params: {strength: 1.0, face_strength: 0.5, scale: 0.85, prompt, zoom: "auto" | ≥ 0.5, views: "auto" | [{yaw,
 pitch, center, extent, prompt?}] (a view's own prompt instead of the asset's: one side of another material; name
 the material, not the place: "construction site" drew a scene into a hoarding's paint, the owner's agent
 2026-10-13) | [] (no redraw, no model: only `delight`), seed, tile: "full" | "lite" (default: full when
 it is downloaded and the budget holds 15.6 GB, else lite; M46c), texture_size: "keep" | 4096,
-delight: 0–1 (M43c: the bake's AO divided out of the base colour first)}. The prompt is `brief.prompt`, then
+delight: 0–1 (M43c: the bake's AO divided out of the base colour first), coverage: 0–8 (M66: the most views
+added where the auto views see too little; default 3, 0 off)}. The prompt is `brief.prompt`, then
 `prompt_full`. Outputs: mesh.glb, basecolor.png, orm.png,
 normal.png, views.png (each view before | after; none without views). Runs one-shot (not resident: `concepts` is the resident
 Z-Image, and two never share the card). ponytail: ~60 s load per run, make it a `concepts` op if the owner
@@ -50,13 +53,16 @@ YAWS = [0, 45, 315, 90, 270, 135, 225, 180]  # front first, then alternating sid
 SUFFIX = ", even flat lighting, plain grey background"
 FACE_DELTA = 8  # a texel `project` changed by more than this (0–255) is face
 ERODE = 6  # view pixels of the silhouette's edge that never paint
+COVER = 0.5  # M66: a face is seen when a view's paint weight on it reaches this (coverage_views)
 
 
 def _yaw_name(yaw: float, pitch: float) -> str:
-    """Only what holds for any facing: the model may face -Z, and "front view" on its back invites a face."""
+    """Only what holds for any facing: the model may face -Z, and "front view" on its back invites a face.
+    "three-quarter view" when the yaw is nearer a diagonal than a side (M66: coverage views and a user's views
+    come at any yaw; before, any yaw off a multiple of 90°)."""
     if pitch <= -30:
         return "from above"
-    return "three-quarter view" if yaw % 90 else ""
+    return "three-quarter view" if abs(yaw % 90 - 45) < 22.5 else ""
 
 
 def _part(k: int, n: int) -> str:
@@ -65,6 +71,11 @@ def _part(k: int, n: int) -> str:
     return "close-up of the " + (
         "upper part" if k == 0 else "lower part" if k == n - 1 else "middle part"
     )
+
+
+def _tall(lo, hi) -> bool:
+    """Taller than wide: the views from above are planned (and added, M66) only then."""
+    return hi[1] - lo[1] >= max(hi[0] - lo[0], hi[2] - lo[2])
 
 
 def texel_density(v: np.ndarray, faces: np.ndarray, uv: np.ndarray, size: int) -> float:
@@ -122,12 +133,98 @@ def plan_views(
                 continue
             c, ext = _fit(yaw, 0, [cx, cy, cz], e, pts)
             out.append({"yaw": yaw, "pitch": 0, "center": c, "extent": ext, "part": _part(k, n)})
-        if yaw == 0 and h >= max(
-            hi[0] - lo[0], hi[2] - lo[2]
-        ):  # from above, after the front: hats, shoulders
+        if yaw == 0 and _tall(lo, hi):  # from above, after the front: hats, shoulders
             c, ext = _fit(0, -60, [cx, ys[0], cz], e, band(ys[0] - e / 2, hi[1]))
             out.append({"yaw": 0, "pitch": -60, "center": c, "extent": ext, "part": _part(0, n)})
     return out
+
+
+def coverage_views(
+    v, faces, views, extra: int, e: float, dev: str = "cpu"
+) -> tuple[list[dict], dict]:
+    """M66 (after StableGen's greedy coverage, rebuilt on our z-buffer): up to `extra` views where the planned
+    ones leave surface poorly seen. A face is seen when a view's paint weight on it (the facing cos weight × the
+    z-test of its centroid, at 256²; not the silhouette's erosion or the depth steps `texel_weights` also leaves
+    out, so `seen_after` is an upper bound) reaches COVER. Candidates: 64 directions spread evenly over the upper
+    half of the sphere (no views from below: a prop's floor side is not seen in a game, and a redraw from below
+    invents; add when undersides show), on a model wider than tall only up to 14.5° above level (y ≤ 0.25:
+    plan_views' rule, no redraw from above onto a chest's lid or a wall's coping, where it invented tiles; a flat
+    top takes nothing from there, cos_weight's 0.25). Each round the one that makes the most poorly seen surface
+    seen, Σ area · (weight − best) · cos over those faces (the more squarely, the more texels its redraw has),
+    while that is 1 % of the surface or more; its window fitted to them, at least the auto windows' size e and at
+    most about 2e (half their zoom: the faces further than e from their gain-weighted middle are left to the next
+    rounds). Returns the added views and the area share seen before and after them."""
+    import torch
+
+    from steps._views import cos_weight, ortho, visible, zbuffer
+
+    tri = v[faces]
+    cr = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+    area = 0.5 * np.linalg.norm(cr, axis=1)
+    nrm = cr / (2 * area[:, None]).clip(1e-12)
+    mid = tri.mean(1)
+    f_t = torch.tensor(faces, dtype=torch.long, device=dev)
+
+    def weights(yaw, pitch, center, extent):
+        """[F] each face's paint weight in the view (either winding), and its cos."""
+        cam = ortho(yaw, pitch, center, extent)
+        pix_v, depth_v = (
+            torch.tensor(x, dtype=torch.float32, device=dev) for x in cam["project"](v)
+        )
+        zbuf = zbuffer(pix_v, depth_v, f_t, 256)[2]
+        pix, depth = cam["project"](mid)
+        seen = visible(
+            zbuf,
+            torch.tensor(pix.clip(0, 1), dtype=torch.float32, device=dev),
+            torch.tensor(depth, dtype=torch.float32, device=dev),
+            depth_v,
+        )
+        cos = np.abs((nrm * cam["towards"](mid)).sum(1))
+        return cos_weight(cos) * seen.cpu().numpy() * ((pix >= 0) & (pix <= 1)).all(1), cos
+
+    total = float(area.sum()) or 1.0
+    best = np.zeros(len(faces))
+    for w in views:
+        best = np.maximum(best, weights(w["yaw"], w["pitch"], w["center"], w["extent"])[0])
+    before = float(area[best >= COVER].sum() / total)
+    seen = {"seen_before": round(before, 3), "seen_after": round(before, 3)}
+    if area[best < COVER].sum() < 0.01 * total:  # no view can add 1 %
+        return [], seen
+    lo, hi = v.min(0), v.max(0)
+    centre, span = (lo + hi) / 2, 1.1 * float(np.linalg.norm(hi - lo))
+    top = 1.0 if _tall(lo, hi) else 0.25
+    n = 64
+    cands = []
+    # a Fibonacci spiral over the upper hemisphere (up to y = top): d is the direction from the model to the camera
+    for i in range(n):
+        y = (i + 0.5) / n * top
+        phi = i * math.pi * (3 - math.sqrt(5))
+        d = (math.sqrt(1 - y * y) * math.cos(phi), y, math.sqrt(1 - y * y) * math.sin(phi))
+        yaw, pitch = math.degrees(math.atan2(d[0], d[2])) % 360, -math.degrees(math.asin(d[1]))
+        cands.append((yaw, pitch, *weights(yaw, pitch, centre, span)))
+    added = []
+    for _ in range(extra):
+        poor = best < COVER
+        gains = [area * (q - best) * cos * (poor & (q >= COVER)) for _, _, q, cos in cands]
+        k = int(np.argmax([g.sum() for g in gains]))
+        if gains[k].sum() < 0.01 * total:
+            break
+        g = gains[k]
+        yaw, pitch, *_ = cands.pop(k)
+        # the faces it makes seen within e of their gain-weighted middle, on the view's plane
+        xy = ortho(yaw, pitch, [0, 0, 0], 1.0)["project"](mid)[0]
+        near = (g > 0) & (np.abs(xy - (g[:, None] * xy).sum(0) / g.sum()).max(1) <= e)
+        if not near.any():  # the middle in a gap between them: round the face that gains most
+            near = (g > 0) & (np.abs(xy - xy[np.argmax(g)]).max(1) <= e)
+        # fitted to their centroids: a long face's corners would widen it past 2e
+        c, ext = _fit(yaw, pitch, mid[near].mean(0), e, mid[near])
+        added.append(
+            {"yaw": round(yaw, 1), "pitch": round(pitch, 1), "center": c, "extent": ext, "part": ""}
+        )
+        # what the fitted window itself sees: the faces outside it are not covered by it
+        best = np.maximum(best, weights(yaw, pitch, c, ext)[0])
+    seen["seen_after"] = round(float(area[best >= COVER].sum() / total), 3)
+    return added, seen
 
 
 def face_mask(src: Path, size: int) -> np.ndarray | None:
@@ -167,11 +264,14 @@ def _params(params: dict) -> dict:
         "seed": params.get("seed", random.randrange(2**31)),
         "prompt": params.get("prompt"),
         "delight": params.get("delight", 0.0),
+        "coverage": params.get("coverage", 3),
     }
     bad = []
     num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
     if not (num(p["delight"]) and 0 <= p["delight"] <= 1):
         bad.append("delight 0–1")
+    if not (type(p["coverage"]) is int and 0 <= p["coverage"] <= 8):
+        bad.append("coverage 0–8 views")
     if not (num(p["strength"]) and 0.3 <= p["strength"] <= 1.0):
         bad.append("strength 0.3–1.0")
     if not (num(p["face_strength"]) and 0.1 <= p["face_strength"] <= 1.0):
@@ -494,6 +594,15 @@ def run(op, in_dir, out_dir, params):
     prompt = (p["prompt"] or asset_prompt(src)).strip()
     zoom = ZOOM if p["zoom"] == "auto" else float(p["zoom"])
     views = plan_views(v_np, faces_np, uv_np, size, zoom) if p["views"] == "auto" else p["views"]
+    seen = {}
+    if p["views"] == "auto" and p["coverage"]:
+        progress(0.01, "planning views for the surface the others miss")
+        e = VIEW / (zoom * texel_density(v_np, faces_np, uv_np, size))
+        more, seen = coverage_views(v_np, faces_np, views, p["coverage"], e, dev)
+        views += more
+        seen["coverage_views"] = len(more)
+        if dev == "cuda":
+            torch.cuda.empty_cache()  # the planning's z-buffers, before the model's 12–15.6 GB
     for w in views:
         w.setdefault("pitch", 0)
         w.setdefault(
@@ -682,6 +791,7 @@ def run(op, in_dir, out_dir, params):
         "delight": p["delight"],
         "ao_luma_corr_before": corr(base),
         "ao_luma_corr": corr(rgba),
+        **seen,  # M66: coverage_views, seen_before, seen_after
     }
     outputs = write_textured(out, mesh, mat, rgba, {"views": "views.png"} if thumbs else {})
     models = getattr(gen, "models", [])

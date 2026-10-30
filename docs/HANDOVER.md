@@ -8,19 +8,25 @@ generator, the chain, Blender, Claude and the exports have run here and their nu
 **Next session: start at section 2, "Next session".**
 
 Read first: `CLAUDE.md` (rules), this file, then `docs/IMPLEMENTATION.md` §0 (rules), §3 (frozen
-contracts), §6 (never-do) as needed. Install steps are `SETUP.md`. **This round's laptop checks (M64, M65):
+contracts), §6 (never-do) as needed. Install steps are `SETUP.md`. **This round's laptop checks (M64, M65, M66):
 `docs/LAPTOP.md`.** The first laptop session's checklist, done, is `docs/archive/LAPTOP.md`.
 
 ---
 
-## 1. Where things stand (2026-10-30: M64 and M65 built blind in the cloud, to validate on the laptop; M61–M63 merged, 0.2.0 out)
+## 1. Where things stand (2026-10-30: M64, M65 and M66 built blind in the cloud, to validate on the laptop; M61–M63 merged, 0.2.0 out)
 
-- **M65 (branch `ccr-3bd14478-pui9wd`, the cloud session, 2026-10-30; not run on a GPU)**: connect clips, transition
+- **M66 (branch `ccr-3bd14478-pui9wd`, the cloud session, 2026-10-30; not run on a GPU)**: `refine` sees more,
+  after the assessment of sakalond/StableGen (GPL: its methods only). A texel takes no colour from a view next to a
+  depth step inside it (no arm halo on the torso), and up to `coverage` (default 3) views are added where the auto
+  views see too little (`coverage_views`: greedy over 64 directions from above; on a model wider than tall only near
+  level, keeping the 2026-10-11 rule against redraws onto flat tops). Metrics `coverage_views`, `seen_before`,
+  `seen_after`. Not done: arm clearance, a painted masked edit. What to run: IMPLEMENTATION M66 "Needs the laptop".
+- **M65 (merged: PR #12, the cloud session, 2026-10-30; not run on a GPU)**: connect clips, transition
   only. On an animated model, "Connect two clips" asks Kimodo for the motion from one clip's last pose into another's
   first (or after one, or into one); the transition goes back on the model with the clips. The pose reaches Kimodo by
   the exact inverse of the retarget (`steps/_connect.py`). The joined clip and the path viewer come later (the
   maintainer, 2026-10-30). What to run: IMPLEMENTATION M65 "Needs the laptop".
-- **M64 (branch `ccr-3bd14478-pui9wd`, the cloud session, 2026-10-29; not run on a GPU)**: motion from video gets the
+- **M64 (merged: PR #12, the cloud session, 2026-10-29; not run on a GPU)**: motion from video gets the
   other people in the clip (`metrics.people`, "Make the other N's motion too" on the motion's page), the editor's
   Find hand contacts (a palm on the floor locked like a foot), and a panning camera (`camera: "panning"`: the camera's
   turn read off the background with OpenCV and given to GEM-X). What to run: IMPLEMENTATION M64 "Needs the laptop".
@@ -230,6 +236,8 @@ Done and recorded elsewhere: the 2D roadmap (M54–M57) and the bigger GPUs (M46
 `docs/bench/m46.md`, research 16; what is left there is the users' GPU reports for the 24/32 GB thresholds), the
 agent's hoarding findings 1–22 (4 built as Setup's Start Blender; 5 decided: the port stays 8000).
 
+0. **Validate M66** (built in the cloud, 2026-10-30, never run on a GPU): `docs/LAPTOP.md` part 3, refine on the
+   chest and a character with the defaults, beside an earlier refine of the same parent.
 0. **Validate M65** (built in the cloud, 2026-10-30, never run on a GPU): `docs/LAPTOP.md` part 1. Check 0
    first (one import, seconds), then the seam numbers from `python -m steps._connect`.
 0. **Validate M64** (built in the cloud, 2026-10-29, never run on a GPU): `docs/LAPTOP.md` part 2, the four laptop

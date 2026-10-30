@@ -2085,7 +2085,7 @@ function DetailPanel(props: { asset: string; version: Meta; versions: Meta[]; ch
       )}
       <p className="muted">
         Click Refine texture to redraw the texture's fine detail (buttons, stitching, wood grain) from close-up views. The shape and the colours stay. It takes
-        about 4–5 minutes. To work on one place, frame it in the 3D view, describe what should be there, and click Redraw this view: the square in the
+        about 4–6 minutes. To work on one place, frame it in the 3D view, describe what should be there, and click Redraw this view: the square in the
         middle of the view is redrawn, the rest stays (a face from the picture stays too).
       </p>
       {props.missing && (
@@ -3336,6 +3336,7 @@ const STEP_HELP: Record<string, StepHelp> = {
       ["texture_size", "keep or 4096"],
       ["delight", "0 to 1: the baked shadows taken out of the colours first, using the bake's ambient occlusion (default 0)"],
       ["views", "auto, or [] for no redraw (only delight; no model, seconds)"],
+      ["coverage", "0 to 8: the most views added where the auto views see too little (default 3, 0 off)"],
     ],
     example: { strength: 1 },
   },

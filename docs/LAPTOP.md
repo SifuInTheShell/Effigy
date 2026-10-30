@@ -1,21 +1,21 @@
-# Laptop checks: M64 and M65 (built in the cloud, 2026-10-29 and 2026-10-30)
+# Laptop checks: M64, M65 and M66 (built in the cloud, 2026-10-29 and 2026-10-30)
 
-For the agent or the maintainer on the reference laptop. Both milestones were built in a cloud session without a
-GPU, Blender, Kimodo's weights or GEM-X. Everything that could run there passed (the unit tests, the Playwright
+For the agent or the maintainer on the reference laptop. All three milestones were built in a cloud session
+without a GPU, Blender, Kimodo's weights, GEM-X or the Tile model. Everything that could run there passed (the unit tests, the Playwright
 suite, Kimodo's own skeleton and constraint code on the CPU). Nothing below has run yet. Tick the boxes, record the
 numbers, and never tick a check that was not run (IMPLEMENTATION §6).
 
-What each milestone is, and why: IMPLEMENTATION.md, sections M64 and M65 (near the end of §4).
+What each milestone is, and why: IMPLEMENTATION.md, sections M64, M65 and M66 (near the end of §4).
 
 ## 0. Get the code
 
-- [ ] The work came in through pull request #12 (branch `ccr-3bd14478-pui9wd`). Once #12 is merged it is on `main`:
+- [ ] M64 and M65 came in through pull request #12, merged: they are on `main`. M66 is on the branch
+  `ccr-3bd14478-pui9wd` until its own pull request is merged; use the branch while it is open:
   ```
-  git switch main
-  git pull
+  git fetch origin ccr-3bd14478-pui9wd
+  git switch ccr-3bd14478-pui9wd
   ```
-  While #12 is still open, use its branch instead: `git fetch origin ccr-3bd14478-pui9wd`, then
-  `git switch ccr-3bd14478-pui9wd`.
+  Once merged: `git switch main`, then `git pull`.
 - [ ] No new package, model or venv. Rebuild the UI and restart the app (`run.bat`): step code changed, and a
   resident Kimodo or GEM-X worker would keep the old code until it is evicted.
   ```
@@ -88,11 +88,35 @@ Needs the Setup card **Motion from video** installed.
   `camera_unread` and `camera_turn_deg`. Doubt this one first: a camera that also walks (a dolly) reads as a turn, so the person drifts.
 - [ ] **Record** the numbers in `docs/bench/m34.md`, in an "M64" section.
 
-## 3. When done
+## 3. M66 Refine sees more: coverage views, no colour next to a depth step
+
+Needs the Setup card **Texture detail** installed (the Tile model). No new download. The chest and a character of
+the M43b bench (the pirate, or the viking), each from its `bake` version (or the version M43b's refine had as parent).
+
+- [ ] **Check 1: the defaults.** Run Texture detail on the character's bake with the defaults. From the new refine
+  version's `meta.json` metrics record `coverage_views`, `seen_before`, `seen_after`, `views`, `views_planned`,
+  `seconds`, `refined`, `seam_delta`. Open `views.png`: the added views are its last pairs (as many as
+  `coverage_views`). They should look onto what the side views miss (the shoulders' tops, the hat's brim, between
+  the arms and the body), never from below and never into the floor.
+- [ ] **Check 2: no halo next to a depth step.** Put the new texture beside the earlier refine of the same parent
+  (made before M66): no arm-coloured band on the torso where an arm crosses it in the front and side views, none on
+  the legs behind the hands. `refined` may be a little lower than before (texels next to steps are left to the
+  other views or kept). Look at the shoulders and the head's top too: seen_after above seen_before should show as
+  more redrawn detail there, not as blotches.
+- [ ] **Check 3: the chest.** The same on the chest's bake: it is wider than tall, so nothing is added from above
+  (in `views_used`, every pitch is 0 or above −15). The lid keeps the input's colour, as before M66 (no invented
+  tiles).
+- [ ] **Check 4: the cost.** The character again with `coverage` 0 (over MCP:
+  `run_step(asset, <bake version>, "refine", {"coverage": 0})`): `views` equals `views_planned` and has no
+  `coverage_views`; `seconds` about check 1's minus `coverage_views` × `seconds_per_view`.
+- [ ] **Record** it all in a new `docs/bench/m66.md`: the asset, the numbers above, and what you saw in checks 2
+  and 3.
+
+## 4. When done
 
 - Commit the bench files and this file's ticks on a branch of your own, and open a pull request; the template fills
   itself in. Put the measured numbers in the PR's Measurements line.
 - A failure with a small fix: fix it on that branch, one milestone per PR (IMPLEMENTATION §0 and §7). Anything
   larger: describe it (the job list at the bottom of the app shows the error, the `run.bat` window has more) and stop.
-- After both pass: tick the acceptance in IMPLEMENTATION M64 and M65, update HANDOVER §1 and §2, and move this
-  file to `docs/archive/`.
+- After all three pass: tick the acceptance in IMPLEMENTATION M64, M65 and M66, update HANDOVER §1 and §2, and
+  move this file to `docs/archive/`.

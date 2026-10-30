@@ -17,7 +17,7 @@ from PIL import Image
 from steps import refine
 from steps._bake import heal_seams, rasterize_uv, seams, write_glb
 from steps._common import StepError
-from steps._views import ortho, render, texel_weights
+from steps._views import depth_edges, ortho, render, texel_weights, zbuffer
 from tests.test_project import _box
 
 ATLAS = 96
@@ -53,6 +53,61 @@ def test_a_wide_window_is_widened_to_fit():
     )  # wider than tall: no view from above onto its flat top
 
 
+def test_a_ledge_below_the_top_window_gets_a_view_from_above():
+    v, f, uv, _, _ = _box()
+    # a 1 × 0.4 × 1 m plinth under a 0.3 × 0.3 × 2 m post: taller than wide, four height windows
+    vv = np.r_[v * [2, 0.8, 2] + [0, 0.2, 0], v * [0.6, 4, 0.6] + [0, 1.4, 0]]
+    ff = np.r_[f, f + len(v)]
+    uu = np.r_[uv, uv]
+    views = refine.plan_views(vv, ff, uu, 2048)
+    # the planned view from above: the top window only
+    assert [w["pitch"] for w in views].count(-60) == 1
+    e = refine.VIEW / (refine.ZOOM * refine.texel_density(vv, ff, uu, 2048))
+    fine = trimesh.remesh.subdivide(*trimesh.remesh.subdivide(vv, ff))  # 16 faces a side
+    added, seen = refine.coverage_views(*fine, views, 3, e)
+    # the most squarely onto the plinth's top first; the post's shadow in it (0.3 × 0.25 m, 1.2 %) from another
+    assert len(added) == 2 and added[0]["pitch"] < -80 and added[1]["pitch"] < -30
+    assert all(w["extent"] >= e - 1e-9 for w in added)
+    # 6.18 m² in all; unseen before: the plinth's top (1) and floor side (1), the post's foot (0.09, on the plinth);
+    # seen after, by the windows as fitted: the top round the post (0.91)
+    assert seen["seen_before"] == pytest.approx(4.09 / 6.18, abs=0.01)
+    assert seen["seen_after"] == pytest.approx(5.0 / 6.18, abs=0.01)
+
+
+def test_a_coverage_window_keeps_its_zoom():
+    """Ledges far apart on a pole, all seen from one side: no window wider than about 2e (half the zoom); the far
+    ones are left to the next views."""
+    v, f, uv, _, _ = _box()
+    ledges = [v * [2, 0.16, 2] + [dx, y, 0] for dx, y in ((0.25, 0.4), (-0.25, 1.0), (0.25, 1.6))]
+    vv = np.concatenate([v * [0.4, 8, 0.4] + [0, 1, 0], *ledges])
+    ff = np.concatenate([f + 24 * i for i in range(4)])
+    uu = np.concatenate([uv] * 4)
+    e = refine.VIEW / (refine.ZOOM * refine.texel_density(vv, ff, uu, 4096))
+    fine = trimesh.remesh.subdivide(*trimesh.remesh.subdivide(vv, ff))
+    added, seen = refine.coverage_views(*fine, refine.plan_views(vv, ff, uu, 4096), 3, e)
+    assert len(added) == 3 and all(e - 1e-9 <= w["extent"] <= 2.1 * e for w in added)
+    assert seen["seen_after"] > seen["seen_before"] + 0.1
+
+
+def test_a_flat_top_wider_than_tall_is_left_alone():
+    v, f, uv, _, _ = _box()
+    # 4 × 0.5 × 0.5 m: no view from above, planned or added (a chest's lid, a wall's coping)
+    v = v * [8, 1, 1]
+    e = refine.VIEW / (refine.ZOOM * refine.texel_density(v, f, uv, 256))
+    added, seen = refine.coverage_views(v, f, refine.plan_views(v, f, uv, 256), 3, e)
+    assert added == [] and seen["seen_before"] == seen["seen_after"]
+    assert seen["seen_after"] == pytest.approx(
+        4.5 / 8.5, abs=1e-3
+    )  # the top and the floor side unseen
+
+
+def test_the_cube_needs_no_more_views():
+    v, f, uv, _, _ = _box()
+    added, seen = refine.coverage_views(v, f, refine.plan_views(v, f, uv, ATLAS), 3, 1.0)
+    assert added == [] and seen["seen_before"] == seen["seen_after"]
+    assert seen["seen_after"] == pytest.approx(5 / 6, abs=1e-3)  # all but the floor side
+
+
 def _cube_texels(dev="cpu"):
     v, f, uv, _, cells = _box()
     ft = torch.tensor(f, dtype=torch.long)
@@ -81,6 +136,56 @@ def test_back_projection_paints_what_the_view_sees():
     assert at((2, 1)) == pytest.approx(1.0)  # the front: full weight
     assert at((0, 1)) == pytest.approx(s * s * (3 - 2 * s), abs=0.02)  # grazing: partly
     assert at((2, -1)) == 0 and at((0, -1)) == 0  # the back and the far side: untouched
+
+
+def test_nothing_is_painted_next_to_a_depth_step():
+    """A small box standing 0.15 m off the cube's front face: the face around it is the view's blend of the two
+    surfaces, so it takes nothing from the view there; further out it takes all."""
+    v, f, _, uvt, _, corners, w3, pts, _ = _cube_texels()
+    vv = np.r_[v, v * 0.4 + [0, 0, 0.5]]
+    ff = np.r_[f, f + len(v)]
+    cam = ortho(0, 0, [0, 0, 0], 1.2)
+    _, a, _, (_, _, zbuf, _, depth_v) = render(
+        torch.full((ATLAS, ATLAS, 3), 128.0),
+        torch.tensor(np.r_[uvt, uvt], dtype=torch.float32),
+        torch.tensor(ff),
+        vv,
+        cam,
+        256,
+    )
+    wt, _ = texel_weights(cam, a, zbuf, depth_v, pts, vv, ff, corners, w3)
+    front = np.abs(pts[:, 2] - 0.25) < 1e-6
+    r = np.abs(pts[:, :2]).max(1)  # the small box covers r < 0.1; 6 view px are 0.028 m
+    assert (wt[front & (r > 0.1) & (r < 0.12)] == 0).all()
+    assert (wt[front & (r > 0.15) & (r < 0.2)] == 1).all()
+
+
+@pytest.mark.parametrize("az", [0, 45])  # tilted along the pixel grid and across its diagonal
+def test_a_surfaces_own_slope_is_no_depth_step(az):
+    """A square turned 75° from the view (cos 0.26: the steepest that still paints) has no depth step; at 84° it is
+    one all over (its 3×3 neighbourhoods span more than 16 pixel widths)."""
+    sq = np.array([[-0.4, -0.4, 0], [0.4, -0.4, 0], [0.4, 0.4, 0], [-0.4, 0.4, 0]])
+    f = torch.tensor([[0, 1, 2], [0, 2, 3]])
+    cam = ortho(0, 0, [0, 0, 0], 1.0)
+    for deg, flagged in ((75, 0.0), (84, 1.0)):
+        k = np.array(
+            [-math.sin(math.radians(az)), math.cos(math.radians(az)), 0.0]
+        )  # the turn's axis
+        kx = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+        t = math.radians(deg)
+        rot = np.eye(3) + math.sin(t) * kx + (1 - math.cos(t)) * kx @ kx  # Rodrigues
+        pix, depth = (torch.tensor(x, dtype=torch.float32) for x in cam["project"](sq @ rot.T))
+        zbuf = zbuffer(pix, depth, f, 512)[2]
+        drawn = torch.isfinite(zbuf).float()
+        inner = -torch.nn.functional.max_pool2d(-drawn[None, None], 3, 1, 1)[0, 0] > 0
+        assert float(depth_edges(zbuf, 1.0, 0)[inner].mean()) == flagged, (deg, az)
+
+
+def test_the_yaw_names_the_diagonals_only():
+    names = {y: refine._yaw_name(y, 0) for y in (0, 10, 30, 45, 60, 80, 90, 315)}
+    assert [y for y, name in names.items() if name == "three-quarter view"] == [30, 45, 60, 315]
+    assert set(names.values()) == {"", "three-quarter view"}
+    assert refine._yaw_name(137.5, -40) == "from above"
 
 
 def test_the_best_view_wins_and_fades_into_the_original():
@@ -175,6 +280,8 @@ def test_a_run_with_an_identity_generator_keeps_the_texture(tmp_path, monkeypatc
     assert all((out / x).is_file() for x in res["outputs"].values())
     m = res["metrics"]
     assert m["views"] == 9 and m["face_views"] == 0 and gen.calls == [1.0] * 9
+    # all but the floor side seen, no views added
+    assert m["coverage_views"] == 0 and m["seen_after"] == pytest.approx(5 / 6, abs=1e-3)
     assert m["detail_metric"] == "coherence"
     assert (
         m["drift"] < 1.5 and m["refined"] > 0.5 and 0.5 < m["detail"] < 1.5
@@ -193,6 +300,29 @@ def test_a_run_with_an_identity_generator_keeps_the_texture(tmp_path, monkeypatc
     assert (np.asarray(Image.open(out / "normal.png")) == normal_map).all()
     glb = trimesh.load(out / "mesh.glb", force="mesh", process=False)
     assert len(glb.faces) == 12
+
+
+@pytest.mark.parametrize("coverage", [3, 0])
+def test_a_run_adds_the_coverage_views(tmp_path, monkeypatch, coverage):
+    bake, *_ = _bake(tmp_path)
+    gen, asked = _Identity(), []
+    top = {"yaw": 0, "pitch": -85, "center": [0, 0, 0], "extent": 1.0, "part": ""}
+
+    def more(v, faces, views, extra, e, dev):
+        asked.append((len(views), extra))
+        return [top], {"seen_before": 0.5, "seen_after": 0.9}
+
+    monkeypatch.setattr(refine, "VIEW", 256)
+    monkeypatch.setattr(refine, "_generator", lambda tile: gen)
+    monkeypatch.setattr(refine, "coverage_views", more)
+    out = tmp_path / "asset" / "040_refine"
+    out.mkdir()
+    m = refine.run("run", str(bake), str(out), {"coverage": coverage})["metrics"]
+    if coverage:
+        assert asked == [(9, 3)] and m["views"] == 10 and m["views_used"][-1]["pitch"] == -85
+        assert (m["coverage_views"], m["seen_before"], m["seen_after"]) == (1, 0.5, 0.9)
+    else:
+        assert asked == [] and m["views"] == 9 and "coverage_views" not in m
 
 
 def test_a_view_takes_its_own_prompt(tmp_path, monkeypatch):
@@ -311,6 +441,9 @@ def test_delight_needs_the_bakes_ao(tmp_path):
         {"views": [{"yaw": 0, "center": [0, 0, 0], "extent": 1, "prompt": " "}]},
         {"views": []},
         {"tile": "huge"},
+        {"coverage": 9},
+        {"coverage": 1.5},
+        {"coverage": True},
     ],
 )
 def test_bad_params(tmp_path, params):
