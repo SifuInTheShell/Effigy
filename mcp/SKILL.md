@@ -101,7 +101,10 @@ Import page (Put an animation on one of your characters) or the Animate panel: `
 `rig_fit`) -> `rig_skin` (`{"engine": "auto"}`; `{"rigid": {"Helmet": "Head"}}` for parts that do not bend)
 -> `anim` (`{"clips": ["Idle_A", "Walk", "Jog"]}`: names from `GET /api/clips`, run `describe_steps("anim")`;
 creatures have their own clips) or `motion` (`{"prompt": "A person waves.", "seconds": 5}`, text to motion,
-human skeletons only) or `mocap` from a video. Read `qa.json` (`read_file`) after `rig_skin`.
+human skeletons only) or `mocap` from a video. Read `qa.json` (`read_file`) after `rig_skin`. A transition between
+two clips of an animated version: `run_step(asset, <anim version>, "motion", {"from": "Idle_A", "to": "Walk",
+"seconds": 1.5})` (one side alone continues or leads in; `turn` degrees, `travel` metres), then `anim` on the skinned
+version with the clips plus the new motion version; `metrics.seam_cm` is how far its ends are from the clips' poses.
 
 ## anim_edit: correcting a clip
 

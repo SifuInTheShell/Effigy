@@ -13,8 +13,13 @@ checklist, done, is `docs/archive/LAPTOP.md`.
 
 ---
 
-## 1. Where things stand (2026-10-29: M64 built blind in the cloud, to validate on the laptop; M61–M63 merged, 0.2.0 out)
+## 1. Where things stand (2026-10-30: M64 and M65 built blind in the cloud, to validate on the laptop; M61–M63 merged, 0.2.0 out)
 
+- **M65 (branch `ccr-3bd14478-pui9wd`, the cloud session, 2026-10-30; not run on a GPU)**: connect clips, transition
+  only. On an animated model, "Connect two clips" asks Kimodo for the motion from one clip's last pose into another's
+  first (or after one, or into one); the transition goes back on the model with the clips. The pose reaches Kimodo by
+  the exact inverse of the retarget (`steps/_connect.py`). The joined clip and the path viewer come later (the
+  maintainer, 2026-10-30). What to run: IMPLEMENTATION M65 "Needs the laptop".
 - **M64 (branch `ccr-3bd14478-pui9wd`, the cloud session, 2026-10-29; not run on a GPU)**: motion from video gets the
   other people in the clip (`metrics.people`, "Make the other N's motion too" on the motion's page), the editor's
   Find hand contacts (a palm on the floor locked like a foot), and a panning camera (`camera: "panning"`: the camera's
@@ -225,6 +230,8 @@ Done and recorded elsewhere: the 2D roadmap (M54–M57) and the bigger GPUs (M46
 `docs/bench/m46.md`, research 16; what is left there is the users' GPU reports for the 24/32 GB thresholds), the
 agent's hoarding findings 1–22 (4 built as Setup's Start Blender; 5 decided: the port stays 8000).
 
+0. **Validate M65** (built in the cloud, 2026-10-30, never run on a GPU): the five laptop checks in IMPLEMENTATION
+   M65's acceptance. Doubt first: Kimodo's post-processing without its C++ corrector (check 5), then the seams by eye.
 0. **Validate M64** (built in the cloud, 2026-10-29, never run on a GPU): the four laptop checks in IMPLEMENTATION
    M64's acceptance (two people, a push-up clip's hand locks, a panned walk in "still" and "panning", the numbers into
    `docs/bench/m34.md`). The panning camera is the one to doubt first: a camera that also walks reads as a turn.

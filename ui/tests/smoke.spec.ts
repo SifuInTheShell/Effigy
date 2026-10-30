@@ -300,6 +300,54 @@ test("Animation: the time bar steps a clip; the editor keys a bone, retimes the 
   expect(errors).toEqual([]);
 });
 
+test("Connect clips (M65): the animated model asks Kimodo for a transition; its page puts it on with the clips", async ({ page }) => {
+  const posted = await mockAsset(page, "mock_connect", [
+    { version: "010_upload", step: "upload", parent: null, outputs: { mesh: "mesh.glb" } },
+    { version: "020_rig_skin", step: "rig_skin", parent: "010_upload", outputs: { rigged: "rigged.glb", skeleton: "skeleton.json", qa: "qa.json" } },
+    {
+      version: "030_anim",
+      step: "anim",
+      parent: "020_rig_skin",
+      params: { clips: ["Idle_A", "Walk"] },
+      outputs: { rigged_anim: "rigged_anim.glb", clips: "clips.json", skeleton: "skeleton.json" },
+    },
+  ]);
+  await page.route("**/files/mock_connect/*/rigged_anim.glb", (r) => r.fulfill({ body: ANIM, contentType: "model/gltf-binary" }));
+  await page.route("**/files/mock_connect/*/clips.json", (r) =>
+    r.fulfill({ json: { clips: [{ name: "Idle_A", frames: 12, seconds: 0.5 }, { name: "Walk", frames: 24, seconds: 1 }], fps: 24, missing: [] } }),
+  );
+  await page.route("**/files/mock_connect/*/skeleton.json", (r) => r.fulfill({ json: { template: "mixamo52", joints: [] } }));
+  await page.route("**/files/mock_connect/020_rig_skin/qa.json", (r) => r.fulfill({ json: { items: {} } }));
+  let parent = "";
+  await page.route("**/api/assets/mock_connect/steps/*", (r) => ((parent = r.request().postDataJSON().parent), r.fallback()));
+  await page.goto("/#/asset/mock_connect?version=030_anim");
+  await page.getByText("Connect two clips").click();
+  await expect(page.getByLabel("Connect from")).toHaveValue("Idle_A");
+  await expect(page.getByLabel("Connect to")).toHaveValue("Walk");
+  await page.getByLabel("Turn degrees").fill("90");
+  await page.getByLabel("What happens in between").fill("turns left and starts walking");
+  await page.getByRole("button", { name: "Make transition" }).click();
+  await expect.poll(() => posted.length).toBe(1);
+  expect(posted[0]).toEqual(["motion", { from: "Idle_A", to: "Walk", turn: 90, prompt: "turns left and starts walking", seconds: 1.5 }]);
+  expect(parent).toBe("030_anim"); // the clips' version is the input
+  // the transition's page: what it holds, and back onto the skinned model under it, next to the clips it was made from
+  await page.goto("/#/asset/mock_connect?version=040_motion");
+  await expect(page.getByRole("heading", { name: "Transition" })).toBeVisible();
+  await expect(page.getByText("it starts at the last pose of Idle_A and ends at the first pose of Walk")).toBeVisible();
+  await page.getByRole("button", { name: "Put this motion on the model with its clips" }).click();
+  await expect.poll(() => posted.length).toBe(2);
+  expect(posted[1]).toEqual(["anim", { clips: ["Idle_A", "Walk", "040_motion"] }]);
+  expect(parent).toBe("020_rig_skin");
+  // leaving one side empty continues a clip: no turn or travel then
+  await page.goto("/#/asset/mock_connect?version=030_anim");
+  await page.getByText("Connect two clips").click();
+  await page.getByLabel("Connect to").selectOption("");
+  await expect(page.getByLabel("Turn degrees")).toHaveCount(0);
+  await page.getByRole("button", { name: "Make transition" }).click();
+  await expect.poll(() => posted.length).toBe(3);
+  expect(posted[2]).toEqual(["motion", { from: "Idle_A", seconds: 1.5 }]);
+});
+
 test("Animation editor: duplicate, rename, edit and save a copy (from), delete it", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));

@@ -438,6 +438,14 @@ On the skinned model, **Animation source** has four ways:
 The animated model plays its clips from the view's **Animation** menu. A clip whose bones did not match says it
 **never moves**.
 
+**Connect two clips** (on the animated model of a person): pick **From** and **To** among its clips, optionally say
+what happens in between (*turns and draws the sword*), the **Length** (0.5 to 8 seconds), and with a **To** clip its
+**Turn** (degrees, left positive) and **Travel** (metres straight on; empty: from how fast the two clips move).
+**Make transition**: Kimodo makes the motion that starts on the last pose of the first clip and ends on the first
+pose of the second. Leave **From** or **To** empty to continue a clip or to lead into one. The transition opens on
+its own page; **Put this motion on the model with its clips** adds it next to the clips it connects. In a game it
+plays between the two. Needs the Setup card **Text to motion**.
+
 ### The animation editor
 
 **Edit animation** opens the editor: the timeline under the view, the tools in the panel. It changes a copy;

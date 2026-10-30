@@ -3923,8 +3923,16 @@ function MotionInfo(props: { asset: string; version: Meta; versions: Meta[]; cha
   const v = props.version;
   const m = v.metrics ?? {};
   const [other, setOther] = useState(""); // a file's other animation, to bring in too
+  // M65: a transition was made from an animated version's clips: it goes back on with them (the version's own clips, or
+  // its base animation's when hand edits sit on top), onto the skinned model under it
+  const connect = v.step === "motion" && !!(v.params?.from || v.params?.to);
+  const byId = (id: string | null | undefined) => props.versions.find((x) => x.version === id);
+  const source = connect ? byId(v.parent) : undefined;
+  const below = (x: Meta | undefined, step: string): Meta | undefined => (!x || actsAs(x) === step ? x : below(byId(x.parent), step));
+  const base = below(source, "anim");
+  const keep = base?.step === "anim" ? ((base.params?.clips as string[] | undefined) ?? []).filter((c) => c !== v.version) : [];
   // the skinned model it was made for: recorded with a video motion, the parent of a text motion, else the newest
-  const made = String(v.params?.for ?? (v.step === "motion" ? v.parent : "") ?? "");
+  const made = String(connect ? (below(source, "rig_skin")?.version ?? "") : (v.params?.for ?? (v.step === "motion" ? v.parent : "") ?? ""));
   const skinned = props.versions.filter((x) => actsAs(x) === "rig_skin");
   const target = skinned.find((x) => x.version === made) ?? skinned.at(-1) ?? null;
   const putOn = target ? (
@@ -3934,8 +3942,17 @@ function MotionInfo(props: { asset: string; version: Meta; versions: Meta[]; cha
         {label(target)}" ({target.version.slice(0, 3)}) as a new version, which opens and plays in the viewer. Later you can add more motions or ready-made
         clips there, under Character.
       </p>
-      <button className="primary" disabled={busy} onClick={() => run(() => props.chain(props.asset, target.version, [["anim", { clips: [v.version] }]]))}>
-        Put this motion on the model
+      {connect && source && source !== base && (
+        <p className="muted">
+          The hand edits of "{label(source)}" stay there: the new version has {base ? `the clips of "${label(base)}"` : "no other clips"} and this transition.
+        </p>
+      )}
+      <button
+        className="primary"
+        disabled={busy}
+        onClick={() => run(() => props.chain(props.asset, target.version, [["anim", { clips: [...keep, v.version] }]]))}
+      >
+        Put this motion on the model{keep.length ? " with its clips" : ""}
       </button>
     </>
   ) : (
@@ -4008,6 +4025,23 @@ function MotionInfo(props: { asset: string; version: Meta; versions: Meta[]; cha
       </section>
     );
   }
+  if (connect)
+    return (
+      <section>
+        <h3>Transition</h3>
+        <p>
+          "{String(m.name ?? "")}", {String(m.seconds ?? "?")} s
+          {m.generate_seconds != null && `, made in ${Number(m.generate_seconds).toFixed(0)} s`}: it starts{" "}
+          {v.params?.from ? `at the last pose of ${String(v.params.from)}` : "freely"} and ends {v.params?.to ? `at the first pose of ${String(v.params.to)}` : "freely"}.
+        </p>
+        {Array.isArray(m.seam_cm) && (
+          <p className="muted">
+            Its ends are {(m.seam_cm as number[]).join(" and ")} cm from those poses (on Kimodo's skeleton); a game blends the rest away when it switches clips.
+          </p>
+        )}
+        {putOn}
+      </section>
+    );
   return (
     <section>
       <h3>Motion from text</h3>
@@ -4020,14 +4054,27 @@ function MotionInfo(props: { asset: string; version: Meta; versions: Meta[]; cha
   );
 }
 
-function AnimInfo(props: { asset: string; version: Meta; onPick: (version: string) => void; onEdit: () => void }) {
+function AnimInfo(props: {
+  asset: string;
+  version: Meta;
+  onPick: (version: string) => void;
+  onEdit: () => void;
+  onRun: (params: object, step?: string, parent?: string) => void;
+  busy: boolean;
+}) {
   const [clips, setClips] = useState<{ name: string; seconds: number }[] | null>(null);
   const [still, setStill] = useState<string[]>([]);
+  const [person, setPerson] = useState(false); // M65: Kimodo connects clips of people only
   useEffect(() => {
     let live = true;
     fetch(fileUrl(props.asset, props.version.version, props.version.outputs.clips))
       .then((r) => r.json())
       .then((c) => live && (setClips(c.clips), setStill(c.still ?? [])));
+    if (props.version.outputs.skeleton)
+      fetch(fileUrl(props.asset, props.version.version, props.version.outputs.skeleton))
+        .then((r) => r.json())
+        .then((sk) => live && setPerson((sk.template ?? "mixamo52") === "mixamo52"))
+        .catch(() => undefined);
     return () => {
       live = false;
     };
@@ -4063,7 +4110,84 @@ function AnimInfo(props: { asset: string; version: Meta; onPick: (version: strin
         )}
       </div>
       <p className="muted">Edit animation opens a timeline under the view: turn bones at any frame to correct a pose, trim, loop or smooth a clip.</p>
+      {person && !!clips?.length && (
+        <ConnectClips clips={clips.map((c) => c.name)} busy={props.busy} onRun={(params) => props.onRun(params, "motion", props.version.version)} />
+      )}
     </div>
+  );
+}
+
+// M65: Kimodo makes the motion from one of this model's clips into another (or after one, or into one): a transition clip,
+// the motion step with from / to (steps/_connect.py)
+function ConnectClips(props: { clips: string[]; busy: boolean; onRun: (params: object) => void }) {
+  const [from, setFrom] = useState(props.clips[0] ?? "");
+  const [to, setTo] = useState(props.clips[1] ?? "");
+  const [prompt, setPrompt] = useState("");
+  const [seconds, setSeconds] = useState(1.5);
+  const [turn, setTurn] = useState(0);
+  const [travel, setTravel] = useState("");
+  const pick = (label: string, value: string, set: (v: string) => void, none: string) => (
+    <label>
+      {label}{" "}
+      <select aria-label={`Connect ${label.toLowerCase()}`} value={value} onChange={(e) => set(e.target.value)}>
+        <option value="">{none}</option>
+        {props.clips.map((c) => (
+          <option key={c}>{c}</option>
+        ))}
+      </select>
+    </label>
+  );
+  const make = () =>
+    props.onRun({
+      ...(from ? { from } : {}),
+      ...(to ? { to, turn } : {}),
+      ...(to && travel.trim() !== "" ? { travel: Number(travel) } : {}),
+      ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
+      seconds,
+    });
+  return (
+    <details>
+      <summary>Connect two clips</summary>
+      <div className="stack">
+        <p className="muted">
+          Kimodo makes the motion that leads from the end of one clip into the start of another, for example from Idle into a fighting stance. Leave one side
+          empty to continue a clip or to lead into one. The result is a transition clip: in the game it plays between the two. Its page puts it on the model with
+          the other clips. Needs the Setup card Text to motion.
+        </p>
+        <div className="row">
+          {pick("From", from, setFrom, "nothing: start freely")}
+          {pick("To", to, setTo, "nothing: end freely")}
+        </div>
+        <input
+          type="text"
+          aria-label="What happens in between"
+          placeholder="What happens in between (optional), for example: turns and draws the sword"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+        <div className="row">
+          <label>
+            Length{" "}
+            <input type="number" aria-label="Transition seconds" min={0.5} max={8} step={0.5} value={seconds} style={{ width: "4.5em" }} onChange={(e) => setSeconds(Number(e.target.value))} /> s
+          </label>
+          {to && (
+            <>
+              <label title="Which way the second clip faces from where the first ended: left positive">
+                Turn{" "}
+                <input type="number" aria-label="Turn degrees" min={-180} max={180} step={15} value={turn} style={{ width: "4.5em" }} onChange={(e) => setTurn(Number(e.target.value))} /> °
+              </label>
+              <label title="How far straight on the second clip starts; empty: from how fast the two clips move">
+                Travel{" "}
+                <input type="number" aria-label="Travel metres" step={0.25} placeholder="auto" value={travel} style={{ width: "4.5em" }} onChange={(e) => setTravel(e.target.value)} /> m
+              </label>
+            </>
+          )}
+        </div>
+        <button disabled={props.busy || (!from && !to) || !(seconds >= 0.5 && seconds <= 8) || !(Math.abs(turn) <= 180)} onClick={make}>
+          Make transition
+        </button>
+      </div>
+    </details>
   );
 }
 
@@ -4417,7 +4541,7 @@ function RigPanel(props: {
           onClose={() => setAnimEditing(false)}
         />
       ) : (
-        <AnimInfo asset={props.asset} version={v} onPick={props.onPick} onEdit={() => setAnimEditing(true)} />
+        <AnimInfo asset={props.asset} version={v} onPick={props.onPick} onEdit={() => setAnimEditing(true)} onRun={onRun} busy={busy} />
       );
     if (step === "rig_skin") return <SkinQA asset={props.asset} version={v} motions={props.motions} onPick={props.onPick} onRun={onRun} busy={busy} />;
     if (!data) return <p className="muted">Loading the skeleton…</p>;

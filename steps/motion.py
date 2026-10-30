@@ -11,6 +11,14 @@ like the pack's with one animation named from the prompt, so the `anim` step can
 params: {"prompt": "A person waves with the right hand.", "seconds": 5, "seed": 0, "steps": 100,
 "offload": true|false (the text encoder on the CPU; default: by the budget)}
 Outputs: clip.glb, motion.bvh, prompt.json.
+
+M65 connect clips (transition only): with "from" and/or "to", clip names of the input version (an animated
+model: its rigged_anim.glb), the motion starts at the "from" clip's last pose and/or ends at the "to" clip's
+first, Kimodo holding both ends as it joins its own prompts (steps/_connect.py); "seconds" 0.5-8 the
+transition (default 1.5), "travel" metres straight on to where "to" starts (default: from the clips' speeds),
+"turn" degrees "to" faces from where "from" ended (left positive, default 0), the prompt optional. The clip's
+name is "A to B" ("After A", "Into B"); metrics add from, to, seam_cm (how far Kimodo's seam frames are from
+the poses held, cm), height_scale.
 """
 
 import contextlib
@@ -23,6 +31,7 @@ import sys
 import time
 from pathlib import Path
 
+from steps import _connect
 from steps._blender import BlenderError, run_blender
 from steps._common import StepError, main, offload, progress
 
@@ -110,11 +119,46 @@ def encoder_device(params: dict, cuda: bool) -> str:
     return "cpu" if offload(params, ENCODER_GPU_GB) else "cuda"
 
 
+def _seams(model, src: Path, connect: dict) -> tuple[dict, list]:
+    """M65: the connect plan (steps/_connect.py) and Kimodo's constraints from it: the full body on every pinned
+    frame, and the hands' and feet's turns, as Kimodo itself joins two prompts."""
+    import numpy as np
+    import torch
+    from kimodo.constraints import EndEffectorConstraintSet, FullBodyConstraintSet
+
+    sk = model.skeleton  # somaskel30: what the model is conditioned on
+    s77 = sk.somaskel77
+    up = np.array(
+        [0.0, 1.0, 0.0]
+    )  # the BVH puts the rest hips 1 m up, so the retarget measures from there
+    rest = {n: v + up for n, v in zip(s77.bone_order_names, s77.neutral_joints.cpu().numpy())}
+    names = list(sk.bone_order_names)
+    pl = _connect.plan(src, connect, rest, names, [sk.bone_parents[n] for n in names])
+    dev = model.device
+
+    def t(a):
+        return torch.as_tensor(np.asarray(a), dtype=torch.float32, device=dev)
+
+    idx = torch.as_tensor(pl["index"], device=dev)
+    ends = ["LeftHand", "RightHand", "LeftFoot", "RightFoot"]
+    return pl, [
+        FullBodyConstraintSet(sk, idx, t(pl["pos"]), t(pl["rot"])),
+        EndEffectorConstraintSet(sk, idx, t(pl["pos"]), t(pl["rot"]), None, joint_names=ends),
+    ]
+
+
 def generate(
-    prompt: str, seconds: float, seed: int, steps: int, out: Path, params: dict | None = None
-) -> Path:
+    prompt: str,
+    seconds: float,
+    seed: int,
+    steps: int,
+    out: Path,
+    params: dict | None = None,
+    connect: tuple[Path, dict] | None = None,
+) -> tuple[Path, dict]:
     """The motion as out/motion.bvh (SOMA 77 joints, the standard T-pose as rest), the way
-    kimodo_gen --bvh --bvh_standard_tpose writes it."""
+    kimodo_gen --bvh --bvh_standard_tpose writes it; with `connect` (the input version, the request) held to
+    the clips' seams and cut back to them. Also returns the connect metrics (empty without)."""
     import torch
     from kimodo.exports.bvh import save_motion_bvh
     from kimodo.skeleton import SOMASkeleton30, global_rots_to_local_rots
@@ -122,7 +166,8 @@ def generate(
 
     model = _model(encoder_device(params or {}, torch.cuda.is_available()))
     seed_everything(seed)
-    frames = round(seconds * model.fps)
+    pl, constraints = _seams(model, *connect) if connect else (None, [])
+    frames = pl["frames"] if pl else round(seconds * model.fps)
     with contextlib.redirect_stdout(sys.stderr):
         output = model(
             [prompt],
@@ -130,6 +175,7 @@ def generate(
             num_denoising_steps=steps,
             num_samples=1,
             multi_prompt=True,
+            constraint_lst=constraints,
             post_processing=True,
             return_numpy=True,
         )
@@ -137,8 +183,15 @@ def generate(
     skeleton = model.skeleton
     if isinstance(skeleton, SOMASkeleton30):  # the model's output is already on somaskel77
         skeleton = skeleton.somaskel77.to(device)
-    joints_pos = torch.from_numpy(output["posed_joints"][0]).to(device)
-    joints_rot = torch.from_numpy(output["global_rot_mats"][0]).to(device)
+    joints_pos, joints_rot = output["posed_joints"][0], output["global_rot_mats"][0]
+    extra = {}
+    if pl:
+        joints_pos, joints_rot, err = _connect.finish(
+            joints_pos, joints_rot, pl, list(skeleton.bone_order_names)
+        )
+        extra = {"seam_cm": err, "height_scale": round(pl["scale"], 3)}
+    joints_pos = torch.as_tensor(joints_pos, dtype=torch.float32, device=device)
+    joints_rot = torch.as_tensor(joints_rot, dtype=torch.float32, device=device)
     local = global_rots_to_local_rots(joints_rot, skeleton)
     bvh = out / "motion.bvh"
     save_motion_bvh(
@@ -149,14 +202,53 @@ def generate(
         fps=model.fps,
         standard_tpose=True,
     )
-    return bvh
+    return bvh, extra
+
+
+def connect_params(params: dict, in_dir) -> dict | None:
+    """M65: the connect request ({from, to, seconds, travel, turn}) or None for a plain prompt; bad_params."""
+    a, b = params.get("from") or None, params.get("to") or None
+    if a is None and b is None:
+        return None
+    try:
+        c = {
+            "from": a if a is None else str(a),
+            "to": b if b is None else str(b),
+            "seconds": float(params.get("seconds", 1.5)),
+            "travel": None if params.get("travel") is None else float(params["travel"]),
+            "turn": float(params.get("turn") or 0),
+        }
+    except (TypeError, ValueError):
+        raise StepError("bad_params", f"bad connect params: {params}") from None
+    if (
+        not 0.5 <= c["seconds"] <= _connect.MAX_SECONDS
+        or not -180 <= c["turn"] <= 180
+        or (c["travel"] is not None and not abs(c["travel"]) <= 20)
+    ):
+        raise StepError(
+            "bad_params",
+            f"bad connect params: {params} (0.5–{_connect.MAX_SECONDS:g} s, turn −180–180°, "
+            "travel within 20 m)",
+        )
+    if not in_dir or not (Path(in_dir) / "rigged_anim.glb").is_file():
+        raise StepError("missing_input", "connecting clips needs an animated model (its clips)")
+    return c
+
+
+def connect_name(c: dict) -> str:
+    """The transition's clip name: "Idle to Walk", "After Idle", "Into Walk" (48 characters at most)."""
+    a, b = c["from"], c["to"]
+    return (f"{a} to {b}" if a and b else f"After {a}" if a else f"Into {b}")[:48].strip()
 
 
 def run(op, in_dir, out_dir, params):
     out = Path(out_dir)
-    prompt = str(params.get("prompt", "")).strip()
+    connect = connect_params(params, in_dir)
+    prompt = str(params.get("prompt", "")).strip() or (
+        "A person moves naturally from one pose to the next." if connect else ""
+    )
     try:
-        seconds = float(params.get("seconds", 5.0))
+        seconds = float(params.get("seconds", 1.5 if connect else 5.0))
         seed = int(params.get("seed", 0))
         steps = int(params.get("steps", 100))
     except (TypeError, ValueError):
@@ -168,10 +260,12 @@ def run(op, in_dir, out_dir, params):
         )
     progress(0.1, "encoding the prompt and sampling the motion")
     t = time.time()
-    bvh = generate(prompt, seconds, seed, steps, out, params)
+    bvh, extra = generate(
+        prompt, seconds, seed, steps, out, params, connect and (Path(in_dir), connect)
+    )
     gen_s = time.time() - t
     progress(0.8, "the clip as a GLB")
-    name = clip_name(prompt)
+    name = connect_name(connect) if connect else clip_name(prompt)
     taken = set()
     for d in out.parent.glob("*_motion"):  # the asset's other motions: one name each
         if d != out and (d / "prompt.json").is_file():
@@ -203,6 +297,7 @@ def run(op, in_dir, out_dir, params):
         "encoder_device": MODEL.get("device", "cpu"),
         "seed": seed,
         "steps": steps,
+        **({"from": connect["from"], "to": connect["to"], **extra} if connect else {}),
     }
     return {
         "outputs": {"clip": "clip.glb", "bvh": "motion.bvh", "prompt": "prompt.json"},
