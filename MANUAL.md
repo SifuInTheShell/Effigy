@@ -345,9 +345,25 @@ copied as it is.
 ### Texture detail
 
 Redraws a texture's fine detail (buttons, stitching, wood grain) from close-up views; the shape and the colours
-stay. **Tools → Texture detail**, then **Refine texture** (about 4–5 minutes). **Description** guides it (the
-asset's own by default), **Detail strength** sets how far it may redraw. Compare the result with the version
-before it in History: it can invent detail.
+stay. **Tools → Texture detail**, then **Refine texture** (about 4–6 minutes). **Description** guides it (the
+asset's own by default), **Detail strength** sets how far it may redraw. Besides the views all round, it adds up to
+three where those see the surface poorly (the top of the shoulders, a ledge, a hollow); a prop wider than tall
+gets none from above, which invented tiles on flat tops. Compare the result with the version before it in History:
+it can invent detail.
+
+**Redraw this view** redraws only the square in the middle of the 3D view, as it is framed now, with the
+description.
+
+The panel has three tools, each under its own heading: **Refine texture** (above), **Baked shadows** (below) and
+**Texture paint**.
+
+**Texture paint**, to change one part (a lock, a belt, a patch): click **Paint the part to change** and paint it on
+the model. Drag on the model to paint and drag beside it to turn the view; **Brush** sets the size. **Erase** (or
+**Shift** while you drag) wipes paint off where a stroke went too far, click it again to paint; **Clear the paint**
+starts again. A magenta veil shows what is painted. Say what the part should become under **It becomes** (*a gold
+lion's-head lock*) and click **Redraw the painted part**. It is redrawn from every side that sees it, from as many
+views as that takes; nothing outside the paint changes, and the new version's page says so. The paint's own
+**Strength** below 1 keeps more of what was there.
 
 **Remove baked shadows** (a few seconds, no redraw) takes the shading the generator baked into the colours back
 out, so your engine's lighting does not double it. **Baked shadows to remove** sets how much.
@@ -427,7 +443,9 @@ On the skinned model, **Animation source** has four ways:
   Needs the Setup card **Text to motion**, which needs a Hugging Face login with access to Meta Llama 3. For people
   only.
 - **From a video**: an MP4, MOV or WebM of a person, head to toe, with a still camera (or one turning on the spot to
-  follow: choose **Camera: panning**). Set the part to use with
+  follow: choose **Camera: panning**). With more than one person in it, the motion is the largest one's; its page
+  says how many it found, and **Make the other one's motion too** (with more people, **the other 2's**, **3's** …)
+  makes the others. Set the part to use with
   **Start here** / **End here** (at most 30 seconds; 15 seconds take about 2 minutes). **Quality**: **Best**
   (smooth and accurate), **Quick** (closest to the video, a little shakier) or **Light** (from the body points
   alone, may drift). **Keep planted feet still**, **In place (no travel)** and **Smoothing** clean it up. **Make
@@ -435,8 +453,12 @@ On the skinned model, **Animation source** has four ways:
 - **From a file**: an FBX, GLB, glTF or BVH animation on a Mixamo, Unreal (Manny, Quinn) or Kimodo skeleton.
   **Import animation**. Its licence is yours to check.
 
+On a person, **Keep the arms out of the body** (ticked) opens the arms just enough wherever a clip would swing the
+forearms or hands through the body, which happens on stout and stylised characters; untick it to keep the clips as
+they come.
+
 The animated model plays its clips from the view's **Animation** menu. A clip whose bones did not match says it
-**never moves**.
+**never moves**. The page names the clips whose arms were opened and by how much.
 
 **Connect two clips** (on the animated model of a person): pick **From** and **To** among its clips, optionally say
 what happens in between (*turns and draws the sword*), the **Length** (0.5 to 8 seconds), and with a **To** clip its
@@ -902,6 +924,7 @@ versions cannot be exported.
 | Where | Keys |
 |---|---|
 | 3D view | drag: orbit · scroll: zoom · right-drag: pan |
+| Painting a part (Texture detail) | drag on the model: paint (with **Erase** on: erase) · **Shift**+drag: the other one · drag beside it: orbit |
 | Time bar (3D clips, 2D sheets, animation editor) | **Space** play/pause · **←** **→** a frame · **Home** **End** first/last frame |
 | Animation editor | **I** key the bone · **X** / **Delete** delete keys · **Ctrl+Z** / **Ctrl+Shift+Z** undo/redo · **Esc** cancel a drag · **Ctrl+wheel** zoom the timeline |
 | Skeleton editor | **G** move · **R** rotate · **Shift+click** add to the selection · **Esc** cancel a drag · **Ctrl+Z** / **Ctrl+Shift+Z** |

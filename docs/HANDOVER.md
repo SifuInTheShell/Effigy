@@ -8,14 +8,14 @@ generator, the chain, Blender, Claude and the exports have run here and their nu
 **Next session: start at section 2, "Next session".**
 
 Read first: `CLAUDE.md` (rules), this file, then `docs/IMPLEMENTATION.md` §0 (rules), §3 (frozen
-contracts), §6 (never-do) as needed. Install steps are `SETUP.md`. **This round's laptop checks (M64 to M68):
+contracts), §6 (never-do) as needed. Install steps are `SETUP.md`; what changed since 0.2.0, for users, is `CHANGELOG.md`. **This round's laptop checks (M64 to M68):
 `docs/LAPTOP.md`.** The first laptop session's checklist, done, is `docs/archive/LAPTOP.md`.
 
 ---
 
 ## 1. Where things stand (2026-10-30: M64 to M68 built blind in the cloud, to validate on the laptop; M61–M63 merged, 0.2.0 out)
 
-- **M68 (branch `ccr-3bd14478-pui9wd`, the cloud session, 2026-10-30; not run on a GPU)**: a painted part of the
+- **M68 (merged: PR #14, the cloud session, 2026-10-30; not run on a GPU)**: a painted part of the
   texture redrawn, item 3 of the StableGen assessment. In Texture detail, Paint the part to change paints a mask
   on the model in the texture's layout; Redraw the painted part uploads it and runs `refine` with `op: "edit"`:
   Z-Image inpaints it in the views that see it, and the frozen mask decides every write (nothing outside it

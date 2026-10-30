@@ -30,6 +30,7 @@ KEEP = {
     "README.md",
     "SETUP.md",
     "MANUAL.md",
+    "CHANGELOG.md",  # README links it
     "docs",  # README links docs/ too
     "wheels",
     "prompts",

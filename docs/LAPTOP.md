@@ -9,13 +9,12 @@ What each milestone is, and why: IMPLEMENTATION.md, sections M64 to M68 (near th
 
 ## 0. Get the code
 
-- [ ] M64 and M65 came in through pull request #12, M66 and M67 through #13, both merged: they are on `main`.
-  M68 is on the branch `ccr-3bd14478-pui9wd` until its pull request is merged; use the branch while it is open:
+- [ ] All five came in through pull requests #12 (M64, M65), #13 (M66, M67) and #14 (M68), all merged: they are
+  on `main`.
   ```
-  git fetch origin ccr-3bd14478-pui9wd
-  git switch ccr-3bd14478-pui9wd
+  git switch main
+  git pull
   ```
-  Once merged: `git switch main`, then `git pull`.
 - [ ] No new package, model or venv. Rebuild the UI and restart the app (`run.bat`): step code changed, and a
   resident Kimodo or GEM-X worker would keep the old code until it is evicted.
   ```
@@ -145,7 +144,7 @@ Needs the Setup card **Texture detail** (Z-Image comes with it). No new download
 - [ ] **Check 2: a belt all round.** On a character, paint its belt all the way round (turn the model as you go),
   "a red leather belt with a brass buckle": the back of the belt changes too. Record `views`, `region_seen`,
   `region_seen_planned`.
-- [ ] **Check 3: less strength.** Check 1 again with the strength slider at 0.5: the lock keeps more of its old
+- [ ] **Check 3: less strength.** Check 1 again with Texture paint's Strength slider at 0.5: the lock keeps more of its old
   shape.
 - [ ] **Check 4: the cost.** From check 1 and 2 record `seconds`, `seconds_per_view`, `peak_vram_gb`.
 - [ ] **Record** in a new `docs/bench/m68.md`: the assets, the prompts, the numbers, and a before | after picture.

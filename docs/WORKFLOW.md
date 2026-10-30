@@ -102,9 +102,9 @@ Driven by the brief's budget, rig type and target. Each step is visible and re-r
 | Clean | fill holes, remove floaters, fix non-manifold, scale to `scale_m`, origin at the feet, face +Z/−Y per target | CuMesh |
 | Remesh | tri decimation to budget, or quad remesh for characters (symmetry, edge loops around joints) | [research 03](research/03-retopology-uv-baking.md) |
 | UV | auto charts, seams on hidden edges for characters, texel density target | CuMesh/xatlas · Blender |
-| Texture | **re-bake PBR from the voxel volume** + normal/AO from the hi-poly; optional retexture or 2D refine pass | [research 04](research/04-texturing.md) |
+| Texture | **re-bake PBR from the voxel volume** + normal/AO from the hi-poly; optional retexture or 2D refine pass; a painted part redrawn on its own (M68) | [research 04](research/04-texturing.md) |
 | Rig | template skeleton fit + marker correction + skin weights + deformation QA | [research 05](research/05-rigging-animation.md) |
-| Animate | brief's clip list retargeted from bundled CC0 libraries; text-to-motion for custom clips | [research 05](research/05-rigging-animation.md) |
+| Animate | brief's clip list retargeted from bundled CC0 libraries, the arms kept out of the body (M67); text-to-motion or a video for custom clips; transitions between clips (M65) | [research 05](research/05-rigging-animation.md) |
 
 ## ⑦ Blender polish: by hand, or by Claude
 

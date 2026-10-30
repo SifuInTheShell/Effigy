@@ -236,8 +236,10 @@ export class Viewer {
     painted: boolean;
     rev: number; // counts the strokes and clears: an unchanged paint need not be uploaded again
   } | null = null;
+  /** The brush erases instead of painting (the panel's Erase); Shift flips it either way. */
+  paintErase = false;
   private onBrushDown = (e: PointerEvent) => {
-    if (!this.brush || e.button !== 0 || !this.stamp(e.clientX, e.clientY, e.shiftKey)) return; // off the model: the orbit as ever
+    if (!this.brush || e.button !== 0 || !this.stamp(e.clientX, e.clientY, e.shiftKey !== this.paintErase)) return; // off the model: the orbit as ever
     this.brush.down = true;
     this.brush.last = [e.clientX, e.clientY];
     this.controls.enabled = false; // runs before the orbit's own listener (capture): it does not start
@@ -249,7 +251,7 @@ export class Viewer {
     // stamps between the last pointer and this one, 4 px apart: a fast stroke stays a stroke
     const [x0, y0] = b.last;
     const n = Math.min(32, Math.max(1, Math.ceil(Math.hypot(e.clientX - x0, e.clientY - y0) / 4)));
-    for (let i = 1; i <= n; i++) this.stamp(x0 + ((e.clientX - x0) * i) / n, y0 + ((e.clientY - y0) * i) / n, e.shiftKey);
+    for (let i = 1; i <= n; i++) this.stamp(x0 + ((e.clientX - x0) * i) / n, y0 + ((e.clientY - y0) * i) / n, e.shiftKey !== this.paintErase);
     b.last = [e.clientX, e.clientY];
   };
   private onBrushUp = () => {
