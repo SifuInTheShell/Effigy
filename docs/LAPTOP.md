@@ -1,16 +1,16 @@
-# Laptop checks: M64, M65 and M66 (built in the cloud, 2026-10-29 and 2026-10-30)
+# Laptop checks: M64 to M67 (built in the cloud, 2026-10-29 and 2026-10-30)
 
-For the agent or the maintainer on the reference laptop. All three milestones were built in a cloud session
+For the agent or the maintainer on the reference laptop. All four milestones were built in a cloud session
 without a GPU, Blender, Kimodo's weights, GEM-X or the Tile model. Everything that could run there passed (the unit tests, the Playwright
 suite, Kimodo's own skeleton and constraint code on the CPU). Nothing below has run yet. Tick the boxes, record the
 numbers, and never tick a check that was not run (IMPLEMENTATION §6).
 
-What each milestone is, and why: IMPLEMENTATION.md, sections M64, M65 and M66 (near the end of §4).
+What each milestone is, and why: IMPLEMENTATION.md, sections M64 to M67 (near the end of §4).
 
 ## 0. Get the code
 
-- [ ] M64 and M65 came in through pull request #12, merged: they are on `main`. M66 is on the branch
-  `ccr-3bd14478-pui9wd` until its own pull request is merged; use the branch while it is open:
+- [ ] M64 and M65 came in through pull request #12, merged: they are on `main`. M66 and M67 are on the branch
+  `ccr-3bd14478-pui9wd` until their pull request is merged; use the branch while it is open:
   ```
   git fetch origin ccr-3bd14478-pui9wd
   git switch ccr-3bd14478-pui9wd
@@ -112,11 +112,31 @@ the M43b bench (the pirate, or the viking), each from its `bake` version (or the
 - [ ] **Record** it all in a new `docs/bench/m66.md`: the asset, the numbers above, and what you saw in checks 2
   and 3.
 
-## 4. When done
+## 4. M67 Arm clearance: the arms kept out of the body
+
+No new package or model; it runs inside the `anim` step (the Animate panel's clips, or `run_step anim`).
+
+- [ ] **Check 1: a wide character.** The dwarf, or any stout character on the 52-joint skeleton, animated with
+  `Idle_A`, `Walk` and `Jog`. The animated version's page says "Arms opened so the hands clear the body: …" with
+  the clips and degrees (from its `meta.json`: `arms_opened`). Play the three: the hands pass beside the hips and
+  the belly, not through them; the arms open before they reach the body and close after, without a jerk; a looping
+  clip has no jump where it starts over.
+- [ ] **Check 2: without it.** The same character with "Keep the arms out of the body" cleared in the Animate
+  panel (over MCP: `run_step(asset, <skinned version>, "anim", {"clips": ["Idle_A", "Walk", "Jog"], "clearance":
+  false})`): the clips as before M67, for the comparison. The page has no "Arms opened" line.
+- [ ] **Check 3: a slim character, and a robed one.** The viking with the same clips: `arms_opened` absent, or a
+  few degrees. A character in a robe, a cape or big pauldrons: if its arms open by tens of degrees in every clip,
+  the clothing widened the torso (its vertices ride on the spine bones); say so in the bench file.
+- [ ] **Check 4: in a game and the editor.** Export check 1's version for Godot: the opened clips play. Open it in
+  Edit animation: the clips there are the opened ones, as the viewer plays them.
+- [ ] **Record** in a new `docs/bench/m67.md`: the characters, `arms_opened` per clip, any clip with `uncleared`
+  frames, and what you saw (a screenshot of a walk with and without, if it shows).
+
+## 5. When done
 
 - Commit the bench files and this file's ticks on a branch of your own, and open a pull request; the template fills
   itself in. Put the measured numbers in the PR's Measurements line.
 - A failure with a small fix: fix it on that branch, one milestone per PR (IMPLEMENTATION §0 and §7). Anything
   larger: describe it (the job list at the bottom of the app shows the error, the `run.bat` window has more) and stop.
-- After all three pass: tick the acceptance in IMPLEMENTATION M64, M65 and M66, update HANDOVER §1 and §2, and
-  move this file to `docs/archive/`.
+- After all four pass: tick the acceptance in IMPLEMENTATION M64 to M67, update HANDOVER §1 and §2, and move
+  this file to `docs/archive/`.

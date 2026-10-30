@@ -1,12 +1,14 @@
 """Animation clips on a skinned character (IMPLEMENTATION.md M21): rigged.glb + a clip pack → rigged_anim.glb.
 
-Input: a rig_skin version. params: {"clips": ["Idle_A", "Walk", "Jog"]}: names from the bundled pack
+Input: a rig_skin version. params: {"clips": ["Idle_A", "Walk", "Jog"], "clearance": true}: names from the bundled pack
 (`catalogue()`, GET /api/clips; the Mesh2Motion human pack, CC0, `tools/download_models.py clips`).
 blender_ops/retarget does the work; the output GLB carries one animation per clip, the mesh and the
 skeleton of the input, so the viewer plays it and export carries the clips into the engine files.
 A creature (M36: a skeleton from steps/_templates.py) takes its template's own clips
 (clips/mesh2motion/creatures/<template>-animations.glb) through blender_ops/creature_clips; the human-only
 motions (Kimodo, a video) are refused.
+M67: on a person, the arms opened where a clip would swing the forearms or hands through the torso
+(`steps/_clear.py`; param `clearance`, default true; metrics `arms_opened`).
 ponytail: one pack; a second one (KayKit, 100STYLE: manual downloads behind Cloudflare / 4.7 GB) adds a
 `pack` param and its preset name when it's there.
 """
@@ -15,9 +17,11 @@ import json
 import os
 import re
 import shutil
+import sys
+import traceback
 from pathlib import Path
 
-from steps import _anim, _templates
+from steps import _anim, _clear, _templates
 from steps._blender import BlenderError, run_blender
 from steps._common import StepError, main, progress
 
@@ -89,10 +93,12 @@ def run(op, in_dir, out_dir, params):
     clips = list(params.get("clips", DEFAULT if template == _templates.HUMAN else ["Idle", "Walk"]))
     if not clips or not all(isinstance(c, str) and c for c in clips):
         raise StepError("bad_params", "clips: a list of clip names")
+    if not isinstance(clearance := params.get("clearance", True), bool):
+        raise StepError("bad_params", "clearance: true or false")
     if template != _templates.HUMAN:
-        return _finish(
-            src, out, _creature(src, out, template, clips, skel.get("yaw", 0)), [], pack=True
-        )
+        # a creature's clips are made for its own skeleton: no clearance
+        res = _creature(src, out, template, clips, skel.get("yaw", 0))
+        return _finish(src, out, res, [], pack=True, clearance=False)
     known = catalogue()
     # a motion version of this asset (M26, "310_motion"; M34 from a video, "320_mocap"; an animation file,
     # "330_import_motion") is a clip too: its clip.glb carries one animation, on a skeleton the retarget tells apart
@@ -129,21 +135,17 @@ def run(op, in_dir, out_dir, params):
         )
     except BlenderError as e:
         raise StepError("failed", str(e)) from e
-    return _finish(src, out, res, motions, pack=bool(pack))
+    return _finish(src, out, res, motions, pack=bool(pack), clearance=clearance)
 
 
-def _finish(src: Path, out: Path, res: dict, motions: list[str], pack: bool) -> dict:
+def _finish(
+    src: Path, out: Path, res: dict, motions: list[str], pack: bool, clearance: bool
+) -> dict:
     shutil.move(out / "_anim" / "rigged_anim.glb", out / "rigged_anim.glb")
     shutil.rmtree(out / "_anim", ignore_errors=True)
-    for f in (
-        "skeleton.json",
-        "qa.json",
-        "parts.json",
-    ):  # parts.json: the export keeps the parts (M32)
-        if (src / f).is_file():
-            shutil.copy(src / f, out / f)
     rep = res["report"]
-    # a clip that plays and never moves: its bone names were not mapped (the Mr. Mak review's silent-clip gate)
+    # a clip that plays and never moves: its bone names were not mapped (the Mr. Mak review's silent-clip gate);
+    # read before the clearance, which may turn a still clip's arms
     try:
         turned = _anim.turns(out / "rigged_anim.glb")
     except (
@@ -154,6 +156,25 @@ def _finish(src: Path, out: Path, res: dict, motions: list[str], pack: bool) -> 
         still := [c["name"] for c in rep["clips"] if turned.get(c["name"], 0.0) < STILL_DEG]
     ):
         rep["still"] = still
+    opened, skipped = {}, None
+    if clearance:  # M67: the arms out of the torso
+        progress(0.9, "keeping the arms out of the body")
+        try:
+            doc, blob = _anim.read_glb(out / "rigged_anim.glb")
+            new, opened = _clear.clear(doc, blob, rep.get("fps", 24), skip=rep.get("still", ()))
+        # never lose the retarget to this pass: the clips stay as retargeted, the reason on the version's page
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc(file=sys.stderr)
+            new, skipped = None, str(e) if isinstance(e, StepError) else f"{type(e).__name__}: {e}"
+        if new:
+            (out / "rigged_anim.glb").write_bytes(new)
+    for f in (
+        "skeleton.json",
+        "qa.json",
+        "parts.json",
+    ):  # parts.json: the export keeps the parts (M32)
+        if (src / f).is_file():
+            shutil.copy(src / f, out / f)
     (out / "clips.json").write_text(json.dumps(rep, indent=2), encoding="utf-8")
     outputs = {"rigged_anim": "rigged_anim.glb", "clips": "clips.json"}
     if (out / "skeleton.json").is_file():
@@ -164,6 +185,8 @@ def _finish(src: Path, out: Path, res: dict, motions: list[str], pack: bool) -> 
         "clips": [c["name"] for c in rep["clips"]],
         **({"still": rep["still"]} if rep.get("still") else {}),
         "seconds_total": round(sum(c["seconds"] for c in rep["clips"]), 2),
+        **({"arms_opened": opened} if opened else {}),
+        **({"arms_clearance_skipped": skipped} if skipped else {}),
     }
     # a motion's own components (Kimodo and Llama 3, GEM-X and DINOv3) reach the exports' credits through the
     # animated version: the motion version is an input here, not an ancestor (M34; M26 lost them)
