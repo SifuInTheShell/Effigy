@@ -95,7 +95,8 @@
       <h4>Better textures</h4>
       <ul>
         <li>The face from your reference image projected onto the head</li>
-        <li>An optional detail pass redraws close-up detail (buttons, stitching, wood grain) with Z-Image + ControlNet Tile and paints it back into the same UVs</li>
+        <li>An optional detail pass redraws close-up detail (buttons, stitching, wood grain) with Z-Image + ControlNet Tile and paints it back into the same UVs, with extra views where the usual ones see too little</li>
+        <li>Paint a part on the model (a lock, a belt) and redraw just that part from every side; nothing else changes</li>
         <li>Baked shadows taken back out of the colour, so the engine's lighting doesn't double them</li>
       </ul>
     </td>
@@ -113,8 +114,10 @@
       <h4>Animate</h4>
       <ul>
         <li>178 CC0 human clips and the creatures' own, retargeted onto your rig</li>
-        <li>A new motion from a sentence (NVIDIA Kimodo) or from a video of a person (NVIDIA GEM-X)</li>
-        <li>An editor with keys, foot locks, IK, trim, loop, speed, ground, in-place and duplicate clips</li>
+        <li>A new motion from a sentence (NVIDIA Kimodo) or from a video (NVIDIA GEM-X): every person in it, a camera that pans to follow</li>
+        <li>Transitions made by Kimodo from one clip's last pose into another's first</li>
+        <li>Arms kept out of the body when a clip made for a slimmer figure meets a stout one</li>
+        <li>An editor with keys, foot and hand locks, IK, trim, loop, speed, ground, in-place and duplicate clips</li>
         <li>The armature drawn the way Blender draws it, with IK targets and poles: a hand kept on a table, a foot on a step, the knee swung where you want it</li>
       </ul>
     </td>
@@ -323,6 +326,9 @@ isn't there hasn't been run. Known limits:
   fits depend on a clean mesh (touching legs or a fused snout fail a skin check).
 - The brief step is template-based, no LLM in the loop. The detail pass can invent detail (a per-view keep/drop
   is open).
+- What came after 0.2.0 ([CHANGELOG.md](CHANGELOG.md): everyone in a video, a panning camera, hand locks,
+  transitions between clips, arms kept out of the body, extra detail views, painting a part to redraw) passes its
+  tests but has not run on a GPU or in Blender yet.
 - An experimental Hunyuan3D engine is designed but not built; if it ever is, its outputs are fenced as
   *restricted* (its licence excludes the EU, UK and South Korea) and never reach a preset.
 
@@ -370,6 +376,7 @@ only.
 | | |
 |---|---|
 | [SETUP.md](SETUP.md) | from a fresh Windows machine to the first asset |
+| [CHANGELOG.md](CHANGELOG.md) | what changed, release by release, and what is new since the last one |
 | [MANUAL.md](MANUAL.md) | the user manual: every page, panel and tool of the app |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | how the project is run and how to send a change |
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | the user journey, prompt to export |

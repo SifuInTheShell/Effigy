@@ -15,6 +15,7 @@ def test_zip_manifest():
         ".mcp.json",
         "SETUP.md",
         "MANUAL.md",
+        "CHANGELOG.md",
     ]:
         assert must in files, must
     for folder in ["server", "steps", "engine", "blender_ops", "mcp", "prompts", "tools", "wheels"]:

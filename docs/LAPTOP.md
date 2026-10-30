@@ -9,13 +9,12 @@ What each milestone is, and why: IMPLEMENTATION.md, sections M64 to M68 (near th
 
 ## 0. Get the code
 
-- [ ] M64 and M65 came in through pull request #12, M66 and M67 through #13, both merged: they are on `main`.
-  M68 is on the branch `ccr-3bd14478-pui9wd` until its pull request is merged; use the branch while it is open:
+- [ ] All five came in through pull requests #12 (M64, M65), #13 (M66, M67) and #14 (M68), all merged: they are
+  on `main`.
   ```
-  git fetch origin ccr-3bd14478-pui9wd
-  git switch ccr-3bd14478-pui9wd
+  git switch main
+  git pull
   ```
-  Once merged: `git switch main`, then `git pull`.
 - [ ] No new package, model or venv. Rebuild the UI and restart the app (`run.bat`): step code changed, and a
   resident Kimodo or GEM-X worker would keep the old code until it is evicted.
   ```
