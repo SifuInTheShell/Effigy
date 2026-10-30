@@ -2085,7 +2085,7 @@ function DetailPanel(props: { asset: string; version: Meta; versions: Meta[]; ch
       )}
       <p className="muted">
         Click Refine texture to redraw the texture's fine detail (buttons, stitching, wood grain) from close-up views. The shape and the colours stay. It takes
-        about 4–5 minutes. To work on one place, frame it in the 3D view, describe what should be there, and click Redraw this view: the square in the
+        about 4–6 minutes. To work on one place, frame it in the 3D view, describe what should be there, and click Redraw this view: the square in the
         middle of the view is redrawn, the rest stays (a face from the picture stays too).
       </p>
       {props.missing && (
@@ -3286,6 +3286,7 @@ const STEP_HELP: Record<string, StepHelp> = {
     needs: "A Skinned version (Character: Attach to skeleton).",
     params: [
       ["clips", 'clip names from the pack, e.g. ["Idle_A", "Walk", "Jog"], or the version names of your motions, e.g. "310_motion" (the Character panel lists them)'],
+      ["clearance", "true (default): on a person, the arms opened where a clip would swing the forearms or hands through the body; false keeps the clips as retargeted"],
     ],
     example: { clips: ["Idle_A", "Walk", "Jog"] },
   },
@@ -3336,6 +3337,7 @@ const STEP_HELP: Record<string, StepHelp> = {
       ["texture_size", "keep or 4096"],
       ["delight", "0 to 1: the baked shadows taken out of the colours first, using the bake's ambient occlusion (default 0)"],
       ["views", "auto, or [] for no redraw (only delight; no model, seconds)"],
+      ["coverage", "0 to 8: the most views added where the auto views see too little (default 3, 0 off)"],
     ],
     example: { strength: 1 },
   },
@@ -3584,6 +3586,7 @@ function ClipPicker(props: {
   const [seconds, setSeconds] = useState(5);
   const [seed, setSeed] = useState(0);
   const [picked, setPicked] = useState<"clips" | "text" | "video" | "file" | null>(null); // UX-05: the animation's source; one form shown
+  const [clearance, setClearance] = useState(true); // M67: a person's arms kept out of the body
   useEffect(() => {
     api
       .clips(template)
@@ -3729,7 +3732,16 @@ function ClipPicker(props: {
               </optgroup>
             )}
           </select>
-          <button className="primary" disabled={props.busy || !chosen.size} onClick={() => props.onRun({ clips: [...chosen] }, "anim")}>
+          {!animal && (
+            <label title="Where a clip swings the forearms or hands through the body (a stout character), the arms open just enough">
+              <input type="checkbox" checked={clearance} onChange={(e) => setClearance(e.target.checked)} /> Keep the arms out of the body
+            </label>
+          )}
+          <button
+            className="primary"
+            disabled={props.busy || !chosen.size}
+            onClick={() => props.onRun({ clips: [...chosen], ...(animal || clearance ? {} : { clearance: false }) }, "anim")}
+          >
             Add {chosen.size} animation{chosen.size === 1 ? "" : "s"}
           </button>
         </>
@@ -4068,6 +4080,8 @@ function AnimInfo(props: {
   const [clips, setClips] = useState<{ name: string; seconds: number }[] | null>(null);
   const [still, setStill] = useState<string[]>([]);
   const [person, setPerson] = useState(false); // M65: Kimodo connects clips of people only
+  // M67: the clips whose arms the anim step opened, and by how much
+  const opened = Object.entries((props.version.metrics?.arms_opened ?? {}) as Record<string, { Left?: number; Right?: number; uncleared?: number }>);
   useEffect(() => {
     let live = true;
     fetch(fileUrl(props.asset, props.version.version, props.version.outputs.clips))
@@ -4089,6 +4103,14 @@ function AnimInfo(props: {
         time and plays it slower. The animations export with the model.
       </p>
       {props.version.step === "anim_edit" && <p className="note">Edited by hand: {(props.version.metrics?.clips as string[] | undefined)?.join(", ")}.</p>}
+      {opened.length > 0 && (
+        <p className="note">
+          Arms opened so the hands clear the body: {opened.map(([c, o]) => `${c} (up to ${Math.max(o.Left ?? 0, o.Right ?? 0)}°${o.uncleared ? `, ${o.uncleared} frames still touching` : ""})`).join(", ")}.
+        </p>
+      )}
+      {typeof props.version.metrics?.arms_clearance_skipped === "string" && (
+        <p className="note warn">The arms were not checked against the body: {props.version.metrics.arms_clearance_skipped as string}</p>
+      )}
       {still.length > 0 && (
         <p className="note warn">
           {still.join(", ")} {still.length === 1 ? "plays but never moves" : "play but never move"}: the animation's bones were not matched to this

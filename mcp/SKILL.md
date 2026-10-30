@@ -82,7 +82,7 @@ with its length / 150, `metrics.closed`; `"close": 0` never) -> `uv` -> `bake`
 materials and textures (recipe: `import_file` -> `clean` -> `remesh` -> `uv` -> `bake` -> `rig_fit` -> `rig_skin` ->
 `anim` -> `export`; a foreign skeleton is dropped, ours is fitted; no materials at all: `missing_input`); a flat prop from a picture in perspective has one end shorter: `"detaper": true` squares it
 after the texture, the tall end kept; straighten it in clean first, `metrics.detapered` null means nothing was done) -> optional `project` (`{"region": "head"|"front"}`, sharper face from the picture) ->
-optional `refine` (`{"strength": 1}`, 4–5 min: the texture's fine detail redrawn from close-up views; the side
+optional `refine` (`{"strength": 1}`, 4–6 min: the texture's fine detail redrawn from close-up views; the side
 the picture never showed is where a bake is weakest; a model wider than tall gets no view from above, which
 invented tiles on flat tops; `views` takes your own list, each view with its own `prompt` if a side is of another
 material. Describe the material, not the place: "construction site" in a hoarding's prompt drew a scene into its
@@ -100,7 +100,8 @@ Import page (Put an animation on one of your characters) or the Animate panel: `
 `{"markers": {name: [x,y,z]}}` to correct) -> `fit_check` on it (joints outside the mesh? fix markers, re-run
 `rig_fit`) -> `rig_skin` (`{"engine": "auto"}`; `{"rigid": {"Helmet": "Head"}}` for parts that do not bend)
 -> `anim` (`{"clips": ["Idle_A", "Walk", "Jog"]}`: names from `GET /api/clips`, run `describe_steps("anim")`;
-creatures have their own clips) or `motion` (`{"prompt": "A person waves.", "seconds": 5}`, text to motion,
+creatures have their own clips; on a person the arms are opened where a clip swings the hands through the body,
+`metrics.arms_opened`, `"clearance": false` keeps the clips as retargeted) or `motion` (`{"prompt": "A person waves.", "seconds": 5}`, text to motion,
 human skeletons only) or `mocap` from a video. Read `qa.json` (`read_file`) after `rig_skin`. A transition between
 two clips of an animated version: `run_step(asset, <anim version>, "motion", {"from": "Idle_A", "to": "Walk",
 "seconds": 1.5})` (one side alone continues or leads in; `turn` degrees, `travel` metres), then `anim` on the skinned

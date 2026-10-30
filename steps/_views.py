@@ -1,8 +1,8 @@
 """Views of a textured mesh and their way back into its texture (M23 `project`, M43b `refine`).
 
 A camera here is anything with `project(points) → (pix [N,2] in [0,1]², u right, v down; depth, nearer is
-smaller)` and `towards(points) → [N,3]` (the direction from each point to the camera). Pure torch + numpy,
-so it runs on the CPU in tests.
+smaller)` and `towards(points) → [N,3]` (the direction from each point to the camera); `texel_weights` also
+takes its `extent` (metres across the view: `ortho`'s, M66). Pure torch + numpy, so it runs on the CPU in tests.
 """
 
 import math
@@ -144,21 +144,40 @@ def render(base_t, uv, f, v_np, cam, size: int = 1024, ss: int = 2, extra=None):
     return out, a, chans[3:].permute(1, 2, 0), (face_img, bary_img, zbuf, pix_v, depth_v)
 
 
+def depth_edges(zbuf, extent: float, grow: int) -> torch.Tensor:
+    """[S,S] 1 near a depth step inside the view (one surface in front of another, M66, after StableGen's
+    depth-edge rejection): drawn pixels whose 3×3 neighbourhood spans more than 16 pixel widths in depth,
+    steeper than any surface `cos_weight` lets paint (75°: 11 widths across the window's diagonal); grown by
+    `grow` pixels, because the generated view blends the two sides there as it does at the silhouette."""
+    drawn = torch.isfinite(zbuf)
+    ninf = torch.full_like(zbuf, -float("inf"))
+    hi = F.max_pool2d(torch.where(drawn, zbuf, ninf)[None, None], 3, 1, 1)[0, 0]
+    lo = -F.max_pool2d(torch.where(drawn, -zbuf, ninf)[None, None], 3, 1, 1)[0, 0]
+    edge = (drawn & (hi - lo > 16 * extent / zbuf.shape[0])).float()
+    return F.max_pool2d(edge[None, None], 2 * grow + 1, 1, grow)[0, 0]
+
+
 def texel_weights(cam, a, zbuf, depth_v, pts, v_np, faces_np, corners, w3, erode: int = 6):
     """How much each texel (points pts on the surface) takes from a view: smoothstep of the facing cos ×
     the z-test × the view's silhouette (coverage a [H,W]) eroded by `erode` px, whose edge pixels mix in the
-    background. Returns (weights [N], the texels' grid for grid_sample on the view)."""
+    background, × none within `erode` px of a depth step inside the view (`depth_edges`: an arm in front of the
+    torso). Returns (weights [N], the texels' grid for grid_sample on the view)."""
     dev = a.device
     pix, depth = cam["project"](pts)
     pix_t = torch.tensor(pix, dtype=torch.float32, device=dev)
     vis = visible(zbuf, pix_t, torch.tensor(depth, dtype=torch.float32, device=dev), depth_v)
     sil = -F.max_pool2d(-(a > 0.5).float()[None, None], 2 * erode + 1, 1, erode)
     grid = (pix_t * 2 - 1).view(1, 1, -1, 2)
-    sil = F.grid_sample(sil, grid, mode="nearest", padding_mode="zeros", align_corners=False)[
-        0, 0, 0
-    ]
+
+    def at(img):
+        return F.grid_sample(img, grid, mode="nearest", padding_mode="zeros", align_corners=False)[
+            0, 0, 0
+        ]
+
+    edge = depth_edges(zbuf, cam["extent"], erode * max(zbuf.shape[0] // a.shape[0], 1))
     cos = facing_cos(v_np, faces_np, corners, w3, pts, cam["towards"])
-    return torch.tensor(cos_weight(cos), dtype=torch.float32, device=dev) * vis * sil, grid
+    weight = torch.tensor(cos_weight(cos), dtype=torch.float32, device=dev)
+    return weight * vis * at(sil) * (1 - at(edge[None, None])), grid
 
 
 def write_textured(out: Path, mesh, mat, rgba: np.ndarray, extra: dict) -> dict:

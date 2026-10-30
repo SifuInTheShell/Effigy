@@ -1982,6 +1982,11 @@ test("Clip picker: a keyboard selection is what gets added (UI-006)", async ({ p
   await page.getByRole("button", { name: "Add 2 animations" }).click();
   await expect.poll(() => posted.length).toBe(1);
   expect(posted[0]).toEqual(["anim", { clips: ["Idle_A", "Wave"] }]);
+  // M67: the arms are kept out of the body unless the box is cleared
+  await page.getByLabel("Keep the arms out of the body").uncheck();
+  await page.getByRole("button", { name: "Add 2 animations" }).click();
+  await expect.poll(() => posted.length).toBe(2);
+  expect(posted[1]).toEqual(["anim", { clips: ["Idle_A", "Wave"], clearance: false }]);
 });
 
 test("Viewer: a clear stops playback and drops the rig; a disposal disposes the skeleton gizmo (UI-007, UI-008)", async ({ page }) => {
@@ -2120,11 +2125,11 @@ test("Setup: Blender starts when it is needed; Open in Blender then works with n
 
 // --- UX review 2026-10-12, Pass 1 ---------------------------------------------------------------
 
-const animMock = async (page: Page, id: string) => {
+const animMock = async (page: Page, id: string, metrics: object = {}) => {
   const posted = await mockAsset(page, id, [
     { version: "010_upload", step: "upload", parent: null, outputs: { mesh: "mesh.glb" } },
     { version: "020_rig_skin", step: "rig_skin", parent: "010_upload", outputs: { rigged: "rigged.glb", skeleton: "skeleton.json", qa: "qa.json" } },
-    { version: "030_anim", step: "anim", parent: "020_rig_skin", outputs: { rigged_anim: "rigged_anim.glb", clips: "clips.json", skeleton: "skeleton.json" } },
+    { version: "030_anim", step: "anim", parent: "020_rig_skin", outputs: { rigged_anim: "rigged_anim.glb", clips: "clips.json", skeleton: "skeleton.json" }, metrics },
   ]);
   await page.route(`**/files/${id}/*/rigged_anim.glb`, (r) => r.fulfill({ body: ANIM, contentType: "model/gltf-binary" }));
   await page.route(`**/files/${id}/*/clips.json`, (r) =>
@@ -2927,6 +2932,15 @@ test("A clip that never moves after the retarget is named on the animated model'
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
   await expect(page.locator("aside.panel .note.warn")).toContainText("Walk plays but never moves");
   await expect(page.locator("aside.panel")).toContainText("Walk · 1.0 s · never moves");
+});
+
+test("The clips whose arms were opened to clear the body are named on the animated model's panel (M67)", async ({ page }) => {
+  await animMock(page, "mock_opened", { arms_opened: { Walk: { Left: 14, Right: 9 }, Idle: { Right: 40, uncleared: 3 } } });
+  await page.goto("/#/asset/mock_opened?version=030_anim");
+  await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
+  await expect(page.locator("aside.panel .note").first()).toContainText(
+    "Arms opened so the hands clear the body: Walk (up to 14°), Idle (up to 40°, 3 frames still touching).",
+  );
 });
 
 test("Animate this character is offered for a character picture, not for a wallpaper", async ({ page }) => {
