@@ -426,7 +426,8 @@ On the skinned model, **Animation source** has four ways:
   **Back elbow**) fill in the sentence. The motion opens on its own page; **Put this motion on the model** adds it.
   Needs the Setup card **Text to motion**, which needs a Hugging Face login with access to Meta Llama 3. For people
   only.
-- **From a video**: an MP4, MOV or WebM of one person, head to toe, with a still camera. Set the part to use with
+- **From a video**: an MP4, MOV or WebM of a person, head to toe, with a still camera (or one turning on the spot to
+  follow: choose **Camera: panning**). Set the part to use with
   **Start here** / **End here** (at most 30 seconds; 15 seconds take about 2 minutes). **Quality**: **Best**
   (smooth and accurate), **Quick** (closest to the video, a little shakier) or **Light** (from the body points
   alone, may drift). **Keep planted feet still**, **In place (no travel)** and **Smoothing** clean it up. **Make
@@ -436,6 +437,14 @@ On the skinned model, **Animation source** has four ways:
 
 The animated model plays its clips from the view's **Animation** menu. A clip whose bones did not match says it
 **never moves**.
+
+**Connect two clips** (on the animated model of a person): pick **From** and **To** among its clips, optionally say
+what happens in between (*turns and draws the sword*), the **Length** (0.5 to 8 seconds), and with a **To** clip its
+**Turn** (degrees, left positive) and **Travel** (metres straight on; empty: from how fast the two clips move).
+**Make transition**: Kimodo makes the motion that starts on the last pose of the first clip and ends on the first
+pose of the second. Leave **From** or **To** empty to continue a clip or to lead into one. The transition opens on
+its own page; **Put this motion on the model with its clips** adds it next to the clips it connects. In a game it
+plays between the two. Needs the Setup card **Text to motion**.
 
 ### The animation editor
 
@@ -467,8 +476,9 @@ The animated model plays its clips from the view's **Animation** menu. A clip wh
   attached, so on other frames the hand goes where the clip takes it (a punch that falls short). IK target holds the
   hand or foot on its target on every frame the control covers, the IK solving each frame (a foot planted while the
   body moves, a weapon in both hands).
-- **Foot locks**: **Find foot contacts** finds where a foot should stand still; **Lock … here** keeps it planted
-  from one frame to another, with a blend in and out.
+- **Foot locks**: **Find foot contacts** finds where a foot should stand still; **Find hand contacts** where a palm
+  rests on the floor (a push-up, a crawl); **Lock … here** keeps it planted from one frame to another, with a blend in
+  and out.
 - **Clip tools**: **Trim** (first and last frame), **Speed**, **Loop match** (the end blends into the start),
   **Ground** (with **Snap to ground**), **In place (no travel)** and **Smoothing** per body part (steadies jitter,
   for example from a video).

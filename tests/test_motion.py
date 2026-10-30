@@ -99,10 +99,10 @@ def fake_generation(monkeypatch):
     """generate() writes a BVH without Kimodo; Blender writes a GLB without Blender."""
     seen = {}
 
-    def fake_generate(prompt, seconds, seed, steps, out, params=None):
+    def fake_generate(prompt, seconds, seed, steps, out, params=None, connect=None):
         seen["generate"] = (prompt, seconds, seed, steps)
         (out / "motion.bvh").write_text("HIERARCHY\nROOT Root\n{\n}\nMOTION\nFrames: 150\n")
-        return out / "motion.bvh"
+        return out / "motion.bvh", {}
 
     def fake_blender(op, inputs, out, params, timeout=None):
         assert op == "bvh_clip" and inputs[0].name == "motion.bvh"

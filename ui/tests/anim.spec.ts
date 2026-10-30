@@ -44,6 +44,34 @@ test("Find foot contacts: a still stretch of three frames or more, not a slide",
   expect(contacts(clip, ["Foot"])).toEqual([{ bone: "Foot", from: 0, to: 4, blend: 3 }]);
 });
 
+test("Find hand contacts (M64): a palm still on the floor locks, a hand held still at hip height does not", () => {
+  const F = 8; // the feet give the floor at 0 and the head 1.7 m up the height
+  const still = (v: V3) => Array.from({ length: F }, () => v);
+  const clip: Clip = {
+    fps: 24,
+    frames: F,
+    bones: [
+      { name: "Foot", parent: null, offset: [0, 0, 0] },
+      { name: "Head", parent: null, offset: [0, 1.7, 0] },
+      { name: "LeftHand", parent: null, translation: still([0.3, 0.05, 0.2]) }, // on the floor (a push-up)
+      { name: "RightHand", parent: null, translation: still([-0.3, 0.9, 0.2]) }, // still, in the air
+    ],
+  };
+  expect(contacts(clip, [], ["LeftHand", "RightHand"])).toEqual([{ bone: "LeftHand", from: 0, to: F - 1, blend: 3 }]);
+  expect(contacts(clip, ["RightHand"])).toEqual([{ bone: "RightHand", from: 0, to: F - 1, blend: 3 }]); // as a foot it would: its own lowest counts
+  // a clip that starts in a plank: 0.35 m tall, 1.6 m long; the palm 8 cm above the toes still counts (the body's size is its length)
+  const plank: Clip = {
+    fps: 24,
+    frames: F,
+    bones: [
+      { name: "Foot", parent: null, offset: [0, 0, 0] },
+      { name: "Head", parent: null, offset: [1.6, 0.35, 0] },
+      { name: "LeftHand", parent: null, translation: still([1.3, 0.08, 0.2]) },
+    ],
+  };
+  expect(contacts(plank, [], ["LeftHand"])).toEqual([{ bone: "LeftHand", from: 0, to: F - 1, blend: 3 }]);
+});
+
 test("The two-bone solve: a straight leg bends to reach, a target out of reach stretches it, the foot keeps its turn", () => {
   // a straight leg down from the hip, its world turns all identity: the bones' offsets are b - a and c - b
   const [a, b, c]: V3[] = [

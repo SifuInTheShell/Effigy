@@ -8,16 +8,26 @@ generator, the chain, Blender, Claude and the exports have run here and their nu
 **Next session: start at section 2, "Next session".**
 
 Read first: `CLAUDE.md` (rules), this file, then `docs/IMPLEMENTATION.md` §0 (rules), §3 (frozen
-contracts), §6 (never-do) as needed. Install steps are `SETUP.md`; the first laptop session's
-checklist, done, is `docs/archive/LAPTOP.md`.
+contracts), §6 (never-do) as needed. Install steps are `SETUP.md`. **This round's laptop checks (M64, M65):
+`docs/LAPTOP.md`.** The first laptop session's checklist, done, is `docs/archive/LAPTOP.md`.
 
 ---
 
-## 1. Where things stand (2026-10-18: M63 built, its two branches pending; M61 and M62 merged)
+## 1. Where things stand (2026-10-30: M64 and M65 built blind in the cloud, to validate on the laptop; M61–M63 merged, 0.2.0 out)
 
-- **M63 (branches `m63-ik-contract`, then `m63-ik-editor` on top; PRs pending)**: character IK in the animation editor. The armature drawn as Blender draws it (octahedral bones with their roll, relationship lines, the IK chain yellow); IK controls in the `anim_edit` layer (§3.2 step 3c: a hand or foot on a keyed target, chain 2–8, FABRIK past two, a swivel for the knee/elbow, weight, world or bone space) with target and pole handles in the view; IK drag over any chain length; R/G, Page Up/Down. The contract branch merges first.
-- **M62 (branch `m62-import-bake`, PR pending; contains M61)**: `bake` of an imported model reads its own materials (no volume needed); chain checked on two imported test models (`docs/bench/m62.md`). A skeleton that is not one of Effigy's templates is dropped and the model is rigged with Effigy's own.
-- **M61 (branch `m61-redraw`, PR pending)**: the 2D step `redraw` (upscale 2×/4× with Real-ESRGAN, or redraw at any size in overlapping windows with Z-Image-Turbo + Tile), in a picture's panel and the Tools menu; MCP `run_step redraw` and `import_file(asset_id=…)`.
+- **M65 (branch `ccr-3bd14478-pui9wd`, the cloud session, 2026-10-30; not run on a GPU)**: connect clips, transition
+  only. On an animated model, "Connect two clips" asks Kimodo for the motion from one clip's last pose into another's
+  first (or after one, or into one); the transition goes back on the model with the clips. The pose reaches Kimodo by
+  the exact inverse of the retarget (`steps/_connect.py`). The joined clip and the path viewer come later (the
+  maintainer, 2026-10-30). What to run: IMPLEMENTATION M65 "Needs the laptop".
+- **M64 (branch `ccr-3bd14478-pui9wd`, the cloud session, 2026-10-29; not run on a GPU)**: motion from video gets the
+  other people in the clip (`metrics.people`, "Make the other N's motion too" on the motion's page), the editor's
+  Find hand contacts (a palm on the floor locked like a foot), and a panning camera (`camera: "panning"`: the camera's
+  turn read off the background with OpenCV and given to GEM-X). What to run: IMPLEMENTATION M64 "Needs the laptop".
+  Came out of the assessment of toyxyz/toyxyz_RGBMoCap (its models are SMPL-family and noncommercial: not used).
+- **M63 (merged: PRs #7 and #8)**: character IK in the animation editor. The armature drawn as Blender draws it (octahedral bones with their roll, relationship lines, the IK chain yellow); IK controls in the `anim_edit` layer (§3.2 step 3c: a hand or foot on a keyed target, chain 2–8, FABRIK past two, a swivel for the knee/elbow, weight, world or bone space) with target and pole handles in the view; IK drag over any chain length; R/G, Page Up/Down. The contract branch merges first.
+- **M62 (merged: PRs #3 and #6)**: `bake` of an imported model reads its own materials (no volume needed); chain checked on two imported test models (`docs/bench/m62.md`). A skeleton that is not one of Effigy's templates is dropped and the model is rigged with Effigy's own.
+- **M61 (merged: PRs #2 and #5)**: the 2D step `redraw` (upscale 2×/4× with Real-ESRGAN, or redraw at any size in overlapping windows with Z-Image-Turbo + Tile), in a picture's panel and the Tools menu; MCP `run_step redraw` and `import_file(asset_id=…)`.
 - **Open issue**: `clean` crashes on a 50k-triangle import (CuMesh `fill_holes`, CUDA error 9). Not diagnosed; a smaller import cleans.
 
 - **2026-10-13: the generic rig dropped** (`drop-generic-rig`; the maintainer): M59's `rig_skin {full: true}`, the Rig
@@ -220,7 +230,12 @@ Done and recorded elsewhere: the 2D roadmap (M54–M57) and the bigger GPUs (M46
 `docs/bench/m46.md`, research 16; what is left there is the users' GPU reports for the 24/32 GB thresholds), the
 agent's hoarding findings 1–22 (4 built as Setup's Start Blender; 5 decided: the port stays 8000).
 
-0. **Merge M61 and M62** (PRs pending): M61 was smoke-tested 2026-10-16; the full 33408 x 9600 redraw job (IMPLEMENTATION M61
+0. **Validate M65** (built in the cloud, 2026-10-30, never run on a GPU): `docs/LAPTOP.md` part 1. Check 0
+   first (one import, seconds), then the seam numbers from `python -m steps._connect`.
+0. **Validate M64** (built in the cloud, 2026-10-29, never run on a GPU): `docs/LAPTOP.md` part 2, the four laptop
+   checks in IMPLEMENTATION M64's acceptance (two people, a push-up clip's hand locks, a panned walk in "still" and "panning", the numbers into
+   `docs/bench/m34.md`). The panning camera is the one to doubt first: a camera that also walks reads as a turn.
+0. **M61's big job** (M61 and M62 are merged): M61 was smoke-tested 2026-10-16; the full 33408 x 9600 redraw job (IMPLEMENTATION M61
    acceptance 3) is the maintainer's to run. Then the `clean` crash above.
 1. **M60 The held weapon as a separate prop on the hand bone** (the maintainer's pick, 2026-10-13: the standing-pose redraw
    empties the hands). The other offered items (a Sprites warning without animations, Flat by default, Animate this

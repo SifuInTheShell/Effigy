@@ -60,7 +60,7 @@ def joints(arm, name_of):
     }
 
 
-def refs(pos):
+def refs(pos):  # mirrored in steps/_connect.py (M65 inverts this retarget): change both
     """The body's forward and up, and the palm normal per side, from joint positions."""
     up = (pos["Head"] - pos["Hips"]).normalized()
     # forward from the feet (toes point the way the body faces), not from which side is called Left:
@@ -93,14 +93,14 @@ rest_world = {n: (ours.matrix_world @ ours.data.bones[n].matrix_local).to_3x3() 
 to_arm = ours.matrix_world.inverted()
 for pb in ours.pose.bones:
     pb.rotation_mode = "QUATERNION"
-MAIN = {
+MAIN = {  # mirrored in steps/_connect.py (a test compares them)
     "Hips": "Spine",
     "Spine2": "Neck",
     "Neck": "Head",
     "LeftHand": "LeftHandMiddle1",
     "RightHand": "RightHandMiddle1",
 }
-KEEP = {
+KEEP = {  # mirrored in steps/_connect.py (a test compares them)
     "Hips",
     "Spine",
     "Spine1",
@@ -120,7 +120,7 @@ def along(name):
     return (name, b.children[0].name) if b.children else (b.parent.name, name)
 
 
-def frames(pos, twist, twists=None):
+def frames(pos, twist, twists=None):  # mirrored in steps/_connect.py: change both
     """Our bone → its rest frame in `pos` (a rig's joint positions), with the twist reference chosen per
     bone. `twists` (skeleton.json, M22b: the hands' palm direction from rig_fit's rule, and whatever the
     user turned in the editor) replace the automatic references: a hand's twist serves its forearm and
@@ -174,7 +174,7 @@ twists_ours = read_twists(p.get("skeleton"))
 frame_ours = frames(pos_ours, twist, twists_ours)
 
 
-def transfer(src, pairs, align, scale, frame):
+def transfer(src, pairs, align, scale, frame):  # steps/_connect.soma_pose is its inverse
     """Pose our bones for the source's current frame; keys on rotation (and the hips' location)."""
     bpy.context.scene.frame_set(frame)
     desired = {}  # our bone → its wanted rotation in world space (3×3)

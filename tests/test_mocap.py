@@ -167,6 +167,7 @@ def test_track_follows_the_chosen_person():
         {"start": -1},
         {"start": 3, "end": 2},
         {"person": 9},
+        {"camera": "moving"},
         {"smooth": 2},
         {"end": "x"},
     ],
@@ -183,11 +184,67 @@ def test_params_defaults():
         "start": 0.0,
         "end": None,
         "person": 0,
+        "camera": "still",
         "smooth": 0.5,
         "foot_lock": True,
         "in_place": False,
         "name": "",
     }
+
+
+def _warped(angles_deg: list[float], K: np.ndarray, rng, mover: bool = False) -> np.ndarray:
+    """A textured scene seen by a camera turning about its vertical axis by each angle: frames (L, H, W, 3).
+    `mover`: a bright square walking across the lower half, a person the mask must leave out (BOX)."""
+    import cv2
+
+    h, w = 240, 320
+    scene = cv2.GaussianBlur(rng.integers(0, 256, (h, w), dtype=np.uint8), (0, 0), 1.5)
+    out = []
+    for t, a in enumerate(angles_deg):
+        R = Rotation.from_euler("y", a, degrees=True).as_matrix()
+        img = cv2.warpPerspective(
+            scene, K @ R @ np.linalg.inv(K), (w, h), borderMode=cv2.BORDER_REFLECT
+        )
+        if mover:
+            x = 40 + 12 * t
+            img[150:230, x : x + 40] = (rng.integers(0, 256, (80, 40)) > 128) * 255
+        out.append(np.repeat(img[..., None], 3, axis=2))
+    return np.stack(out)
+
+
+BOX = lambda t: np.array(
+    [[40 + 12 * t, 150, 80 + 12 * t, 230]], float
+)  # the mover's box at frame t
+
+
+def test_camera_path_reads_a_pan_off_the_background_and_a_still_camera_as_still():
+    pytest.importorskip("cv2")
+    K = np.array([[320.0, 0, 160], [0, 320.0, 120], [0, 0, 1]])
+    rng = np.random.default_rng(0)
+    angles = [0.5 * t for t in range(10)]
+    none = [np.zeros((0, 4))] * 10
+    R, unread = mocap.camera_path(_warped(angles, K, rng), none, K)
+    assert unread == 0
+    for t, a in enumerate(angles):  # each frame's R_w2c is the camera's turn from the first frame
+        off = Rotation.from_matrix(R[t]) * Rotation.from_euler("y", a, degrees=True).inv()
+        assert np.degrees(off.magnitude()) < 0.3, (t, np.degrees(off.magnitude()))
+    still, _ = mocap.camera_path(_warped([0.0] * 5, K, rng), none[:5], K)
+    assert np.degrees(Rotation.from_matrix(still[-1]).magnitude()) < 0.05
+
+
+def test_camera_path_leaves_the_people_out_and_gives_up_on_a_blank_wall():
+    pytest.importorskip("cv2")
+    K = np.array([[320.0, 0, 160], [0, 320.0, 120], [0, 0, 1]])
+    rng = np.random.default_rng(1)
+    angles = [0.5 * t for t in range(10)]
+    frames = _warped(angles, K, rng, mover=True)
+    R, unread = mocap.camera_path(frames, [BOX(t) for t in range(10)], K)
+    off = Rotation.from_matrix(R[-1]) * Rotation.from_euler("y", angles[-1], degrees=True).inv()
+    assert unread == 0 and np.degrees(off.magnitude()) < 0.3
+    blank = np.full((6, 240, 320, 3), 128, np.uint8)
+    with pytest.raises(StepError) as e:
+        mocap.camera_path(blank, [np.zeros((0, 4))] * 6, K)
+    assert e.value.code == "failed" and "held still" in str(e.value)
 
 
 def test_prepare_video_resamples_trims_and_scales(tmp_path):
@@ -270,9 +327,10 @@ def test_run_around_a_faked_gem_x(tmp_path, monkeypatch):
         }
     }
 
-    def fake_gem(video, mode, person, work):
+    def fake_gem(video, mode, person, work, camera):
         monkeypatch.chdir(tmp_path / "elsewhere")  # what the engine does
-        return pred, np.zeros((L, 77, 3)), np.zeros((L, 4)), 0.5
+        assert camera == "panning"
+        return pred, np.zeros((L, 77, 3)), np.zeros((L, 4)), 0.5, {"people": 3, "camera_unread": 2}
 
     def fake_blender(op, inputs, outdir, params, timeout=None):
         assert op == "bvh_clip" and params["name"] == "Walk 050"  # the pack has a Walk
@@ -291,7 +349,14 @@ def test_run_around_a_faked_gem_x(tmp_path, monkeypatch):
 
     monkeypatch.setattr(steps.anim, "catalogue", lambda: [{"name": "Walk", "file": "pack.glb"}])
     monkeypatch.chdir(tmp_path)
-    res = mocap.run("run", "asset/040_upload", str(asset / "050_mocap"), {"mode": "keypoints"})
+    res = mocap.run(
+        "run",
+        "asset/040_upload",
+        str(asset / "050_mocap"),
+        {"mode": "keypoints", "camera": "panning", "person": 1},
+    )
     assert res["metrics"]["name"] == "Walk 050" and res["outputs"]["clip"] == "clip.glb"
+    m = res["metrics"]
+    assert (m["people"], m["person"], m["camera"], m["camera_unread"]) == (3, 1, "panning", 2)
     assert (asset / "050_mocap" / "motion.bvh").read_text().startswith("HIERARCHY")
     assert "facebook/sam-3d-body" not in res["licenses"] and "nvidia/GEM-X" in res["licenses"]
