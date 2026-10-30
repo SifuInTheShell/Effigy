@@ -925,6 +925,45 @@ ol.steps {
   border-top: 1px solid var(--border);
   padding-top: 12px;
 }
+/* each tool its own block: the Tools' sections, and a section's separate tools (Texture detail: Refine texture |
+   Baked shadows | Texture paint) */
+#tools > .stack > section + section,
+.panel .tool + .tool {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+#tools > .stack {
+  gap: 16px;
+}
+.panel .tool h4 {
+  margin: 0;
+}
+.panel .tool > button,
+.panel .pair button,
+.panel .pair select,
+.panel .pair input {
+  width: 100%;
+}
+/* two controls side by side, half the width each: they never wrap onto a line of their own */
+.panel .pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  align-items: end;
+}
+.panel .slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel .slider input {
+  flex: 1;
+  min-width: 0;
+}
+.panel .slider span {
+  min-width: 3ch;
+  color: var(--text);
+}
 .panel > details > div,
 .panel details .stack {
   display: grid;

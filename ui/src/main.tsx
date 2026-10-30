@@ -2023,11 +2023,14 @@ function FacePanel(props: { asset: string; version: Meta; chain: Chain }) {
       <p className="muted">
         Click Face from image to copy the face from your picture onto the texture. This makes the face as sharp as the picture. It takes a few seconds.
       </p>
-      <div className="row">
-        <select aria-label="Region" value={region} onChange={(e) => setRegion(e.target.value)}>
-          <option value="head">Head</option>
-          <option value="front">Whole front</option>
-        </select>
+      <div className="pair">
+        <label>
+          Region
+          <select aria-label="Region" value={region} onChange={(e) => setRegion(e.target.value)}>
+            <option value="head">Head</option>
+            <option value="front">Whole front</option>
+          </select>
+        </label>
         <label>
           Strength{" "}
           <input
@@ -2037,15 +2040,27 @@ function FacePanel(props: { asset: string; version: Meta; chain: Chain }) {
             max={1}
             step={0.1}
             value={strength}
-            style={{ width: "4.5em" }}
             onChange={(e) => setStrength(Math.min(1, Math.max(0.1, Number(e.target.value) || 1)))}
           />
         </label>
-        <button disabled={busy} onClick={() => run(() => props.chain(props.asset, v.version, [["project", { region, strength }]]))}>
-          Face from image
-        </button>
       </div>
+      <button className="primary" disabled={busy} onClick={() => run(() => props.chain(props.asset, v.version, [["project", { region, strength }]]))}>
+        Face from image
+      </button>
     </section>
+  );
+}
+
+// a panel slider: its name above, the bar the panel's width with its value beside it (no wrapped value line)
+function Slider(p: { name: string; label: string; min: number; max: number; step: number; value: number; digits?: number; set: (x: number) => void }) {
+  return (
+    <label>
+      {p.name}
+      <span className="slider">
+        <input type="range" aria-label={p.label} min={p.min} max={p.max} step={p.step} value={p.value} onChange={(e) => p.set(Number(e.target.value))} />
+        {p.digits != null && <span>{p.value.toFixed(p.digits)}</span>}
+      </span>
+    </label>
   );
 }
 
@@ -2061,12 +2076,15 @@ function DetailPanel(props: { asset: string; version: Meta; versions: Meta[]; ch
   const [k4, setK4] = useState(false);
   const [painting, setPainting] = useState(false); // M68: the brush on the model
   const [brush, setBrush] = useState(0.03);
+  const [erase, setErase] = useState(false); // the brush wipes paint off instead of adding it
+  const [paintStrength, setPaintStrength] = useState(1); // its own: the paint is a separate tool from Refine texture
   const [becomes, setBecomes] = useState(""); // what the painted part becomes: never the whole asset's description
   const [err, setErr] = useState("");
   const sent = useRef<{ rev: number; version: string } | null>(null); // the paint uploaded last, while unchanged
   useEffect(
     () => () => {
       window.__viewer?.setPaint(false); // the brush off when the panel goes
+      if (window.__viewer) window.__viewer.paintErase = false;
     },
     [],
   );
@@ -2086,7 +2104,7 @@ function DetailPanel(props: { asset: string; version: Meta; versions: Meta[]; ch
         } catch (e) {
           return setErr(explain(e));
         }
-      await props.chain(props.asset, v.version, [["refine", { op: "edit", region: sent.current!.version, prompt: becomes.trim(), strength }]]);
+      await props.chain(props.asset, v.version, [["refine", { op: "edit", region: sent.current!.version, prompt: becomes.trim(), strength: paintStrength }]]);
     });
   const go = (params: object) => run(() => props.chain(props.asset, v.version, [["refine", { ...params, ...(delight ? { delight } : {}) }]]));
   // a redraw: the strength, the description if any, 4K if ticked
@@ -2112,33 +2130,25 @@ function DetailPanel(props: { asset: string; version: Meta; versions: Meta[]; ch
           )}
         </>
       )}
-      <p className="muted">
-        Click Refine texture to redraw the texture's fine detail (buttons, stitching, wood grain) from close-up views. The shape and the colours stay. It takes
-        about 4–6 minutes. To work on one place, frame it in the 3D view, describe what should be there, and click Redraw this view: the square in the
-        middle of the view is redrawn, the rest stays (a face from the picture stays too).
-      </p>
       {props.missing && (
         <p className="note warn">
           The texture-detail model wasn't found. <a className="button small" href={setupAt("refine")}>Set it up</a>.
         </p>
       )}
-      <label>
-        Description{" "}
-        <input aria-label="Description" value={prompt} placeholder="the asset's own description" onChange={(e) => setPrompt(e.target.value)} />
-      </label>
-      <div className="row">
+      <div className="stack tool">
+        <h4>Refine texture</h4>
+        <p className="muted">
+          Click Refine texture to redraw the texture's fine detail (buttons, stitching, wood grain) from close-up views. The shape and the colours stay. It
+          takes about 4–6 minutes. To work on one place, frame it in the 3D view, describe what should be there, and click Redraw this view: the square in the
+          middle of the view is redrawn, the rest stays (a face from the picture stays too).
+        </p>
         <label>
-          Strength{" "}
-          <input
-            type="range"
-            aria-label="Detail strength"
-            min={0.3}
-            max={1}
-            step={0.1}
-            value={strength}
-            onChange={(e) => setStrength(Number(e.target.value))}
-          />{" "}
-          {strength.toFixed(1)}
+          Description{" "}
+          <input aria-label="Description" value={prompt} placeholder="the asset's own description" onChange={(e) => setPrompt(e.target.value)} />
+        </label>
+        <Slider name="Strength" label="Detail strength" min={0.3} max={1} step={0.1} digits={1} value={strength} set={setStrength} />
+        <label className="check" title="4096² instead of the texture's size, for characters seen up close: more views on a tall model (about twice), and the time and memory are not measured yet">
+          <input type="checkbox" checked={k4} onChange={(e) => setK4(e.target.checked)} /> 4K texture (slower, not measured yet)
         </label>
         <button className="primary" disabled={busy || props.missing} onClick={() => redraw({})}>
           Refine texture
@@ -2151,41 +2161,62 @@ function DetailPanel(props: { asset: string; version: Meta; versions: Meta[]; ch
           Redraw this view
         </button>
       </div>
-      <p className="muted">
-        To change one part, click Paint the part to change and paint it on the model (drag on it; Shift erases; a drag beside it still turns the view), say what
-        it should become, and click Redraw the painted part: it is redrawn from every side that sees it, and nothing outside it changes.
-      </p>
-      <label>
-        It becomes{" "}
-        <input aria-label="What the painted part becomes" value={becomes} placeholder="a gold lion's-head lock" onChange={(e) => setBecomes(e.target.value)} />
-      </label>
-      <div className="row">
-        <button
-          aria-pressed={painting}
-          disabled={busy || props.missing}
-          onClick={() => setPainting(!!window.__viewer?.setPaint(!painting, brush))}
-        >
+      <div className="stack tool">
+        <h4>Baked shadows</h4>
+        <p className="muted">
+          Lightens what the texture darkened where the model is occluded (from the bake's ambient occlusion), so the game engine's own shadows don't double
+          them. Remove baked shadows alone takes a few seconds; Refine texture applies it too.
+        </p>
+        <Slider name="Baked shadows to remove" label="Baked shadows to remove" min={0} max={1} step={0.25} digits={2} value={delight} set={setDelight} />
+        <button disabled={busy || !delight} title="Only takes the shadows out: no redraw, a few seconds" onClick={() => go({ views: [] })}>
+          Remove baked shadows
+        </button>
+      </div>
+      <div className="stack tool">
+        <h4>Texture paint</h4>
+        <p className="muted">
+          To change one part, click Paint the part to change and paint it on the model (drag on it; Erase, or Shift, wipes a stroke that went too far; a drag
+          beside it still turns the view), say what it should become, and click Redraw the painted part: it is redrawn from every side that sees it, and
+          nothing outside it changes.
+        </p>
+        <label>
+          It becomes{" "}
+          <input aria-label="What the painted part becomes" value={becomes} placeholder="a gold lion's-head lock" onChange={(e) => setBecomes(e.target.value)} />
+        </label>
+        <Slider
+          name="Brush"
+          label="Brush size"
+          min={0.01}
+          max={0.1}
+          step={0.01}
+          value={brush}
+          set={(x) => {
+            setBrush(x);
+            if (painting) window.__viewer?.setPaint(true, x);
+          }}
+        />
+        <button aria-pressed={painting} disabled={busy || props.missing} onClick={() => setPainting(!!window.__viewer?.setPaint(!painting, brush))}>
           {painting ? "Stop painting" : "Paint the part to change"}
         </button>
-        <label>
-          Brush{" "}
-          <input
-            type="range"
-            aria-label="Brush size"
-            min={0.01}
-            max={0.1}
-            step={0.01}
-            value={brush}
-            onChange={(e) => {
-              setBrush(Number(e.target.value));
-              if (painting) window.__viewer?.setPaint(true, Number(e.target.value));
+        <div className="pair">
+          <button
+            aria-pressed={erase}
+            disabled={busy}
+            title="Wipes paint off where you drag, for a stroke that went too far (Shift does the same while you paint)"
+            onClick={() => {
+              if (window.__viewer) window.__viewer.paintErase = !erase;
+              setErase(!erase);
             }}
-          />
-        </label>
-        <button disabled={busy} onClick={() => window.__viewer?.clearPaint()}>
-          Clear the paint
-        </button>
+          >
+            Erase
+          </button>
+          <button disabled={busy} onClick={() => window.__viewer?.clearPaint()}>
+            Clear the paint
+          </button>
+        </div>
+        <Slider name="Strength" label="Paint strength" min={0.3} max={1} step={0.1} digits={1} value={paintStrength} set={setPaintStrength} />
         <button
+          className="primary"
           disabled={busy || props.missing || !becomes.trim()}
           title={becomes.trim() ? "Redraws what is painted as you said; the rest stays as it is" : "Say above what the painted part should become"}
           onClick={editPainted}
@@ -2198,23 +2229,6 @@ function DetailPanel(props: { asset: string; version: Meta; versions: Meta[]; ch
           {err}
         </p>
       )}
-      <label className="check" title="4096² instead of the texture's size, for characters seen up close: more views on a tall model (about twice), and the time and memory are not measured yet">
-        <input type="checkbox" checked={k4} onChange={(e) => setK4(e.target.checked)} /> 4K texture (slower, not measured yet)
-      </label>
-      <div className="row">
-        <label>
-          Baked shadows to remove{" "}
-          <input type="range" aria-label="Baked shadows to remove" min={0} max={1} step={0.25} value={delight} onChange={(e) => setDelight(Number(e.target.value))} />{" "}
-          {delight.toFixed(2)}
-        </label>
-        <button disabled={busy || !delight} title="Only takes the shadows out: no redraw, a few seconds" onClick={() => go({ views: [] })}>
-          Remove baked shadows
-        </button>
-      </div>
-      <p className="muted">
-        Lightens what the texture darkened where the model is occluded (from the bake's ambient occlusion), so the game engine's own shadows don't double
-        them. Remove baked shadows alone takes a few seconds; Refine texture applies it too.
-      </p>
     </section>
   );
 }

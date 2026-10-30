@@ -1215,6 +1215,26 @@ test("Texture detail: a part painted on the model is redrawn by refine's edit (M
   await page.mouse.up();
   expect(await page.evaluate(() => (window as any).__viewer.painted())).toBe(true);
   expect(await page.evaluate(() => (window as any).__viewer.view())).toEqual(before);
+  // Erase wipes the first half of the stroke off, the rest stays painted
+  const whites = () =>
+    page.evaluate(async () => {
+      const bmp = await createImageBitmap(await (window as any).__viewer.paintMask());
+      const g = new OffscreenCanvas(bmp.width, bmp.height).getContext("2d")!;
+      g.drawImage(bmp, 0, 0);
+      return g.getImageData(0, 0, bmp.width, bmp.height).data.filter((c, i) => i % 4 === 0 && c > 127).length;
+    });
+  const full = await whites();
+  await page.getByRole("button", { name: "Erase" }).click();
+  await expect(page.getByRole("button", { name: "Erase" })).toHaveAttribute("aria-pressed", "true");
+  await page.mouse.move(x - 15, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y, { steps: 3 });
+  await page.mouse.up();
+  const left = await whites();
+  expect(left).toBeGreaterThan(0);
+  expect(left).toBeLessThan(full);
+  await page.getByRole("button", { name: "Erase" }).click();
+  await expect(page.getByRole("button", { name: "Erase" })).toHaveAttribute("aria-pressed", "false");
   // the veil is the brush's own: the Inspect views and the wireframe leave it alone, and the view keeps drawing
   for (const mode of ["albedo", "uv", "pbr"]) await page.getByLabel("Inspect").selectOption(mode);
   await page.getByLabel("Wireframe").check();
