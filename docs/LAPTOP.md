@@ -9,11 +9,13 @@ What each milestone is, and why: IMPLEMENTATION.md, sections M64 and M65 (near t
 
 ## 0. Get the code
 
-- [ ] The work is on branch `ccr-3bd14478-pui9wd`, not on `main` (protected: changes go through pull requests).
+- [ ] The work came in through pull request #12 (branch `ccr-3bd14478-pui9wd`). Once #12 is merged it is on `main`:
   ```
-  git fetch origin ccr-3bd14478-pui9wd
-  git switch ccr-3bd14478-pui9wd
+  git switch main
+  git pull
   ```
+  While #12 is still open, use its branch instead: `git fetch origin ccr-3bd14478-pui9wd`, then
+  `git switch ccr-3bd14478-pui9wd`.
 - [ ] No new package, model or venv. Rebuild the UI and restart the app (`run.bat`): step code changed, and a
   resident Kimodo or GEM-X worker would keep the old code until it is evicted.
   ```
