@@ -354,12 +354,16 @@ it can invent detail.
 **Redraw this view** redraws only the square in the middle of the 3D view, as it is framed now, with the
 description.
 
-**To change one part** (a lock, a belt, a patch): click **Paint the part to change** and paint it on the model.
-Drag on the model to paint, hold **Shift** to erase, and drag beside the model to turn the view; **Brush** sets the
-size, **Clear the paint** starts again. A magenta veil shows what is painted. Say what the part should become under
-**It becomes** (*a gold lion's-head lock*) and click **Redraw the painted part**. It is redrawn from every side that
-sees it, from as many views as that takes; nothing outside the paint changes, and the new version's page says so.
-**Detail strength** below 1 keeps more of what was there.
+The panel has three tools, each under its own heading: **Refine texture** (above), **Baked shadows** (below) and
+**Texture paint**.
+
+**Texture paint**, to change one part (a lock, a belt, a patch): click **Paint the part to change** and paint it on
+the model. Drag on the model to paint and drag beside it to turn the view; **Brush** sets the size. **Erase** (or
+**Shift** while you drag) wipes paint off where a stroke went too far, click it again to paint; **Clear the paint**
+starts again. A magenta veil shows what is painted. Say what the part should become under **It becomes** (*a gold
+lion's-head lock*) and click **Redraw the painted part**. It is redrawn from every side that sees it, from as many
+views as that takes; nothing outside the paint changes, and the new version's page says so. The paint's own
+**Strength** below 1 keeps more of what was there.
 
 **Remove baked shadows** (a few seconds, no redraw) takes the shading the generator baked into the colours back
 out, so your engine's lighting does not double it. **Baked shadows to remove** sets how much.
@@ -920,7 +924,7 @@ versions cannot be exported.
 | Where | Keys |
 |---|---|
 | 3D view | drag: orbit · scroll: zoom · right-drag: pan |
-| Painting a part (Texture detail) | drag on the model: paint · **Shift**+drag: erase · drag beside it: orbit |
+| Painting a part (Texture detail) | drag on the model: paint (with **Erase** on: erase) · **Shift**+drag: the other one · drag beside it: orbit |
 | Time bar (3D clips, 2D sheets, animation editor) | **Space** play/pause · **←** **→** a frame · **Home** **End** first/last frame |
 | Animation editor | **I** key the bone · **X** / **Delete** delete keys · **Ctrl+Z** / **Ctrl+Shift+Z** undo/redo · **Esc** cancel a drag · **Ctrl+wheel** zoom the timeline |
 | Skeleton editor | **G** move · **R** rotate · **Shift+click** add to the selection · **Esc** cancel a drag · **Ctrl+Z** / **Ctrl+Shift+Z** |

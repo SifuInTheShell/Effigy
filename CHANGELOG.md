@@ -6,8 +6,10 @@ milestone, is in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) §4.
 
 ## Unreleased (on `main` since 0.2.0)
 
-Built in a cloud session without a GPU or Blender. The unit and interface tests pass. None of it has run on a GPU
-or in Blender yet: the checks for that are in [docs/LAPTOP.md](docs/LAPTOP.md).
+M64 to M68 were built in a cloud session without a GPU or Blender; the unit and interface tests pass. On the
+reference laptop (RTX 5080, 2026-10-30) so far: connecting clips (M65), the extra detail views (M66) and the arm
+clearance (M67) ran on one character. The video checks (M64), painting a part (M68) and the checks in a game
+engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
 
 ### Animation
 
@@ -33,9 +35,18 @@ or in Blender yet: the checks for that are in [docs/LAPTOP.md](docs/LAPTOP.md).
   of the shoulders, a ledge under a post, hollows), never from above onto the flat top of a wide prop (that
   invented tiles before). No colour is taken from right next to an inner edge any more (an arm in front of the
   body), which removes coloured halos. A run takes about 4 to 6 minutes.
-- **Paint a part and redraw it** (M68). In **Texture detail**, **Paint the part to change** on the model (Shift
-  erases), say what it should become under **It becomes**, and click **Redraw the painted part**. It is redrawn
-  from every side that sees it, and nothing outside the paint changes.
+- **Paint a part and redraw it** (M68). In **Texture detail**, **Paint the part to change** on the model, say what
+  it should become under **It becomes**, and click **Redraw the painted part**. It is redrawn from every side that
+  sees it, and nothing outside the paint changes. **Erase** (or Shift while painting) wipes a stroke that went too
+  far; **Clear the paint** starts again; the paint has its own **Strength**.
+
+### Interface
+
+- **Each tool its own block.** Under **Tools**, Face from image, Texture detail, Parts and Sprites are set apart by
+  a line, and Texture detail is split into its three tools, each with its own heading: **Refine texture**, **Baked
+  shadows** and **Texture paint**.
+- **No wrapped rows.** A slider shows its value on the same line; a tool's buttons fill the panel's width, and two
+  side by side split it in half (Erase | Clear the paint, Region | Strength in Face from image).
 
 ### For agents
 

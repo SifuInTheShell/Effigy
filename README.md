@@ -328,7 +328,8 @@ isn't there hasn't been run. Known limits:
   is open).
 - What came after 0.2.0 ([CHANGELOG.md](CHANGELOG.md): everyone in a video, a panning camera, hand locks,
   transitions between clips, arms kept out of the body, extra detail views, painting a part to redraw) passes its
-  tests but has not run on a GPU or in Blender yet.
+  tests. Transitions, the extra detail views and the arm clearance have run on the reference laptop on one
+  character; the video features and painting a part have not run on a GPU yet.
 - An experimental Hunyuan3D engine is designed but not built; if it ever is, its outputs are fenced as
   *restricted* (its licence excludes the EU, UK and South Korea) and never reach a preset.
 
