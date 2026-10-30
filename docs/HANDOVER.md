@@ -8,8 +8,8 @@ generator, the chain, Blender, Claude and the exports have run here and their nu
 **Next session: start at section 2, "Next session".**
 
 Read first: `CLAUDE.md` (rules), this file, then `docs/IMPLEMENTATION.md` §0 (rules), §3 (frozen
-contracts), §6 (never-do) as needed. Install steps are `SETUP.md`; the first laptop session's
-checklist, done, is `docs/archive/LAPTOP.md`.
+contracts), §6 (never-do) as needed. Install steps are `SETUP.md`. **This round's laptop checks (M64, M65):
+`docs/LAPTOP.md`.** The first laptop session's checklist, done, is `docs/archive/LAPTOP.md`.
 
 ---
 
@@ -230,10 +230,10 @@ Done and recorded elsewhere: the 2D roadmap (M54–M57) and the bigger GPUs (M46
 `docs/bench/m46.md`, research 16; what is left there is the users' GPU reports for the 24/32 GB thresholds), the
 agent's hoarding findings 1–22 (4 built as Setup's Start Blender; 5 decided: the port stays 8000).
 
-0. **Validate M65** (built in the cloud, 2026-10-30, never run on a GPU): the laptop checks 0–4 in IMPLEMENTATION
-   M65's acceptance. Check 0 first (one import, seconds), then the seam numbers from `python -m steps._connect`.
-0. **Validate M64** (built in the cloud, 2026-10-29, never run on a GPU): the four laptop checks in IMPLEMENTATION
-   M64's acceptance (two people, a push-up clip's hand locks, a panned walk in "still" and "panning", the numbers into
+0. **Validate M65** (built in the cloud, 2026-10-30, never run on a GPU): `docs/LAPTOP.md` part 1. Check 0
+   first (one import, seconds), then the seam numbers from `python -m steps._connect`.
+0. **Validate M64** (built in the cloud, 2026-10-29, never run on a GPU): `docs/LAPTOP.md` part 2, the four laptop
+   checks in IMPLEMENTATION M64's acceptance (two people, a push-up clip's hand locks, a panned walk in "still" and "panning", the numbers into
    `docs/bench/m34.md`). The panning camera is the one to doubt first: a camera that also walks reads as a turn.
 0. **M61's big job** (M61 and M62 are merged): M61 was smoke-tested 2026-10-16; the full 33408 x 9600 redraw job (IMPLEMENTATION M61
    acceptance 3) is the maintainer's to run. Then the `clean` crash above.
