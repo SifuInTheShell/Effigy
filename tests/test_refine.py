@@ -424,6 +424,151 @@ def test_delight_needs_the_bakes_ao(tmp_path):
     assert e.value.code == "missing_input"
 
 
+class _Red:
+    """An inpainter that draws pure red wherever it is asked to draw again."""
+
+    models = ()
+
+    def encode(self, prompts):
+        self.prompts = prompts
+        return {p: None for p in prompts}
+
+    def __call__(self, img, mask, emb, strength, seed):
+        self.calls = getattr(self, "calls", []) + [(int((mask > 127).sum()), strength)]
+        out = img.copy()
+        out[mask > 127] = (255, 0, 0)
+        return out
+
+
+def _painted(tmp_path, square=8, name="050_upload", grey=255):
+    """A painted mask beside the bake: `grey` (white by default) in a square round the middle of the cube's +Z face."""
+    *_, cells = _box()
+    u, w = cells[(2, 1)]["centre"]
+    m = np.zeros((ATLAS, ATLAS), np.uint8)
+    m[
+        int(w * ATLAS) - square : int(w * ATLAS) + square,
+        int(u * ATLAS) - square : int(u * ATLAS) + square,
+    ] = grey
+    d = tmp_path / "asset" / name
+    d.mkdir(parents=True)
+    Image.fromarray(m).save(d / "image.png")
+    (d / "meta.json").write_text(
+        json.dumps({"version": name, "step": "upload", "outputs": {"image": "image.png"}})
+    )
+    return m > 0
+
+
+def test_an_edit_redraws_the_painted_part_and_nothing_else(tmp_path, monkeypatch):
+    bake, rgba, *_ = _bake(tmp_path)
+    painted = _painted(tmp_path)
+    gen = _Red()
+    monkeypatch.setattr(refine, "VIEW", 256)
+    monkeypatch.setattr(refine, "_inpainter", lambda: gen)
+    monkeypatch.setattr(refine, "_generator", lambda tile: pytest.fail("an edit loads no Tile"))
+    out = tmp_path / "asset" / "060_refine"
+    out.mkdir()
+    res = refine.run(
+        "edit", str(bake), str(out), {"region": "050_upload", "prompt": "a brass plate"}
+    )
+    m = res["metrics"]
+    # one view sees the square on the front face, squarely; it is asked to draw only round the paint
+    assert m["op"] == "edit" and m["views"] == 1 and abs(m["views_used"][0]["pitch"]) < 30
+    assert gen.prompts == ["a brass plate, even flat lighting, plain grey background"]
+    assert 0 < gen.calls[0][0] < 256 * 256 / 20 and gen.calls[0][1] == 1.0
+    assert m["region_seen"] == 1.0 and m["changed_outside"] == 0
+    got = np.asarray(Image.open(out / "basecolor.png"), int)
+    _, f, uv, _, _ = _box()
+    cov = (
+        rasterize_uv(torch.tensor(uv, dtype=torch.float32), torch.tensor(f), ATLAS)[0].numpy() >= 0
+    )
+    # texel for texel wherever nothing is painted: the covered texels and the gutters alike
+    assert (got[..., :3][~painted] == rgba[..., :3][~painted]).all()
+    red = got[painted & cov]
+    # the paint became the drawing
+    assert (red[:, 0] > 200).mean() > 0.9 and (red[:, 1] < 60).mean() > 0.9
+    assert res["models"] == ()
+
+
+def test_grey_paint_blends_once(tmp_path, monkeypatch):
+    """Half-painted texels come out half the drawing (the paint gates the views by where, the mask blends by how
+    much: not both by how much). The strength reaches the inpainter; the server's OOM hint is taken."""
+    bake, rgba, *_ = _bake(tmp_path)
+    painted = _painted(tmp_path, grey=128)
+    gen = _Red()
+    monkeypatch.setattr(refine, "VIEW", 256)
+    monkeypatch.setattr(refine, "_inpainter", lambda: gen)
+    out = tmp_path / "asset" / "060_refine"
+    out.mkdir()
+    params = {
+        "region": "050_upload",
+        "prompt": "x",
+        "strength": 0.5,
+        "texture_size": "keep",
+        "tile": "lite",
+    }
+    m = refine.run("edit", str(bake), str(out), params)["metrics"]
+    assert gen.calls[0][1] == 0.5 and m["changed_outside"] == 0
+    got = np.asarray(Image.open(out / "basecolor.png"), int)
+    half = 128 / 255
+    want = rgba[..., 0][painted] * (1 - half) + 255 * half
+    assert np.abs(got[..., 0][painted] - want).mean() < 4
+    assert (got[..., :3][~painted] == rgba[..., :3][~painted]).all()
+
+
+def test_paint_no_view_sees_fails(tmp_path, monkeypatch):
+    bake, *_ = _bake(tmp_path)
+    _painted(tmp_path)
+    monkeypatch.setattr(refine, "region_views", lambda *a, **k: ([], 0.0))
+    monkeypatch.setattr(refine, "_inpainter", lambda: pytest.fail("nothing to draw: no model"))
+    with pytest.raises(StepError, match="no view sees") as e:
+        refine.run(
+            "edit", str(bake), str(tmp_path / "out"), {"region": "050_upload", "prompt": "x"}
+        )
+    assert e.value.code == "failed"
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"prompt": "x"},
+        {"region": "050_upload"},
+        {"region": "050_upload", "prompt": " "},
+        {"region": "050_upload", "prompt": "x", "strength": 0.1},
+        {"region": "050_upload", "prompt": "x", "views": "auto"},
+        {"region": "040_nothing", "prompt": "x"},
+        {"region": "../other/050_upload", "prompt": "x"},  # a version of this asset, never a path
+    ],
+)
+def test_bad_edit_params(tmp_path, params):
+    bake, *_ = _bake(tmp_path)
+    _painted(tmp_path)
+    with pytest.raises(StepError) as e:
+        refine.run("edit", str(bake), str(tmp_path / "out"), params)
+    assert e.value.code == "bad_params"
+
+
+def test_an_unknown_op_is_refused(tmp_path):
+    bake, *_ = _bake(tmp_path)
+    with pytest.raises(StepError, match="run or edit"):
+        refine.run("restyle", str(bake), str(tmp_path / "out"), {})
+
+
+def test_paint_that_misses_the_texture_is_refused(tmp_path):
+    bake, *_ = _bake(tmp_path)
+    d = tmp_path / "asset" / "050_upload"
+    d.mkdir(parents=True)
+    m = np.zeros((ATLAS, ATLAS), np.uint8)
+    m[:2, :2] = 255  # a corner of the atlas no face covers
+    Image.fromarray(m).save(d / "image.png")
+    (d / "meta.json").write_text(
+        json.dumps({"version": "050_upload", "outputs": {"image": "image.png"}})
+    )
+    with pytest.raises(StepError, match="covers none"):
+        refine.run(
+            "edit", str(bake), str(tmp_path / "out"), {"region": "050_upload", "prompt": "x"}
+        )
+
+
 @pytest.mark.parametrize(
     "params",
     [

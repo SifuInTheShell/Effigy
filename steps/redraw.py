@@ -36,6 +36,7 @@ import gc
 import json
 import os
 import random
+import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -212,16 +213,19 @@ def _redraw(base: np.ndarray, p: dict, mask: np.ndarray | None):
     )
 
 
-def _mask_path(src: Path, name: str) -> Path:
-    """The sibling version's mask picture; StepError when it is not a version of this asset with an image."""
+def _mask_path(src: Path, name: str, param: str = "protect") -> Path:
+    """The sibling version's mask picture (refine's `region` too, M68); StepError when it is not a version of this
+    asset with an image."""
     d = src.parent / name
     try:
+        if not re.fullmatch(r"\d{3}_\w+", name):  # a version's own name: no path into another asset
+            raise ValueError(name)
         outs = json.loads((d / "meta.json").read_text(encoding="utf-8")).get("outputs", {})
         if (path := d / outs["image"]).is_file():
             return path
-    except (OSError, KeyError, ValueError):
+    except (OSError, KeyError, ValueError, TypeError):
         pass
-    raise StepError("bad_params", f"protect {name!r}: not a version of this asset with an image")
+    raise StepError("bad_params", f"{param} {name!r}: not a version of this asset with an image")
 
 
 def _protect(path: Path, size: tuple[int, int]) -> np.ndarray:

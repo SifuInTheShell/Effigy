@@ -7,6 +7,15 @@ generated view is colour-matched to its render at low frequency and back-project
 silhouette, none next to a depth step inside the view; the best view per texel wins by weight⁴). Mesh, UVs,
 ORM and normal map stay the input's. M66: with views "auto", up to `coverage` more views where the planned ones
 leave surface poorly seen (`coverage_views`).
+op edit (M68, after StableGen's masked edit: its method only): a painted part of the texture redrawn as `prompt`
+says, the rest left texel for texel. params {region: a sibling version whose `image` is the painted mask in the
+texture's own layout (white = redrawn, black = kept, grey in between; resized to the atlas), prompt (required: what
+the part becomes), strength 0.3–1 (default 1: drawn anew; less keeps more of what is there), seed}. The views are
+`region_views` (the fewest that see the painted faces, from any side); each is Z-Image's inpaint (`layers._pipeline`,
+the concepts weights) where the view sees the paint, grown by 8 px, the rest of the view its context; back-projected
+as a refine view is, times the mask. The mask is frozen in texture space and decides every write: the result is the
+input where the mask is black, whatever the views drew. Metrics add op, region, region_share, region_seen and
+changed_outside (the largest change outside the mask, 0 by construction).
 params: {strength: 1.0, face_strength: 0.5, scale: 0.85, prompt, zoom: "auto" | ≥ 0.5, views: "auto" | [{yaw,
 pitch, center, extent, prompt?}] (a view's own prompt instead of the asset's: one side of another material; name
 the material, not the place: "construction site" drew a scene into a hoarding's paint, the owner's agent
@@ -54,6 +63,7 @@ SUFFIX = ", even flat lighting, plain grey background"
 FACE_DELTA = 8  # a texel `project` changed by more than this (0–255) is face
 ERODE = 6  # view pixels of the silhouette's edge that never paint
 COVER = 0.5  # M66: a face is seen when a view's paint weight on it reaches this (coverage_views)
+REGION_VIEWS = 6  # M68: the most views an edit draws
 
 
 def _yaw_name(yaw: float, pitch: float) -> str:
@@ -139,21 +149,10 @@ def plan_views(
     return out
 
 
-def coverage_views(
-    v, faces, views, extra: int, e: float, dev: str = "cpu"
-) -> tuple[list[dict], dict]:
-    """M66 (after StableGen's greedy coverage, rebuilt on our z-buffer): up to `extra` views where the planned
-    ones leave surface poorly seen. A face is seen when a view's paint weight on it (the facing cos weight × the
-    z-test of its centroid, at 256²; not the silhouette's erosion or the depth steps `texel_weights` also leaves
-    out, so `seen_after` is an upper bound) reaches COVER. Candidates: 64 directions spread evenly over the upper
-    half of the sphere (no views from below: a prop's floor side is not seen in a game, and a redraw from below
-    invents; add when undersides show), on a model wider than tall only up to 14.5° above level (y ≤ 0.25:
-    plan_views' rule, no redraw from above onto a chest's lid or a wall's coping, where it invented tiles; a flat
-    top takes nothing from there, cos_weight's 0.25). Each round the one that makes the most poorly seen surface
-    seen, Σ area · (weight − best) · cos over those faces (the more squarely, the more texels its redraw has),
-    while that is 1 % of the surface or more; its window fitted to them, at least the auto windows' size e and at
-    most about 2e (half their zoom: the faces further than e from their gain-weighted middle are left to the next
-    rounds). Returns the added views and the area share seen before and after them."""
+def _faces(v, faces, dev):
+    """Per face its area and centroid, and weights(yaw, pitch, center, extent) → (each face's paint weight in that
+    view: the facing cos weight, either winding, × the z-test of its centroid at 256², × inside the frame; its
+    cos)."""
     import torch
 
     from steps._views import cos_weight, ortho, visible, zbuffer
@@ -166,7 +165,6 @@ def coverage_views(
     f_t = torch.tensor(faces, dtype=torch.long, device=dev)
 
     def weights(yaw, pitch, center, extent):
-        """[F] each face's paint weight in the view (either winding), and its cos."""
         cam = ortho(yaw, pitch, center, extent)
         pix_v, depth_v = (
             torch.tensor(x, dtype=torch.float32, device=dev) for x in cam["project"](v)
@@ -182,32 +180,33 @@ def coverage_views(
         cos = np.abs((nrm * cam["towards"](mid)).sum(1))
         return cos_weight(cos) * seen.cpu().numpy() * ((pix >= 0) & (pix <= 1)).all(1), cos
 
-    total = float(area.sum()) or 1.0
-    best = np.zeros(len(faces))
-    for w in views:
-        best = np.maximum(best, weights(w["yaw"], w["pitch"], w["center"], w["extent"])[0])
-    before = float(area[best >= COVER].sum() / total)
-    seen = {"seen_before": round(before, 3), "seen_after": round(before, 3)}
-    if area[best < COVER].sum() < 0.01 * total:  # no view can add 1 %
-        return [], seen
-    lo, hi = v.min(0), v.max(0)
-    centre, span = (lo + hi) / 2, 1.1 * float(np.linalg.norm(hi - lo))
-    top = 1.0 if _tall(lo, hi) else 0.25
-    n = 64
-    cands = []
-    # a Fibonacci spiral over the upper hemisphere (up to y = top): d is the direction from the model to the camera
+    return area, mid, weights
+
+
+def _spiral(n: int, lo: float, hi: float):
+    """(yaw, pitch) of n cameras spread evenly over the band lo ≤ y ≤ hi of the sphere (a Fibonacci spiral; y the
+    height of the direction from the model to the camera)."""
     for i in range(n):
-        y = (i + 0.5) / n * top
+        y = lo + (i + 0.5) / n * (hi - lo)
         phi = i * math.pi * (3 - math.sqrt(5))
         d = (math.sqrt(1 - y * y) * math.cos(phi), y, math.sqrt(1 - y * y) * math.sin(phi))
-        yaw, pitch = math.degrees(math.atan2(d[0], d[2])) % 360, -math.degrees(math.asin(d[1]))
-        cands.append((yaw, pitch, *weights(yaw, pitch, centre, span)))
+        yield math.degrees(math.atan2(d[0], d[2])) % 360, -math.degrees(math.asin(d[1]))
+
+
+def _greedy(mid, area, weights, best, target, cands, most, e, least):
+    """Up to `most` of the candidate views [(yaw, pitch, weight, cos)], each round the one that makes the most of
+    the target faces' poorly seen surface seen, Σ area · (weight − best) · cos over those faces (the more squarely,
+    the more texels its redraw has), while that is `least` or more; its window fitted to the centroids of those
+    faces within e of their gain-weighted middle (at least e, at most about 2e: the faces further out are left to
+    the next rounds), then the faces it sees in that window counted. Returns (the views, best)."""
+    from steps._views import ortho
+
     added = []
-    for _ in range(extra):
-        poor = best < COVER
+    for _ in range(most):
+        poor = target & (best < COVER)
         gains = [area * (q - best) * cos * (poor & (q >= COVER)) for _, _, q, cos in cands]
         k = int(np.argmax([g.sum() for g in gains]))
-        if gains[k].sum() < 0.01 * total:
+        if gains[k].sum() < least:
             break
         g = gains[k]
         yaw, pitch, *_ = cands.pop(k)
@@ -223,8 +222,52 @@ def coverage_views(
         )
         # what the fitted window itself sees: the faces outside it are not covered by it
         best = np.maximum(best, weights(yaw, pitch, c, ext)[0])
+    return added, best
+
+
+def coverage_views(
+    v, faces, views, extra: int, e: float, dev: str = "cpu"
+) -> tuple[list[dict], dict]:
+    """M66 (after StableGen's greedy coverage, rebuilt on our z-buffer): up to `extra` views where the planned
+    ones leave surface poorly seen. A face is seen when a view's paint weight on it (`_faces`; not the silhouette's
+    erosion or the depth steps `texel_weights` also leaves out, so `seen_after` is an upper bound) reaches COVER.
+    Candidates: 64 directions spread evenly over the upper half of the sphere (no views from below: a prop's floor
+    side is not seen in a game, and a redraw from below invents; add when undersides show), on a model wider than
+    tall only up to 14.5° above level (y ≤ 0.25: plan_views' rule, no redraw from above onto a chest's lid or a
+    wall's coping, where it invented tiles; a flat top takes nothing from there, cos_weight's 0.25). `_greedy`
+    picks them while a view adds 1 % of the surface or more. Returns the added views and the area share seen
+    before and after them."""
+    area, mid, weights = _faces(v, faces, dev)
+    total = float(area.sum()) or 1.0
+    best = np.zeros(len(faces))
+    for w in views:
+        best = np.maximum(best, weights(w["yaw"], w["pitch"], w["center"], w["extent"])[0])
+    before = float(area[best >= COVER].sum() / total)
+    seen = {"seen_before": round(before, 3), "seen_after": round(before, 3)}
+    if area[best < COVER].sum() < 0.01 * total:  # no view can add 1 %
+        return [], seen
+    lo, hi = v.min(0), v.max(0)
+    centre, span = (lo + hi) / 2, 1.1 * float(np.linalg.norm(hi - lo))
+    up = 1.0 if _tall(lo, hi) else 0.25
+    cands = [(y, p, *weights(y, p, centre, span)) for y, p in _spiral(64, 0.0, up)]
+    target = np.ones(len(faces), bool)
+    added, best = _greedy(mid, area, weights, best, target, cands, extra, e, 0.01 * total)
     seen["seen_after"] = round(float(area[best >= COVER].sum() / total), 3)
     return added, seen
+
+
+def region_views(v, faces, target, e: float, dev: str = "cpu"):
+    """M68: the views for a painted region (target [F]: the faces under the paint): from 128 directions over the
+    whole sphere (the user painted it, an underside too), `_greedy` from nothing seen, while a view adds 1 % of
+    the region or more, at most REGION_VIEWS. Returns the views and the share of the region seen."""
+    area, mid, weights = _faces(v, faces, dev)
+    lo, hi = v.min(0), v.max(0)
+    centre, span = (lo + hi) / 2, 1.1 * float(np.linalg.norm(hi - lo))
+    cands = [(y, p, *weights(y, p, centre, span)) for y, p in _spiral(128, -1.0, 1.0)]
+    total = float(area[target].sum()) or 1.0
+    best = np.zeros(len(faces))
+    views, best = _greedy(mid, area, weights, best, target, cands, REGION_VIEWS, e, 0.01 * total)
+    return views, round(float(area[target & (best >= COVER)].sum() / total), 3)
 
 
 def face_mask(src: Path, size: int) -> np.ndarray | None:
@@ -387,6 +430,21 @@ def paint(acc, wsum, wmax, wt, col, orig):
     return orig * (1 - wmax[:, None]) + blend * wmax[:, None]
 
 
+def _encode(torch, pipe, prompts: list[str], then) -> dict:
+    """The prompts' embeddings with the text encoder alone on the card, one at a time (its peak stays that of one
+    prompt); then the models in `then` go on the card."""
+    pipe.text_encoder.to("cuda")
+    out = {}
+    with torch.inference_mode():
+        for p in prompts:
+            out[p] = pipe.encode_prompt([p], device="cuda", do_classifier_free_guidance=False)[0][0]
+    pipe.text_encoder.to("cpu")
+    torch.cuda.empty_cache()
+    for m in then:
+        m.to("cuda")
+    return out
+
+
 class _Tile:
     """Z-Image-Turbo + the Tile control net on the GPU, one model resident (research 14 §4): DiT fp8 storage,
     the control net's own layers fp8, prompts encoded with the text encoder alone on the card."""
@@ -442,19 +500,8 @@ class _Tile:
         ]
 
     def encode(self, prompts: list[str]) -> dict:
-        torch, pipe = self.torch, self.pipe
-        pipe.text_encoder.to("cuda")
-        out = {}
-        with torch.inference_mode():
-            for p in prompts:  # one at a time: the encoder's peak stays that of one prompt
-                out[p] = pipe.encode_prompt([p], device="cuda", do_classifier_free_guidance=False)[
-                    0
-                ][0]
-        pipe.text_encoder.to("cpu")
-        torch.cuda.empty_cache()
-        for m in (pipe.transformer, pipe.controlnet, pipe.vae):
-            m.to("cuda")
-        return out
+        pipe = self.pipe
+        return _encode(self.torch, pipe, prompts, (pipe.transformer, pipe.controlnet, pipe.vae))
 
     def __call__(
         self, ctrl: np.ndarray, emb, strength: float, scale: float, seed: int
@@ -520,6 +567,48 @@ def _generator(tile: str = "lite"):
     return _Tile(tile)
 
 
+class _Inpaint:
+    """M68: Z-Image-Turbo's inpaint pipeline as `layers` loads it (the concepts weights, DiT fp8 storage): a view
+    drawn again where its mask is white, as the prompt says, the rest of it the context."""
+
+    def __init__(self):
+        import torch
+
+        from steps.concepts import MODEL, REVISION
+        from steps.layers import _pipeline
+
+        if not torch.cuda.is_available():
+            raise StepError("failed", "this step needs a CUDA GPU")
+        self.pipe, self.torch = _pipeline((VIEW, VIEW)), torch
+        self.pipe.set_progress_bar_config(disable=True)
+        self.models = [{"id": MODEL, "revision": REVISION}]
+
+    def encode(self, prompts: list[str]) -> dict:
+        return _encode(self.torch, self.pipe, prompts, (self.pipe.transformer, self.pipe.vae))
+
+    def __call__(self, img: np.ndarray, mask: np.ndarray, emb, strength: float, seed: int):
+        """img [h, w, 3] uint8, mask [h, w] uint8 (255 = drawn again) → the picture, uint8."""
+        torch = self.torch
+        h, w = img.shape[:2]
+        out = self.pipe(
+            prompt_embeds=[emb],
+            image=Image.fromarray(img),
+            mask_image=Image.fromarray(mask),
+            height=h,
+            width=w,
+            strength=strength,
+            num_inference_steps=8,
+            guidance_scale=0.0,  # Turbo is distilled without CFG
+            generator=torch.Generator("cpu").manual_seed(seed),
+        ).images[0]
+        return np.asarray(out.convert("RGB"))
+
+
+def _inpainter():
+    """The edit's view generator; tests replace it."""
+    return _Inpaint()
+
+
 def _band_energy(x, mask):
     """Structure-weighted band energy of the luminance inside mask: the band-pass (σ 1 − σ 4 px: detail at
     2–8 px scales) squared, weighted per pixel by how coherent the gradients around it are (the structure
@@ -559,7 +648,9 @@ def run(op, in_dir, out_dir, params):
         raise StepError(
             "missing_input", "refine needs a textured, UV-mapped version (bake, project, refine)"
         )
-    p = _params(params)
+    if op not in ("run", "edit"):
+        raise StepError("bad_params", f"op {op!r}: run or edit")
+    p = _edit_params(params) if op == "edit" else _params(params)
     t0 = time.time()
     src, out = Path(in_dir), Path(out_dir)
     meta = json.loads((src / "meta.json").read_text(encoding="utf-8"))
@@ -593,9 +684,33 @@ def run(op, in_dir, out_dir, params):
     uv_np[:, 1] = 1 - uv_np[:, 1]  # trimesh's OpenGL UVs → glTF UVs (what the file holds)
     prompt = (p["prompt"] or asset_prompt(src)).strip()
     zoom = ZOOM if p["zoom"] == "auto" else float(p["zoom"])
-    views = plan_views(v_np, faces_np, uv_np, size, zoom) if p["views"] == "auto" else p["views"]
-    seen = {}
-    if p["views"] == "auto" and p["coverage"]:
+    f = torch.tensor(faces_np, dtype=torch.long, device=dev)
+    uv = torch.tensor(uv_np, dtype=torch.float32, device=dev)
+    face_id, bary = rasterize_uv(uv, f, size)
+    covered = face_id >= 0
+    region, seen = None, {}
+    if op == "edit":  # M68: the views that see the painted part
+        from steps.redraw import _mask_path
+
+        img = Image.open(_mask_path(src, p["region"], "region")).convert("L")
+        region = np.asarray(img.resize((size, size), Image.BILINEAR), np.float32) / 255
+        fid = face_id.cpu().numpy()
+        target = np.zeros(len(faces_np), bool)
+        target[fid[(fid >= 0) & (region > 0.5)]] = True
+        if not target.any():
+            raise StepError(
+                "bad_params", f"region {p['region']}: the paint covers none of the texture"
+            )
+        progress(0.01, "finding the views that see the painted part")
+        e = VIEW / (zoom * texel_density(v_np, faces_np, uv_np, size))
+        views, seen["region_seen_planned"] = region_views(v_np, faces_np, target, e, dev)
+        if not views:  # inside the model, or nowhere a camera reaches
+            raise StepError("failed", f"region {p['region']}: no view sees the painted part")
+    else:
+        views = (
+            plan_views(v_np, faces_np, uv_np, size, zoom) if p["views"] == "auto" else p["views"]
+        )
+    if op == "run" and p["views"] == "auto" and p["coverage"]:
         progress(0.01, "planning views for the surface the others miss")
         e = VIEW / (zoom * texel_density(v_np, faces_np, uv_np, size))
         more, seen = coverage_views(v_np, faces_np, views, p["coverage"], e, dev)
@@ -610,7 +725,10 @@ def run(op, in_dir, out_dir, params):
         )  # a user's window (Redraw this view) names no part; the auto views do
 
     gen, tile = None, None
-    if views:
+    if views and region is not None:
+        progress(0.02, f"loading the inpaint model ({len(views)} views see the painted part)")
+        gen = _inpainter()
+    elif views:
         tile = _tile(p["tile"])
         progress(0.02, f"loading the detail model ({len(views)} views planned, the {tile} Tile)")
         gen = _generator(tile)
@@ -636,10 +754,6 @@ def run(op, in_dir, out_dir, params):
         progress(0.15, "encoding the prompts")
         embeds = gen.encode(sorted(set(prompts.values())))
 
-    f = torch.tensor(faces_np, dtype=torch.long, device=dev)
-    uv = torch.tensor(uv_np, dtype=torch.float32, device=dev)
-    face_id, bary = rasterize_uv(uv, f, size)
-    covered = face_id >= 0
     # the closing passes (seams, gutters) use bake's coverage (M43a: the raster at 2×, a texel covered when any
     # quarter is; 1× at 4096): with the texel-centre mask the gutter fill rewrote bake's edge ring and the seam
     # delta rose ×3 on an unchanged texture (docs/bench/m43c.md)
@@ -655,13 +769,20 @@ def run(op, in_dir, out_dir, params):
         .numpy()
         .astype(float)
     )
-    fmask = face_mask(src, size)
+    fmask = (
+        None if region is not None else face_mask(src, size)
+    )  # an edit's paint decides, a face too
     keep = torch.ones(len(pts), device=dev)
     if fmask is not None:
         keep[torch.from_numpy(fmask).to(dev)[covered]] = 0
+    # the channel the views carry along: the projected face, or an edit's paint (M68)
     face_t = torch.zeros(size, size, 1, device=dev)
     if fmask is not None:
         face_t[torch.from_numpy(fmask).to(dev)] = 255
+    if region is not None:
+        face_t[..., 0] = torch.from_numpy(region).to(dev) * 255
+        paint_t = torch.from_numpy(region).to(dev)[covered]  # each texel's paint, 0–1
+        painted_t = (paint_t > 0).float()  # where views may draw; how much, the gate below says
     cur = torch.tensor(base, dtype=torch.float32, device=dev)
     ao = None
     if occ is not None:
@@ -700,15 +821,28 @@ def run(op, in_dir, out_dir, params):
             dev == "cuda"
         ):  # the renders' and the last view's blocks back to the driver: the model needs them
             torch.cuda.empty_cache()
-        g = gen(
-            ctrl,
-            embeds[prompts[i]],
-            p["face_strength"] if face else p["strength"],
-            p["scale"],
-            p["seed"] + i,
-        )
-        g = torch.tensor(g, dtype=torch.float32, device=dev) / 255
-        matched = colour_match(rgb, a, g, sigma)
+        if region is not None:  # M68: drawn again where this view sees the paint, grown by 8 px
+            vm = extra[..., 0] * a
+            if int((vm > 0.5).sum()) < 16:
+                continue
+            grown = F.max_pool2d((vm > 0.1).float()[None, None], 17, 1, 8)[0, 0]
+            mask = (grown * 255).byte().cpu().numpy()
+            g = gen(ctrl, mask, embeds[prompts[i]], p["strength"], p["seed"] + i)
+            # its own colours: an edit may change them (no colour match)
+            matched = (torch.tensor(g, dtype=torch.float32, device=dev) / 255).permute(2, 0, 1)[
+                None
+            ]
+            keep = painted_t
+        else:
+            g = gen(
+                ctrl,
+                embeds[prompts[i]],
+                p["face_strength"] if face else p["strength"],
+                p["scale"],
+                p["seed"] + i,
+            )
+            g = torch.tensor(g, dtype=torch.float32, device=dev) / 255
+            matched = colour_match(rgb, a, g, sigma)
         wt, grid = texel_weights(cam, a, zbuf, depth_v, pts, v_np, faces_np, corners, w3)
         wt = (
             wt * keep
@@ -729,7 +863,24 @@ def run(op, in_dir, out_dir, params):
     rgba = cur.round().clamp(0, 255).to(torch.uint8).cpu().numpy()
     # views paint the two sides of a UV seam from different pixels: level them as bake does (M43a)
     rgba[..., :3] = heal_seams(rgba[..., :3], cov, seam)
+    if region is not None:  # M68: the mask decides every write: the input wherever it is black
+        m = region[..., None]
+        rgba[..., :3] = (base_lit[..., :3] * (1 - m) + rgba[..., :3] * m + 0.5).astype(np.uint8)
     rgba = fill_gutters(rgba, cov)
+    if region is not None:
+        out_t = (
+            region == 0
+        )  # the gutters there too: refilled from the edit's colours only round the paint
+        rgba[out_t] = base_lit[out_t]
+        diff = np.abs(rgba[..., :3].astype(int) - base_lit[..., :3])[out_t]
+        seen |= {
+            "op": "edit",
+            "region": p["region"],
+            "region_share": round(float((region[cov] > 0.5).mean()), 4),
+            "region_seen": round(float((wmax[paint_t > 0.5] >= COVER).float().mean()), 3),
+            "changed_outside": int(diff.max()) if diff.size else 0,
+            "strength": p["strength"],
+        }
     w_img = torch.zeros(size, size, 1, device=dev)
     w_img[covered] = wmax[:, None] * 255
     before_t = torch.cat(
@@ -791,7 +942,7 @@ def run(op, in_dir, out_dir, params):
         "delight": p["delight"],
         "ao_luma_corr_before": corr(base),
         "ao_luma_corr": corr(rgba),
-        **seen,  # M66: coverage_views, seen_before, seen_after
+        **seen,  # M66: coverage_views, seen_before, seen_after; M68: an edit's region numbers
     }
     outputs = write_textured(out, mesh, mat, rgba, {"views": "views.png"} if thumbs else {})
     models = getattr(gen, "models", [])
@@ -800,6 +951,40 @@ def run(op, in_dir, out_dir, params):
         "metrics": metrics,
         "models": models,
         "licenses": [m["id"] for m in models],
+    }
+
+
+def _edit_params(params: dict) -> dict:
+    """M68: an edit's params, and the run's own that the shared code reads, fixed."""
+    p = {
+        "region": params.get("region"),
+        "prompt": params.get("prompt"),
+        "strength": params.get("strength", 1.0),
+        "seed": params.get("seed", random.randrange(2**31)),
+    }
+    bad = []
+    num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    # the server's out-of-memory hint for refine ({"texture_size": "keep", "tile": "lite"}) is taken and means nothing
+    hint = {k for k in ("texture_size", "tile") if params.get(k) in ("keep", "lite", "full", None)}
+    if other := sorted(set(params) - set(p) - hint):
+        bad.append(f"an edit takes region, prompt, strength and seed, not {', '.join(other)}")
+    if not (isinstance(p["region"], str) and p["region"].strip()):
+        bad.append("region: the version holding the painted mask")
+    if not (isinstance(p["prompt"], str) and p["prompt"].strip()):
+        bad.append("prompt: what the painted part becomes")
+    if not (num(p["strength"]) and 0.3 <= p["strength"] <= 1.0):
+        bad.append("strength 0.3–1.0")
+    if not isinstance(p["seed"], int) or isinstance(p["seed"], bool):
+        bad.append("seed: an integer")
+    if bad:
+        raise StepError("bad_params", "; ".join(bad))
+    return p | {
+        "delight": 0.0,
+        "texture_size": "keep",
+        "views": "auto",
+        "coverage": 0,
+        "tile": None,
+        "zoom": "auto",
     }
 
 

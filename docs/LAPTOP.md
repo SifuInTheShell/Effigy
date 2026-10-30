@@ -1,16 +1,16 @@
-# Laptop checks: M64 to M67 (built in the cloud, 2026-10-29 and 2026-10-30)
+# Laptop checks: M64 to M68 (built in the cloud, 2026-10-29 and 2026-10-30)
 
-For the agent or the maintainer on the reference laptop. All four milestones were built in a cloud session
+For the agent or the maintainer on the reference laptop. All five milestones were built in a cloud session
 without a GPU, Blender, Kimodo's weights, GEM-X or the Tile model. Everything that could run there passed (the unit tests, the Playwright
 suite, Kimodo's own skeleton and constraint code on the CPU). Nothing below has run yet. Tick the boxes, record the
 numbers, and never tick a check that was not run (IMPLEMENTATION §6).
 
-What each milestone is, and why: IMPLEMENTATION.md, sections M64 to M67 (near the end of §4).
+What each milestone is, and why: IMPLEMENTATION.md, sections M64 to M68 (near the end of §4).
 
 ## 0. Get the code
 
-- [ ] M64 and M65 came in through pull request #12, merged: they are on `main`. M66 and M67 are on the branch
-  `ccr-3bd14478-pui9wd` until their pull request is merged; use the branch while it is open:
+- [ ] M64 and M65 came in through pull request #12, M66 and M67 through #13, both merged: they are on `main`.
+  M68 is on the branch `ccr-3bd14478-pui9wd` until its pull request is merged; use the branch while it is open:
   ```
   git fetch origin ccr-3bd14478-pui9wd
   git switch ccr-3bd14478-pui9wd
@@ -132,11 +132,29 @@ No new package or model; it runs inside the `anim` step (the Animate panel's cli
 - [ ] **Record** in a new `docs/bench/m67.md`: the characters, `arms_opened` per clip, any clip with `uncleared`
   frames, and what you saw (a screenshot of a walk with and without, if it shows).
 
-## 5. When done
+## 5. M68 A painted part of the texture redrawn
+
+Needs the Setup card **Texture detail** (Z-Image comes with it). No new download.
+
+- [ ] **Check 1: the chest's lock.** Open the chest's bake (or refine) version, Tools, Texture detail. Type "a gold
+  lion's-head lock" under **It becomes**, click **Paint the part to change** and paint over the lock (drag on it;
+  Shift erases; turn the view by dragging beside the model, or stop painting to turn it freely). Click **Redraw
+  the painted part**. The new version's page says how many views drew it and how much they saw. In the viewer, the
+  lock is the new one from every side that sees it; compare with the version before it in History: nothing else
+  changed (its `meta.json`: `changed_outside` 0).
+- [ ] **Check 2: a belt all round.** On a character, paint its belt all the way round (turn the model as you go),
+  "a red leather belt with a brass buckle": the back of the belt changes too. Record `views`, `region_seen`,
+  `region_seen_planned`.
+- [ ] **Check 3: less strength.** Check 1 again with the strength slider at 0.5: the lock keeps more of its old
+  shape.
+- [ ] **Check 4: the cost.** From check 1 and 2 record `seconds`, `seconds_per_view`, `peak_vram_gb`.
+- [ ] **Record** in a new `docs/bench/m68.md`: the assets, the prompts, the numbers, and a before | after picture.
+
+## 6. When done
 
 - Commit the bench files and this file's ticks on a branch of your own, and open a pull request; the template fills
   itself in. Put the measured numbers in the PR's Measurements line.
 - A failure with a small fix: fix it on that branch, one milestone per PR (IMPLEMENTATION §0 and §7). Anything
   larger: describe it (the job list at the bottom of the app shows the error, the `run.bat` window has more) and stop.
-- After all four pass: tick the acceptance in IMPLEMENTATION M64 to M67, update HANDOVER §1 and §2, and move
+- After all five pass: tick the acceptance in IMPLEMENTATION M64 to M68, update HANDOVER §1 and §2, and move
   this file to `docs/archive/`.

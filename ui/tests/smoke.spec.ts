@@ -1172,6 +1172,65 @@ test("Texture detail: Refine texture runs refine; a refine version shows its vie
   await expect(page.getByText(/No redraw\. Baked shadows taken out \(0\.5\): their trace in the colours 0\.62 → 0\.04\./)).toBeVisible();
 });
 
+test("Texture detail: a part painted on the model is redrawn by refine's edit (M68)", async ({ page }) => {
+  const posted = await mockAsset(page, "mock_paint", [
+    { version: "010_trellis2", step: "trellis2", parent: null, outputs: { mesh: "hi.glb", ovoxel: "ovoxel.npz" } },
+    { version: "020_bake", step: "bake", parent: "010_trellis2", outputs: { mesh: "mesh.glb", basecolor: "basecolor.png" } },
+    {
+      version: "040_refine",
+      step: "refine",
+      parent: "020_bake",
+      outputs: { mesh: "mesh.glb", basecolor: "basecolor.png", views: "views.png" },
+      metrics: { op: "edit", region: "030_upload", views: 2, region_seen: 0.97, changed_outside: 0 },
+    },
+  ]);
+  const row = (id: number, name: string, groups: string[]) => ({ id, name, groups, revision: "r", where: "hub", installed: true, partial: false, bytes: 1, missing_bytes: 0 });
+  await page.route("**/api/models", (r) => r.fulfill({ json: [row(1, "Tongyi-MAI/Z-Image-Turbo", ["concepts", "refine"]), row(2, "alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1", ["refine"])] }));
+  const uploads: { url: string; width: number }[] = [];
+  await page.route("**/api/assets/mock_paint/upload/*", (r) => {
+    const png = r.request().postDataBuffer()!;
+    uploads.push({ url: r.request().url(), width: png.readUInt32BE(16) }); // the PNG's IHDR width
+    return r.fulfill({ json: { version: "030_upload", step: "upload", parent: null, outputs: { image: "paint.png" } } });
+  });
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/#/asset/mock_paint?version=020_bake");
+  await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
+  await page.locator("#tools > summary").click();
+  // the asset's description is not what a painted part becomes: the edit waits for its own words
+  await expect(page.getByRole("button", { name: "Redraw the painted part" })).toBeDisabled();
+  await page.getByLabel("What the painted part becomes").fill("a brass plate");
+  await page.getByRole("button", { name: "Redraw the painted part" }).click();
+  await expect(page.locator("#detail").getByRole("alert")).toContainText("Paint the part to change on the model first.");
+  expect(posted).toHaveLength(0);
+  await page.getByRole("button", { name: "Paint the part to change" }).click();
+  await expect(page.getByRole("button", { name: "Stop painting" })).toHaveAttribute("aria-pressed", "true");
+  // a drag across the middle of the view, where the model is: it paints, the view does not turn
+  const before = await page.evaluate(() => (window as any).__viewer.view());
+  const box = (await page.locator("#viewport").boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x - 15, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 15, y, { steps: 6 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => (window as any).__viewer.painted())).toBe(true);
+  expect(await page.evaluate(() => (window as any).__viewer.view())).toEqual(before);
+  // the veil is the brush's own: the Inspect views and the wireframe leave it alone, and the view keeps drawing
+  for (const mode of ["albedo", "uv", "pbr"]) await page.getByLabel("Inspect").selectOption(mode);
+  await page.getByLabel("Wireframe").check();
+  await page.getByLabel("Wireframe").uncheck();
+  await page.waitForTimeout(200);
+  expect(errors).toEqual([]);
+  await page.getByRole("button", { name: "Redraw the painted part" }).click();
+  await expect.poll(() => posted.length).toBe(1);
+  expect(uploads).toHaveLength(1);
+  expect(uploads[0].url).toMatch(/upload\/paint\.png$/);
+  expect(uploads[0].width).toBe(1024); // the texture's size (no texture here: 1024)
+  expect(posted[0]).toEqual(["refine", { op: "edit", region: "030_upload", prompt: "a brass plate", strength: 1 }]);
+  await page.goto("/#/asset/mock_paint?version=040_refine");
+  await expect(page.getByText("The painted part (030_upload) redrawn from 2 views: 97% of it seen, nothing outside it changed.")).toBeVisible();
+});
+
 test("Animate: a video becomes a motion (uploaded, then mocap on the upload), and video motions are listed", async ({ page }) => {
   await page.route("**/api/clips?*", (r) => r.fulfill({ json: [{ name: "Walk" }] }));
   const posted = await mockAsset(page, "mock_video", [

@@ -88,7 +88,9 @@ invented tiles on flat tops; `views` takes your own list, each view with its own
 material. Describe the material, not the place: "construction site" in a hoarding's prompt drew a scene into its
 paint, and its painted front's prompt put blue panels on its plywood back. A side no concept showed can carry
 invented marks, a stencil or letters: look at the back, and redraw it with a view whose prompt names the plain
-material).
+material). One part only (a lock, a belt): `refine` with `{"op": "edit", "region": "<version>", "prompt": "…"}`, the
+region a version (an upload) whose picture is the mask in the texture's layout, white where it changes; nothing
+outside it changes. The app's Texture detail panel paints that mask on the model.
 `parts` (`{"op": "views"}`, then `{"op": "segment", "view", "points": [[x, y, 1|0]], "name"}`) names pieces
 such as a helmet so export keeps them as objects.
 
