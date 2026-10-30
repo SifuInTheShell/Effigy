@@ -230,8 +230,8 @@ Done and recorded elsewhere: the 2D roadmap (M54–M57) and the bigger GPUs (M46
 `docs/bench/m46.md`, research 16; what is left there is the users' GPU reports for the 24/32 GB thresholds), the
 agent's hoarding findings 1–22 (4 built as Setup's Start Blender; 5 decided: the port stays 8000).
 
-0. **Validate M65** (built in the cloud, 2026-10-30, never run on a GPU): the five laptop checks in IMPLEMENTATION
-   M65's acceptance. Doubt first: Kimodo's post-processing without its C++ corrector (check 5), then the seams by eye.
+0. **Validate M65** (built in the cloud, 2026-10-30, never run on a GPU): the laptop checks 0–4 in IMPLEMENTATION
+   M65's acceptance. Check 0 first (one import, seconds), then the seam numbers from `python -m steps._connect`.
 0. **Validate M64** (built in the cloud, 2026-10-29, never run on a GPU): the four laptop checks in IMPLEMENTATION
    M64's acceptance (two people, a push-up clip's hand locks, a panned walk in "still" and "panning", the numbers into
    `docs/bench/m34.md`). The panning camera is the one to doubt first: a camera that also walks reads as a turn.

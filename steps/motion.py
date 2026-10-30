@@ -139,7 +139,9 @@ def _seams(model, src: Path, connect: dict) -> tuple[dict, list]:
     def t(a):
         return torch.as_tensor(np.asarray(a), dtype=torch.float32, device=dev)
 
-    idx = torch.as_tensor(pl["index"], device=dev)
+    idx = torch.as_tensor(
+        pl["index"]
+    )  # on the CPU: Kimodo indexes its CPU masks with it (as its own callers do)
     ends = ["LeftHand", "RightHand", "LeftFoot", "RightFoot"]
     return pl, [
         FullBodyConstraintSet(sk, idx, t(pl["pos"]), t(pl["rot"])),
@@ -230,8 +232,18 @@ def connect_params(params: dict, in_dir) -> dict | None:
             f"bad connect params: {params} (0.5–{_connect.MAX_SECONDS:g} s, turn −180–180°, "
             "travel within 20 m)",
         )
-    if not in_dir or not (Path(in_dir) / "rigged_anim.glb").is_file():
+    glb = Path(in_dir or "") / "rigged_anim.glb"
+    if not in_dir or not glb.is_file():
         raise StepError("missing_input", "connecting clips needs an animated model (its clips)")
+    from steps import _anim
+
+    doc, _ = _anim.read_glb(
+        glb
+    )  # a wrong clip or a creature fails here, before the 16 GB model loads
+    _connect.rig(doc)
+    for clip in (a, b):
+        if clip:
+            _anim.clip_index(doc, clip)
     return c
 
 
@@ -248,7 +260,7 @@ def run(op, in_dir, out_dir, params):
         "A person moves naturally from one pose to the next." if connect else ""
     )
     try:
-        seconds = float(params.get("seconds", 1.5 if connect else 5.0))
+        seconds = connect["seconds"] if connect else float(params.get("seconds", 5.0))
         seed = int(params.get("seed", 0))
         steps = int(params.get("steps", 100))
     except (TypeError, ValueError):

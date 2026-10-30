@@ -127,13 +127,15 @@ ARM = Rotation.from_euler(
 ).as_matrix()  # an armature node turned, as exporters do
 
 
-def glb(clips: dict, prefix="") -> tuple[dict, bytes]:
+def glb(clips: dict, prefix="", yaw=0.0) -> tuple[dict, bytes]:
     """Our rig as a GLB document: an Armature node (turned by ARM) over the 52 joints at rest (identity local
     turns), and `clips`: name → [(joint, path, times, values in world terms: hips position or joint turn)]."""
     rest = our_rest()
     order = [n for n, _ in _rig.template()]
     parent = dict(_rig.template())
-    nodes = [{"name": "Armature", "rotation": Rotation.from_matrix(ARM).as_quat().tolist()}]
+    # `yaw` turns the whole rig about +Y (an imported rig whose rest does not face +Z)
+    top = _connect.yrot(math.radians(yaw)) @ ARM
+    nodes = [{"name": "Armature", "rotation": Rotation.from_matrix(top).as_quat().tolist()}]
     index = {n: k + 1 for k, n in enumerate(order)}
     for n in order:
         base = rest[parent[n]] if parent[n] else np.zeros(3)
@@ -340,6 +342,45 @@ def test_plan_pins_the_seams_from_a_standing_clip_into_a_walk(tmp_path):
     assert e.value.code == "bad_params" and "Run" in str(e.value)
 
 
+def test_a_rig_whose_rest_faces_another_way_still_pins_kimodos_heading_0(tmp_path):
+    """The seams are placed facing the rig's own rest, which the retarget's turn T takes to SOMA's: the pinned
+    heading in Kimodo's frame is the same whichever way the rig was built (a SOMA-like rest faces 5° here)."""
+    sr = soma_rest()
+    req = {"from": "Idle", "to": "Walk", "seconds": 1.0, "travel": 2.0, "turn": 0.0}
+    li, ri = NAMES30.index("LeftLeg"), NAMES30.index("RightLeg")
+    seen = []
+    for yaw in (0.0, 90.0, 180.0):
+        d = tmp_path / str(int(yaw))
+        d.mkdir()
+        _two_clips(d, yaw)
+        pl = _connect.plan(d, req, sr, NAMES30, PARENTS30)
+        hip = pl["pos"][4, ri] - pl["pos"][4, li]
+        seen.append((math.degrees(math.atan2(hip[2], -hip[0])), pl["pos"][5, 0] - pl["pos"][4, 0]))
+    for h, step in seen:
+        assert math.isclose(h, 5.0, abs_tol=1e-6)  # SOMA's own rest heading, as for a rig facing +Z
+        assert np.allclose(step, seen[0][1], atol=1e-9)  # and B lands the same 2 m straight on
+
+
+def test_seam_check_measures_our_joints_at_the_clip_ends(tmp_path):
+    rest = our_rest()
+    up = Rotation.from_euler("z", 90, degrees=True).as_matrix()
+    doc, blob = glb(
+        {
+            "Idle": [("Hips", "translation", [0, 1], [rest["Hips"]] * 2)],
+            "Raise": [
+                ("LeftArm", "rotation", [0, 1], [np.eye(3), up])
+            ],  # starts at rest, ends with the arm up
+        }
+    )
+    path = tmp_path / "rigged_anim.glb"
+    path.write_bytes(_anim.pack(doc, blob))
+    out = _connect.seam_check(path, "Raise", "Idle", "Idle")
+    assert (
+        out["from_cm"] == 0.0 and out["to_cm"] > 5
+    )  # Raise's first frame is Idle's pose; its last is not
+    assert _connect.seam_check(path, "Raise", None, "Idle") == {"to_cm": out["to_cm"]}
+
+
 def test_finish_cuts_to_the_seams_starts_over_the_origin_and_measures_them():
     names77 = ["Hips", "LeftLeg", "RightLeg"]
     pl = {
@@ -376,9 +417,22 @@ def test_finish_cuts_to_the_seams_starts_over_the_origin_and_measures_them():
 # --- the motion step --------------------------------------------------------------------------------------
 
 
+def _two_clips(folder: Path, yaw=0.0) -> None:
+    rest = our_rest()
+    hips = [rest["Hips"] + [0, 0, 1.4 * t] for t in (0, 1)]
+    doc, blob = glb(
+        {
+            "Idle": [("Hips", "translation", [0, 2], [rest["Hips"]] * 2)],
+            "Walk": [("Hips", "translation", [0, 1], hips)],
+        },
+        yaw=yaw,
+    )
+    (folder / "rigged_anim.glb").write_bytes(_anim.pack(doc, blob))
+
+
 def test_connect_params_and_names(tmp_path):
     assert motion.connect_params({"prompt": "A person waves."}, None) is None
-    (tmp_path / "rigged_anim.glb").write_bytes(b"glTF")
+    _two_clips(tmp_path)
     c = motion.connect_params(
         {"from": "Idle", "to": "Walk", "turn": -90, "travel": 1.5}, str(tmp_path)
     )
@@ -395,6 +449,9 @@ def test_connect_params_and_names(tmp_path):
     with pytest.raises(StepError) as e:
         motion.connect_params({"from": "Idle"}, str(tmp_path / "nothing"))
     assert e.value.code == "missing_input"
+    with pytest.raises(StepError) as e:  # a clip the version lacks fails before the model loads
+        motion.connect_params({"from": "Idle", "to": "Run"}, str(tmp_path))
+    assert e.value.code == "bad_params" and "Run" in str(e.value)
 
 
 def test_the_motion_step_connects_with_a_default_prompt_and_names_the_transition(
@@ -402,7 +459,7 @@ def test_the_motion_step_connects_with_a_default_prompt_and_names_the_transition
 ):
     src = tmp_path / "040_anim"
     src.mkdir()
-    (src / "rigged_anim.glb").write_bytes(b"glTF")
+    _two_clips(src)
     out = tmp_path / "050_motion"
     out.mkdir()
     seen = {}

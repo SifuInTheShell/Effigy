@@ -3511,9 +3511,11 @@ above are the contract; each milestone's "As built" note lands here.
     it plays between the two; the duplicated frame is the seam). One side empty continues a clip ("After A") or leads
     into one ("Into B"). The prompt is optional ("A person moves naturally from one pose to the next.").
   - **The pose onto Kimodo's skeleton** (`steps/_connect.py`, numpy only): our clip sampled at the seam frames from
-    `rigged_anim.glb` (the node tree with its armature node, a "mixamorig:" prefix dropped), placed so the seam faces
-    +Z over the origin (Kimodo's heading: the hip line); B turned by `turn` and landed at `travel` straight on, or by
-    default at the mean of A's end velocity and B's start velocity over the transition. Then the exact inverse of
+    `rigged_anim.glb` (the node tree with its armature node, a "mixamorig:" prefix dropped), placed over the origin
+    facing the way the rig's rest faces (Kimodo's heading rule, the hip line: the retarget's turn T then makes that
+    Kimodo's heading 0, its `first_heading_angle`; Effigy's own rigs face +Z, an imported one may not); B turned by
+    `turn` and landed at `travel` straight on, or by default at the mean of A's end velocity and B's start velocity
+    over the transition. Then the exact inverse of
     `blender_ops/retarget` (which brings every Kimodo clip onto our rigs): the retarget poses our bone at
     `Δ_src · align · rest` (`align` from both rests' frames: the bone's direction and the palm or the body's forward;
     the torso and the clavicles unaligned), so SOMA's bone gets `Δ = (our world turn · our rest⁻¹) · align⁻¹`, in
@@ -3533,24 +3535,35 @@ above are the contract; each milestone's "As built" note lands here.
     (the same viewer); sideways travel (`travel` is straight on; the path viewer places B anywhere); the exact height
     ratio (from joints on both rigs, the retarget measures Blender's bones with their tails: a big-headed
     character's hips may come back a few per cent of their travel off at the seams; the exact ratio needs a Blender
-    run on both rigs); creatures (Kimodo is human only: the box shows only on the 52-joint template).
+    run on both rigs); creatures (Kimodo is human only: the box shows only on the 52-joint template); a judged
+    `seam_cm` (reported, never failed or warned on: a threshold after the first laptop runs, the QA rule); a repo
+    test of the Kimodo glue in `motion._seams` (Kimodo is only in `.venv-kimodo`; checked in a scratch venv, below).
+    The retarget's `refs`, `frames`, `MAIN`, `KEEP` carry a "mirrored in steps/_connect.py" note; a test compares
+    the name map, `MAIN` and `KEEP`, not the frame rules (laptop check 1 measures the round trip on our rig).
   - **Acceptance**: run here, pass: `tests/test_connect.py` (the copied tables equal the retarget's; the GLB read
     through its armature node and a prefix; a random SOMA pose put on our rig by the retarget's formula comes back
     exactly, every joint's position and turn; our A-pose rest lands on SOMA with our arm directions and SOMA's own
     torso; placing, the landing, the plan's frames, cut and held poses from a standing clip into a walk; the cut,
-    the start over the origin and the seam error; the step's params, defaults and name), `tests/test_motion.py`,
-    the smoke test `Connect clips (M65)`. With the pinned Kimodo (1aece8c) on the CPU in a scratch venv (its skeleton
+    the start over the origin and the seam error; the step's params, defaults and name, a wrong clip refused before
+    the model loads; rigs built facing +Z, +X and −Z pin the same heading in Kimodo's frame and land B the same;
+    `seam_check` on a clip that starts at another's pose), `tests/test_motion.py`, the smoke test
+    `Connect clips (M65)`, the whole Playwright suite (94 passed). With the pinned Kimodo (1aece8c) on the CPU in a scratch venv (its skeleton
     assets, no weights): a plan on its real SOMA rest builds its `FullBodyConstraintSet` and
     `EndEffectorConstraintSet`, its post-processing reads them, and its own forward kinematics of our joint turns
     gives our joint positions exactly (0.0 m); A's last pose stood over the origin at heading 0.07°, its lowest joint
-    3 mm under the floor; B for a 30° turn after a stand-to-walk landed at heading 30.07°.
-    **Needs the laptop** (not run): (1) on the viking (`Idle_A` → `Walk`, 1.5 s, and `Walk` → `Idle_A`): the
-    transition clip generated, put on with its clips, its first frame on Idle's last and its last on Walk's first
-    by eye in the viewer, `seam_cm` and `generate_seconds` recorded; (2) one side empty both ways; (3) a turn of 90°
-    and a travel of 2 m; (4) the Godot export of the three clips plays Idle → transition → Walk without a pop;
-    (5) Kimodo's post-processing: `post_processing=True` as text-to-motion has it (its C++ corrector,
-    `motion_correction`, is not in `.venv-kimodo` per M26; if text-to-motion runs, so does this; if a run fails on
-    it, the fix is in both).
+    3 mm under the floor; B for a 30° turn after a stand-to-walk landed at heading 30.07°. The step-reviewer's pass
+    (2026-10-30) found the frame indices on the GPU, which Kimodo indexes its CPU masks with (every run would have
+    raised): now on the CPU as Kimodo's own callers have them, checked with a model on torch's meta device standing
+    in for CUDA through `motion._seams` and Kimodo's `update_constraints`.
+    **Needs the laptop** (not run): (0) `.venv-kimodo\Scripts\python -c "import motion_correction"`: Kimodo's
+    post-processing (`post_processing=True`, as text-to-motion already has it) needs its C++ corrector, which
+    Kimodo's `setup.py` builds with the package unless `SKIP_MOTION_CORRECTION_IN_SETUP` is set (the M26 note "not
+    MotionCorrection" meant no separate install); (1) on the viking (`Idle_A` → `Walk`, 1.5 s, and `Walk` →
+    `Idle_A`): the transition generated and put on with its clips, then
+    `uv run python -m steps._connect library/<asset>/<anim version>/rigged_anim.glb "Idle_A to Walk" Idle_A Walk`
+    (our joints' mean distance at both seams, cm: the retarget's round trip measured on our rig), `seam_cm` and
+    `generate_seconds` recorded; (2) one side empty both ways; (3) a turn of 90° and a travel of 2 m; (4) the Godot
+    export of the three clips plays Idle → transition → Walk without a pop.
 
 ## 5. Bench procedure (reference laptop)
 

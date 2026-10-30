@@ -18,6 +18,7 @@ import math
 from pathlib import Path
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from steps import _anim
 from steps._common import StepError
@@ -63,17 +64,6 @@ def _unit(v):
     return v / n if n > 1e-12 else v
 
 
-def _qmat(q) -> np.ndarray:
-    x, y, z, w = np.asarray(q, float) / np.linalg.norm(q)
-    return np.array(
-        [
-            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-        ]
-    )
-
-
 def yrot(a: float) -> np.ndarray:
     """A turn by `a` radians about +Y (positive: +Z towards +X, a person facing +Z turning to their left)."""
     c, s = math.cos(a), math.sin(a)
@@ -82,8 +72,7 @@ def yrot(a: float) -> np.ndarray:
 
 def _rot(m3: np.ndarray) -> np.ndarray:
     """The rotation of a 3×3 that may carry a scale (the nearest one)."""
-    u, _, vt = np.linalg.svd(m3)
-    return u @ np.diag([1, 1, np.sign(np.linalg.det(u @ vt))]) @ vt
+    return Rotation.from_matrix(m3).as_matrix()
 
 
 def _frame(primary, secondary) -> np.ndarray:
@@ -106,7 +95,9 @@ def _local(node, over=None) -> np.ndarray:
     over = over or {}
     m = np.eye(4)
     s = np.asarray(over.get("scale", node.get("scale", [1, 1, 1])), float)
-    m[:3, :3] = _qmat(over.get("rotation", node.get("rotation", [0, 0, 0, 1]))) * s
+    m[:3, :3] = (
+        Rotation.from_quat(over.get("rotation", node.get("rotation", [0, 0, 0, 1]))).as_matrix() * s
+    )
     m[:3, 3] = over.get("translation", node.get("translation", [0, 0, 0]))
     return m
 
@@ -142,12 +133,16 @@ def rig(doc) -> dict:
     parent = {n: name.get(par.get(i)) for n, i in node.items()}
     children = {n: [c for c, p in parent.items() if p == n] for n in node}
     w = _world(doc, {})
+    pos = {n: w[i][:3, 3].copy() for n, i in node.items()}
     return {
         "node": node,
         "parent": parent,
         "children": children,
-        "pos": {n: w[i][:3, 3].copy() for n, i in node.items()},
+        "pos": pos,
         "rot": {n: _rot(w[i][:3, :3]) for n, i in node.items()},
+        # the way the rest faces: a seam placed facing it is Kimodo's heading 0 (its first_heading_angle) after the
+        # retarget's turn T; Effigy's own rigs face +Z (0), an imported one may not
+        "heading": heading({n: pos[n][None] for n in ("LeftUpLeg", "RightUpLeg")}, 0),
     }
 
 
@@ -195,11 +190,11 @@ def speed(P: dict) -> np.ndarray:
     return v * [1, 0, 1]
 
 
-def landing(va, vb, seconds: float, travel: float | None) -> np.ndarray:
-    """Where B's first frame stands, from where A ended (the origin, facing +Z): `travel` metres straight on,
+def landing(va, vb, seconds: float, travel: float | None, facing: float = 0.0) -> np.ndarray:
+    """Where B's first frame stands, from where A ended (the origin, facing `facing`): `travel` metres straight on,
     or, by default, the mean of A's end velocity and B's start velocity over the transition."""
     if travel is not None:
-        return np.array([0.0, 0.0, float(travel)])
+        return yrot(facing) @ [0.0, 0.0, float(travel)]
     return seconds * (np.asarray(va, float) + np.asarray(vb, float)) / 2
 
 
@@ -337,7 +332,7 @@ def plan(src: Path, p: dict, rest: dict, names: list, parents: list) -> dict:
         P, W = pose(
             doc, blob, r, p["from"], [max(end - (SEAM - 1 - i) / FPS, 0) for i in range(SEAM)]
         )
-        P, W = place(P, W, SEAM - 1)
+        P, W = place(P, W, SEAM - 1, r["heading"])
         va = speed(P)
         idx += list(range(SEAM))
         Ps.append(P)
@@ -345,9 +340,8 @@ def plan(src: Path, p: dict, rest: dict, names: list, parents: list) -> dict:
     if p["to"]:
         end = clip_seconds(doc, blob, p["to"])
         P, W = pose(doc, blob, r, p["to"], [min(i / FPS, end) for i in range(SEAM)])
-        turn = math.radians(p["turn"])
-        P, W = place(P, W, 0, turn)
-        at = landing(va, speed(P), p["seconds"], p["travel"])
+        P, W = place(P, W, 0, r["heading"] + math.radians(p["turn"]))
+        at = landing(va, speed(P), p["seconds"], p["travel"], r["heading"])
         P = {n: x + at for n, x in P.items()}
         idx += list(range(N - SEAM, N))
         Ps.append(P)
@@ -381,3 +375,34 @@ def finish(posed: np.ndarray, rots: np.ndarray, pl: dict, names77: list) -> tupl
     R = yrot(-math.atan2(d[2], -d[0]))
     c = posed[0, names77.index("Hips")] * [1, 0, 1]
     return (posed - c) @ R.T, R @ rots, err
+
+
+def seam_check(glb: Path, transition: str, a: str | None, b: str | None) -> dict:
+    """M65 acceptance 1, on the laptop: in an animated version holding the clips and the transition, how far our
+    joints are (cm, their mean) between the transition's first frame and A's last, and its last and B's first, each
+    pose placed over the origin facing +Z: the retarget's round trip measured on our rig, not on Kimodo's."""
+    doc, blob = _anim.read_glb(glb)
+    r = rig(doc)
+
+    def at(clip, first):
+        P, W = pose(doc, blob, r, clip, [0.0 if first else clip_seconds(doc, blob, clip)])
+        return place(P, W, 0)[0]
+
+    def cm(P, Q):
+        return round(float(np.mean([np.linalg.norm(P[n][0] - Q[n][0]) for n in P])) * 100, 1)
+
+    out = {}
+    if a:
+        out["from_cm"] = cm(at(transition, True), at(a, False))
+    if b:
+        out["to_cm"] = cm(at(transition, False), at(b, True))
+    return out
+
+
+if (
+    __name__ == "__main__"
+):  # python -m steps._connect <version>/rigged_anim.glb "<transition>" <from|-> <to|->
+    import sys
+
+    g, t, a, b = sys.argv[1:5]
+    print(json.dumps(seam_check(Path(g), t, None if a == "-" else a, None if b == "-" else b)))

@@ -3942,9 +3942,11 @@ function MotionInfo(props: { asset: string; version: Meta; versions: Meta[]; cha
         {label(target)}" ({target.version.slice(0, 3)}) as a new version, which opens and plays in the viewer. Later you can add more motions or ready-made
         clips there, under Character.
       </p>
-      {connect && source && source !== base && (
+      {connect && source && (source !== base || !keep.length) && (
         <p className="muted">
-          The hand edits of "{label(source)}" stay there: the new version has {base ? `the clips of "${label(base)}"` : "no other clips"} and this transition.
+          {keep.length
+            ? `The hand edits of "${label(source)}" stay there: the new version has the clips of "${label(base!)}" and this transition.`
+            : "The new version has only this transition: add the clips it connects there, under Character."}
         </p>
       )}
       <button
@@ -4036,7 +4038,8 @@ function MotionInfo(props: { asset: string; version: Meta; versions: Meta[]; cha
         </p>
         {Array.isArray(m.seam_cm) && (
           <p className="muted">
-            Its ends are {(m.seam_cm as number[]).join(" and ")} cm from those poses (on Kimodo's skeleton); a game blends the rest away when it switches clips.
+            {(m.seam_cm as number[]).length > 1 ? "Its ends are" : "Its held end is"} {(m.seam_cm as number[]).join(" and ")} cm from{" "}
+            {(m.seam_cm as number[]).length > 1 ? "those poses" : "that pose"} (on Kimodo's skeleton); a game blends the rest away when it switches clips.
           </p>
         )}
         {putOn}
