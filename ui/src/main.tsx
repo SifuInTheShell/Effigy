@@ -2059,8 +2059,35 @@ function DetailPanel(props: { asset: string; version: Meta; versions: Meta[]; ch
   const [delight, setDelight] = useState(0);
   const [big, setBig] = useState(false);
   const [k4, setK4] = useState(false);
+  const [painting, setPainting] = useState(false); // M68: the brush on the model
+  const [brush, setBrush] = useState(0.03);
+  const [becomes, setBecomes] = useState(""); // what the painted part becomes: never the whole asset's description
+  const [err, setErr] = useState("");
+  const sent = useRef<{ rev: number; version: string } | null>(null); // the paint uploaded last, while unchanged
+  useEffect(
+    () => () => {
+      window.__viewer?.setPaint(false); // the brush off when the panel goes
+    },
+    [],
+  );
   const v = props.version;
   const m = v.metrics ?? {};
+  // M68: the painted mask uploaded beside this version, then refine's edit on it
+  const editPainted = () =>
+    run(async () => {
+      setErr("");
+      const viewer = window.__viewer;
+      const blob = await viewer?.paintMask();
+      if (!viewer || !blob) return setErr("Paint the part to change on the model first.");
+      const rev = viewer.paintRev();
+      if (sent.current?.rev !== rev)
+        try {
+          sent.current = { rev, version: (await api.upload(props.asset, new File([blob], "paint.png", { type: "image/png" }))).version };
+        } catch (e) {
+          return setErr(explain(e));
+        }
+      await props.chain(props.asset, v.version, [["refine", { op: "edit", region: sent.current!.version, prompt: becomes.trim(), strength }]]);
+    });
   const go = (params: object) => run(() => props.chain(props.asset, v.version, [["refine", { ...params, ...(delight ? { delight } : {}) }]]));
   // a redraw: the strength, the description if any, 4K if ticked
   const redraw = (params: object) => go({ strength, ...(prompt.trim() ? { prompt: prompt.trim() } : {}), ...(k4 ? { texture_size: 4096 } : {}), ...params });
@@ -2071,9 +2098,11 @@ function DetailPanel(props: { asset: string; version: Meta; versions: Meta[]; ch
       {v.step === "refine" && (
         <>
           <p className="muted">
-            {Number(m.views) > 0
-              ? `${m.views} of ${m.views_planned ?? m.views} views in ${Math.round(Number(m.seconds ?? 0) / 60)} min: ${Math.round(Number(m.refined ?? 0) * 100)}% of the texture redrawn, colour drift ${m.drift ?? "?"}.`
-              : "No redraw."}
+            {m.op === "edit"
+              ? `The painted part (${m.region}) redrawn from ${m.views} view${m.views === 1 ? "" : "s"}: ${Math.round(Number(m.region_seen ?? 0) * 100)}% of it seen${m.changed_outside === 0 ? ", nothing outside it changed" : `; outside it a change of up to ${m.changed_outside}`}.`
+              : Number(m.views) > 0
+                ? `${m.views} of ${m.views_planned ?? m.views} views in ${Math.round(Number(m.seconds ?? 0) / 60)} min: ${Math.round(Number(m.refined ?? 0) * 100)}% of the texture redrawn, colour drift ${m.drift ?? "?"}.`
+                : "No redraw."}
             {shadows} Compare with the version before it in History.
           </p>
           {v.outputs.views && (
@@ -2122,6 +2151,53 @@ function DetailPanel(props: { asset: string; version: Meta; versions: Meta[]; ch
           Redraw this view
         </button>
       </div>
+      <p className="muted">
+        To change one part, click Paint the part to change and paint it on the model (drag on it; Shift erases; a drag beside it still turns the view), say what
+        it should become, and click Redraw the painted part: it is redrawn from every side that sees it, and nothing outside it changes.
+      </p>
+      <label>
+        It becomes{" "}
+        <input aria-label="What the painted part becomes" value={becomes} placeholder="a gold lion's-head lock" onChange={(e) => setBecomes(e.target.value)} />
+      </label>
+      <div className="row">
+        <button
+          aria-pressed={painting}
+          disabled={busy || props.missing}
+          onClick={() => setPainting(!!window.__viewer?.setPaint(!painting, brush))}
+        >
+          {painting ? "Stop painting" : "Paint the part to change"}
+        </button>
+        <label>
+          Brush{" "}
+          <input
+            type="range"
+            aria-label="Brush size"
+            min={0.01}
+            max={0.1}
+            step={0.01}
+            value={brush}
+            onChange={(e) => {
+              setBrush(Number(e.target.value));
+              if (painting) window.__viewer?.setPaint(true, Number(e.target.value));
+            }}
+          />
+        </label>
+        <button disabled={busy} onClick={() => window.__viewer?.clearPaint()}>
+          Clear the paint
+        </button>
+        <button
+          disabled={busy || props.missing || !becomes.trim()}
+          title={becomes.trim() ? "Redraws what is painted as you said; the rest stays as it is" : "Say above what the painted part should become"}
+          onClick={editPainted}
+        >
+          Redraw the painted part
+        </button>
+      </div>
+      {err && (
+        <p className="error" role="alert">
+          {err}
+        </p>
+      )}
       <label className="check" title="4096² instead of the texture's size, for characters seen up close: more views on a tall model (about twice), and the time and memory are not measured yet">
         <input type="checkbox" checked={k4} onChange={(e) => setK4(e.target.checked)} /> 4K texture (slower, not measured yet)
       </label>
@@ -3338,6 +3414,8 @@ const STEP_HELP: Record<string, StepHelp> = {
       ["delight", "0 to 1: the baked shadows taken out of the colours first, using the bake's ambient occlusion (default 0)"],
       ["views", "auto, or [] for no redraw (only delight; no model, seconds)"],
       ["coverage", "0 to 8: the most views added where the auto views see too little (default 3, 0 off)"],
+      ["op", "edit: only a painted part redrawn as the prompt says (takes region, prompt, strength, seed); the panel's Paint the part to change makes the region"],
+      ["region", "with op edit: the version holding the painted mask in the texture's layout (white = redrawn, black = kept)"],
     ],
     example: { strength: 1 },
   },

@@ -223,6 +223,41 @@ export class Viewer {
   private selected: string | null = null;
   private onMarker: ((name: string, p: Vec3 | null) => void) | null = null;
   private raycaster = new THREE.Raycaster();
+  // M68: a brush painting a mask in the texture's own layout (white = redrawn), shown on the model as a veil
+  private brush: {
+    canvas: HTMLCanvasElement;
+    g: CanvasRenderingContext2D;
+    tex: THREE.CanvasTexture;
+    veils: THREE.Mesh[];
+    radius: number;
+    size: number; // the model's diagonal, metres
+    down: boolean;
+    last: [number, number] | null; // the pointer at the last stamp
+    painted: boolean;
+    rev: number; // counts the strokes and clears: an unchanged paint need not be uploaded again
+  } | null = null;
+  private onBrushDown = (e: PointerEvent) => {
+    if (!this.brush || e.button !== 0 || !this.stamp(e.clientX, e.clientY, e.shiftKey)) return; // off the model: the orbit as ever
+    this.brush.down = true;
+    this.brush.last = [e.clientX, e.clientY];
+    this.controls.enabled = false; // runs before the orbit's own listener (capture): it does not start
+    this.canvas.setPointerCapture(e.pointerId);
+  };
+  private onBrushMove = (e: PointerEvent) => {
+    const b = this.brush;
+    if (!b?.down || !b.last) return;
+    // stamps between the last pointer and this one, 4 px apart: a fast stroke stays a stroke
+    const [x0, y0] = b.last;
+    const n = Math.min(32, Math.max(1, Math.ceil(Math.hypot(e.clientX - x0, e.clientY - y0) / 4)));
+    for (let i = 1; i <= n; i++) this.stamp(x0 + ((e.clientX - x0) * i) / n, y0 + ((e.clientY - y0) * i) / n, e.shiftKey);
+    b.last = [e.clientX, e.clientY];
+  };
+  private onBrushUp = () => {
+    if (!this.brush?.down) return;
+    this.brush.down = false;
+    this.brush.last = null;
+    this.controls.enabled = true;
+  };
   private edit: SkeletonEdit | null = null;
   private joints: Joint[] = [];
   private tc: TransformControls | null = null; // the gizmo, made on first use; it moves `proxy`, set in the selected bone's frame
@@ -405,6 +440,120 @@ export class Viewer {
       center: [t.x, t.y, t.z].map((x) => Math.round(x * 1e4) / 1e4) as [number, number, number],
       extent: Math.round(Math.min(height, height * this.camera.aspect) * 1e4) / 1e4,
     };
+  }
+
+  /** M68: painting on (a left drag on the model paints, with Shift it erases; a drag beside it still orbits) or
+   * off. `radius`: the brush's radius as a share of the model's size. The paint stays until clearPaint() or another
+   * model. */
+  setPaint(on: boolean, radius = 0.03): boolean {
+    if (on && this.model && !this.brush) {
+      // the canvas has the base colour texture's size, at most 2048 (the step resizes it to the atlas); glTF textures
+      // are not flipped: (u, v) is the canvas' (x, y)
+      let size = 1024;
+      this.model.traverse((o) => {
+        const map = ((o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined)?.map?.image as { width?: number } | undefined;
+        if (map?.width) size = Math.min(map.width, 2048);
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = size;
+      const g = canvas.getContext("2d")!;
+      g.fillStyle = "#000";
+      g.fillRect(0, 0, size, size);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.flipY = false;
+      tex.generateMipmaps = false; // re-uploaded at every stamp: no mip chain to rebuild
+      tex.minFilter = THREE.LinearFilter;
+      const veils: THREE.Mesh[] = [];
+      this.model.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh || mesh.userData.veil || !mesh.geometry.attributes.uv) return;
+        const mat = new THREE.MeshBasicMaterial({ color: 0xff2bd6, transparent: true, opacity: 0.6, alphaMap: tex, depthWrite: false });
+        Object.assign(mat, { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+        const veil = new THREE.Mesh(mesh.geometry, mat);
+        veil.userData.veil = true;
+        veil.raycast = () => undefined; // the brush hits the model under it
+        mesh.add(veil);
+        veils.push(veil);
+      });
+      const size3 = new THREE.Box3().setFromObject(this.model).getSize(new THREE.Vector3()).length();
+      this.brush = { canvas, g, tex, veils, radius, size: size3, down: false, last: null, painted: false, rev: 0 };
+    }
+    if (this.brush) this.brush.radius = radius;
+    const c = this.canvas;
+    const ends = ["pointerup", "pointercancel", "lostpointercapture"] as const;
+    if (on && this.brush) {
+      c.addEventListener("pointerdown", this.onBrushDown, { capture: true });
+      c.addEventListener("pointermove", this.onBrushMove);
+      ends.forEach((ev) => c.addEventListener(ev, this.onBrushUp));
+    } else {
+      this.onBrushUp();
+      c.removeEventListener("pointerdown", this.onBrushDown, { capture: true });
+      c.removeEventListener("pointermove", this.onBrushMove);
+      ends.forEach((ev) => c.removeEventListener(ev, this.onBrushUp));
+    }
+    this.dirty = true;
+    return on && !!this.brush;
+  }
+
+  /** M68: nothing painted any more. */
+  clearPaint() {
+    if (!this.brush) return;
+    const { g, canvas } = this.brush;
+    g.fillStyle = "#000";
+    g.fillRect(0, 0, canvas.width, canvas.height);
+    this.brush.tex.needsUpdate = true;
+    this.brush.painted = false;
+    this.brush.rev++;
+    this.dirty = true;
+  }
+
+  /** M68: changes with every stroke and clear (the panel uploads a paint once). */
+  paintRev(): number {
+    return this.brush?.rev ?? 0;
+  }
+
+  /** M68: whether anything is painted. */
+  painted(): boolean {
+    return !!this.brush?.painted;
+  }
+
+  /** M68: the painted mask as a PNG in the texture's layout (white = redrawn), or null when nothing is painted. */
+  paintMask(): Promise<Blob | null> {
+    const b = this.brush;
+    if (!b?.painted) return Promise.resolve(null);
+    return new Promise((done) => b.canvas.toBlob(done, "image/png"));
+  }
+
+  /** Paint (Shift: erase) a disc of the brush's radius round where the pointer meets the model; false: it missed. */
+  private stamp(x: number, y: number, erase: boolean): boolean {
+    const b = this.brush;
+    if (!b || !this.model) return false;
+    const r = this.canvas.getBoundingClientRect();
+    this.raycaster.setFromCamera(new THREE.Vector2(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1), this.camera);
+    const hit = this.raycaster.intersectObject(this.model, true).find((h) => h.uv && h.face);
+    if (!hit) return false;
+    // the brush's radius in the texture: metres times this face's texels per metre (its UV area over its 3D area)
+    const mesh = hit.object as THREE.Mesh;
+    const pos = mesh.geometry.attributes.position;
+    const uv = mesh.geometry.attributes.uv;
+    const { a, b: bi, c } = hit.face!;
+    const P = [a, bi, c].map((i) => mesh.localToWorld(new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i))));
+    const U = [a, bi, c].map((i) => new THREE.Vector2(uv.getX(i), uv.getY(i)));
+    const area3 = P[1].clone().sub(P[0]).cross(P[2].clone().sub(P[0])).length() / 2;
+    const e1 = U[1].clone().sub(U[0]);
+    const e2 = U[2].clone().sub(U[0]);
+    const areaUv = Math.abs(e1.x * e2.y - e1.y * e2.x) / 2;
+    const ruv = area3 > 1e-12 ? b.radius * b.size * Math.sqrt(areaUv / area3) : 0.01;
+    const px = Math.max(1, ruv * b.canvas.width);
+    b.g.fillStyle = erase ? "#000" : "#fff";
+    b.g.beginPath();
+    b.g.arc(hit.uv!.x * b.canvas.width, hit.uv!.y * b.canvas.height, px, 0, 2 * Math.PI);
+    b.g.fill();
+    b.tex.needsUpdate = true;
+    b.painted ||= !erase;
+    b.rev++;
+    this.dirty = true;
+    return true;
   }
 
   /** Frame the whole model, or look at it from the front (+Z), the side (+X) or the top (+Y). */
@@ -678,7 +827,7 @@ export class Viewer {
     this.xray = on;
     this.dirty = true;
     this.model?.traverse((o) => {
-      if (!(o as THREE.Mesh).isMesh) return;
+      if (!(o as THREE.Mesh).isMesh || o.userData.veil) return; // M68: the brush's veil is its own
       for (const m of [(o as THREE.Mesh).material].flat()) {
         if (on && !this.xsaved.has(m)) this.xsaved.set(m, { transparent: m.transparent, opacity: m.opacity, depthWrite: m.depthWrite });
         const was = this.xsaved.get(m);
@@ -740,6 +889,12 @@ export class Viewer {
   }
 
   private drop() {
+    if (this.brush) {
+      this.setPaint(false);
+      this.brush.veils.forEach((v) => (v.removeFromParent(), (v.material as THREE.Material).dispose()));
+      this.brush.tex.dispose();
+      this.brush = null;
+    }
     this.setPoseEdit(null);
     this.setMotionPath(null);
     this.setOnion(null);
@@ -789,7 +944,7 @@ export class Viewer {
     this.dirty = true;
     this.model?.traverse((o) => {
       const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh) return;
+      if (!mesh.isMesh || mesh.userData.veil) return; // M68: the brush's veil keeps its own material
       const orig = this.originals.get(mesh)!;
       if (mesh.material !== orig) (mesh.material as THREE.Material).dispose(); // the previous channel view
       const src = (Array.isArray(orig) ? orig[0] : orig) as THREE.MeshStandardMaterial;
@@ -1423,7 +1578,7 @@ export class Viewer {
     this.quadEdges = 0;
     this.model?.traverse((o) => {
       const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh) return;
+      if (!mesh.isMesh || mesh.userData.veil) return; // M68: the brush's veil keeps its offset
       // a quad mesh shows its quads as lines over the shaded surface; a skinned mesh keeps the triangle wireframe (its
       // vertices move with the bones, a still line set would not)
       const lines = on && quads && !(mesh as THREE.SkinnedMesh).isSkinnedMesh ? this.quadLinesOf(mesh) : null;
