@@ -483,16 +483,76 @@ def write_glb(
     mesh = trimesh.Trimesh(v, np.asarray(faces), vertex_normals=n, process=False)
     mesh.visual = trimesh.visual.TextureVisuals(uv=uv_trimesh, material=material)
     mesh.export(path, file_type="glb")
-    if (
-        occlusion
-    ):  # trimesh lists the ORM once per slot (two images, two textures, one buffer view): once
+    # TANGENT, the frame the normal map was baked in: without it every viewer builds its own (facets, seams)
+    tangents = None
+    if normal_map is not None:
+        nrm = mesh.vertex_normals if n is None else n
+        tangents = vertex_tangents(v, np.asarray(faces), np.asarray(uv, np.float64), nrm)
+    if occlusion or tangents is not None:
         from pathlib import Path
 
         from steps import _anim
 
         doc, blob = _anim.read_glb(path)
-        _one_image_per_picture(doc)
+        if (
+            occlusion
+        ):  # trimesh lists the ORM once per slot (two images, two textures, one buffer view): once
+            _one_image_per_picture(doc)
+        if tangents is not None:
+            blob = _add_tangents(doc, blob, tangents)
         Path(path).write_bytes(_anim.pack(doc, blob))
+
+
+def vertex_tangents(v, f, uv, n) -> np.ndarray:
+    """glTF TANGENT [N,4] per vertex (xyz, w = the bitangent's sign): area-weighted ∂P/∂u made square to the
+    normal, the frame bake encodes the normal map in. `uv` in glTF's convention (v runs down the image)."""
+    p0, p1, p2 = v[f[:, 0]], v[f[:, 1]], v[f[:, 2]]
+    t0, t1, t2 = uv[f[:, 0]], uv[f[:, 1]], uv[f[:, 2]]
+    e1, e2, d1, d2 = p1 - p0, p2 - p0, t1 - t0, t2 - t0
+    r = d1[:, 0] * d2[:, 1] - d1[:, 1] * d2[:, 0]
+    r = np.where(np.abs(r) < 1e-20, 1e-20, r)
+    du = (e1 * d2[:, 1:] - e2 * d1[:, 1:]) / r[:, None]  # ∂P/∂u
+    up = -(e2 * d1[:, :1] - e1 * d2[:, :1]) / r[:, None]  # -∂P/∂v: "up" in the image is -v
+    tan, bit = np.zeros_like(v), np.zeros_like(v)
+    for k in range(3):
+        np.add.at(tan, f[:, k], du)
+        np.add.at(bit, f[:, k], up)
+    n = n / np.linalg.norm(n, axis=1, keepdims=True).clip(1e-12)
+    tan -= (tan * n).sum(1, keepdims=True) * n
+    length = np.linalg.norm(tan, axis=1, keepdims=True)
+    # a vertex whose triangles have no UV area: any unit vector square to its normal (glTF wants unit length)
+    spare = np.cross(n, np.where(np.abs(n[:, :1]) < 0.9, [[1.0, 0, 0]], [[0, 1.0, 0]]))
+    tan = np.where(
+        length > 1e-12,
+        tan / length.clip(1e-12),
+        spare / np.linalg.norm(spare, axis=1, keepdims=True),
+    )
+    sign = np.where((np.cross(n, tan) * bit).sum(1) >= 0, 1.0, -1.0)
+    return np.concatenate([tan, sign[:, None]], 1).astype(np.float32)
+
+
+def _add_tangents(doc: dict, blob: bytes, tangents: np.ndarray) -> bytes:
+    """Append `tangents` as each primitive's TANGENT (the primitives trimesh wrote: one per mesh, over all the
+    vertices); a primitive with another vertex count is left alone. Returns the new BIN chunk."""
+    data = np.ascontiguousarray(tangents, "<f4").tobytes()
+    doc.setdefault("bufferViews", []).append(
+        {"buffer": 0, "byteOffset": len(blob), "byteLength": len(data), "target": 34962}
+    )
+    doc.setdefault("accessors", []).append(
+        {
+            "bufferView": len(doc["bufferViews"]) - 1,
+            "componentType": 5126,
+            "count": len(tangents),
+            "type": "VEC4",
+        }
+    )
+    for mesh in doc.get("meshes", []):
+        for prim in mesh["primitives"]:
+            if doc["accessors"][prim["attributes"]["POSITION"]]["count"] == len(tangents):
+                prim["attributes"]["TANGENT"] = len(doc["accessors"]) - 1
+    blob += data
+    doc["buffers"][0]["byteLength"] = len(blob)
+    return blob
 
 
 def _uniq(items: list) -> tuple[list, dict]:

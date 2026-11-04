@@ -263,3 +263,198 @@ def test_small_dark_islands_in_the_ao_are_filled_and_crevices_stay():
     assert (out[180:183, 180:183] == 0.0).all() and (out[150:160, 150:160] == 0.1).all()
     assert (out[30:34, 0:4] == 0.0).all()
     assert abs(share - 16 / mask.sum()) < 1e-6
+
+
+def test_write_glb_stores_the_tangent_frame_the_normal_map_was_baked_in(tmp_path):
+    """A normal-mapped GLB carries TANGENT (unit xyz, w = ±1) equal to bake.vertex_frames' frame, so viewers and
+    engines read the map in the frame it was baked in (without it the map showed facets and seams);
+    the frame is the same after an even scale, a turn and a mirror. Without a normal map there is no TANGENT."""
+    import trimesh
+
+    from steps import _anim
+    from steps.bake import vertex_frames
+
+    sphere = trimesh.creation.uv_sphere(radius=0.5, count=[12, 16])
+    v, f = sphere.vertices, sphere.faces
+    uv = np.stack(
+        [
+            (np.arctan2(v[:, 2], v[:, 0]) / (2 * np.pi)) % 1,
+            0.5 - np.arcsin(np.clip(v[:, 1] / 0.5, -1, 1)) / np.pi,
+        ],
+        1,
+    )
+    n = sphere.vertex_normals
+    rgba = np.full((8, 8, 4), 255, np.uint8)
+    orm = np.full((8, 8, 3), 255, np.uint8)
+    normal = np.full((8, 8, 3), (128, 128, 255), np.uint8)
+    fl = lambda x: torch.tensor(x, dtype=torch.float32)
+    tan, sign = vertex_frames(
+        fl(v),
+        torch.tensor(f, dtype=torch.long),
+        fl(uv),
+        torch.nn.functional.normalize(fl(n), dim=1),
+    )
+    want = np.concatenate([tan.numpy(), sign.numpy()[:, None]], 1)
+    for k, turn in enumerate(
+        [
+            np.eye(3),
+            2.5 * trimesh.transformations.rotation_matrix(0.7, [1, 1, 0])[:3, :3],
+            np.diag([-1.0, 1, 1]),
+        ]
+    ):
+        write_glb(
+            tmp_path / f"m{k}.glb",
+            v @ turn.T,
+            f,
+            uv,
+            rgba,
+            orm,
+            n @ np.linalg.inv(turn),
+            normal_map=normal,
+            occlusion=True,
+        )
+        doc, blob = _anim.read_glb(tmp_path / f"m{k}.glb")
+        prim = doc["meshes"][0]["primitives"][0]
+        acc = doc["accessors"][prim["attributes"]["TANGENT"]]
+        assert (acc["type"], acc["componentType"], acc["count"]) == ("VEC4", 5126, len(v))
+        view = doc["bufferViews"][acc["bufferView"]]
+        got = np.frombuffer(blob, "<f4", len(v) * 4, view["byteOffset"]).reshape(-1, 4)
+        assert np.allclose(np.linalg.norm(got[:, :3], axis=1), 1, atol=1e-4) and set(
+            np.unique(got[:, 3])
+        ) <= {-1.0, 1.0}
+        frame = want[:, :3] @ turn.T
+        frame /= np.linalg.norm(frame, axis=1, keepdims=True)
+        ok = np.linalg.norm(want[:, :3], axis=1) > 0.5  # the poles: no UV area, any tangent will do
+        assert np.allclose(got[ok, :3], frame[ok], atol=1e-3)
+        mirrored = np.linalg.det(turn) < 0
+        assert np.array_equal(got[ok, 3], -want[ok, 3] if mirrored else want[ok, 3])
+        assert (
+            len(doc["images"]) == 3
+        )  # the ORM still once (occlusion) next to the colour and the normal map
+    write_glb(tmp_path / "plain.glb", v, f, uv, rgba, orm, n)
+    doc, _ = _anim.read_glb(tmp_path / "plain.glb")
+    assert "TANGENT" not in doc["meshes"][0]["primitives"][0]["attributes"]
+
+
+def test_axis_normals_ignore_random_winding():
+    """A TRELLIS hi mesh's winding is random; summed face normals cancel there and the baked normal map turned to
+    grain. axis_normals gives each vertex its surface's normal whatever the winding (sign free)."""
+    import trimesh
+
+    from steps.bake import axis_normals
+
+    s = trimesh.creation.icosphere(subdivisions=4)
+    f = s.faces.copy()
+    flip = np.random.default_rng(0).random(len(f)) < 0.5
+    f[flip] = f[flip][:, ::-1]  # half the faces wound the other way
+    got = axis_normals(
+        torch.tensor(s.vertices, dtype=torch.float32), torch.tensor(f, dtype=torch.long)
+    ).numpy()
+    radial = s.vertices / np.linalg.norm(s.vertices, axis=1, keepdims=True)
+    assert np.abs((got * radial).sum(1)).min() > 0.99  # the surface normal, up to its sign
+    summed = trimesh.Trimesh(s.vertices, f, process=False).vertex_normals
+    assert (
+        np.abs((summed * radial).sum(1)).min() < 0.9
+    )  # what the old sum gave: off by a lot somewhere
+
+
+def test_drop_crumbs_keeps_the_parts_and_drops_the_crumbs():
+    import trimesh
+
+    from steps.bake import drop_crumbs
+
+    body = trimesh.creation.icosphere(subdivisions=3)
+    button = trimesh.creation.icosphere(subdivisions=1, radius=0.05)  # 0.25 % of the area: a part
+    button.apply_translation([2, 0, 0])
+    crumb = trimesh.creation.box(extents=(1e-3, 1e-3, 1e-3))
+    crumb.apply_translation([3, 0, 0])
+    m = trimesh.util.concatenate([body, button, crumb])
+    kept = drop_crumbs(
+        torch.tensor(m.vertices, dtype=torch.float32), torch.tensor(m.faces, dtype=torch.long)
+    )
+    assert len(kept) == len(body.faces) + len(button.faces)
+
+
+def test_denoise_normals_smooths_noise_and_keeps_a_crease():
+    """Edge-aware: a noisy flat face comes out flat, the 90° edge of a box stays a 90° edge; random signs in."""
+    import trimesh
+
+    from steps.bake import axis_normals, denoise_normals
+
+    box = trimesh.creation.box(extents=(1, 1, 1))
+    for _ in range(5):  # 32 segments a side: a face's middle is several rings from its edges
+        box = box.subdivide()
+    rng = np.random.default_rng(1)
+    v = box.vertices + rng.normal(0, 0.004, box.vertices.shape)  # faceting-like noise
+    f = box.faces.copy()
+    flip = rng.random(len(f)) < 0.5
+    f[flip] = f[flip][:, ::-1]
+    vt, ft = torch.tensor(v, dtype=torch.float32), torch.tensor(f, dtype=torch.long)
+    n0 = axis_normals(vt, ft).numpy()
+    n1 = denoise_normals(vt, ft, torch.from_numpy(n0), 6).numpy()
+    top = box.vertices[:, 1] > 0.49
+    middle = top & (np.abs(box.vertices[:, [0, 2]]).max(1) < 0.3)
+
+    def tilt(n):
+        return np.degrees(np.arccos(np.abs(n[middle, 1]).clip(0, 1))).mean()
+
+    assert tilt(n1) < 0.5 * tilt(n0)  # the noise smoothed
+    near_edge = (
+        top
+        & (box.vertices[:, 0] > 0.45)
+        & (box.vertices[:, 0] < 0.49)
+        & (np.abs(box.vertices[:, 2]) < 0.4)
+    )
+    # the top face's vertices next to the +X edge still point up, not halfway round the edge
+    assert near_edge.any() and np.abs(n1[near_edge, 1]).min() > 0.9
+
+
+def test_project_takes_the_near_side_of_a_thin_part():
+    """Two parallel sheets 2 mm apart (a thin part, front and back); a texel just behind the front sheet is closer to
+    the back sheet. The back sheet here is tilted 60°, so its normal would bake a steep lean; facing takes the
+    front sheet's normal through the ray along the texel's normal."""
+    import trimesh
+
+    from steps.bake import _Hi, _project, axis_normals
+
+    if not torch.cuda.is_available():
+        pytest.skip("rays need the GPU BVH")
+    front = trimesh.creation.box(extents=(0.2, 0.2, 1e-4)).subdivide().subdivide()
+    back = front.copy()
+    back.apply_transform(trimesh.transformations.rotation_matrix(np.radians(60), [1, 0, 0]))
+    back.apply_translation([0, 0, -0.002])
+    m = trimesh.util.concatenate([front, back])
+    v, f = torch.tensor(m.vertices, dtype=torch.float32), torch.tensor(m.faces, dtype=torch.long)
+    hi = _Hi(v, f, axis_normals(v, f))
+    pts = torch.tensor(
+        [[0.0, 0.0, -0.0013]]
+    ).cuda()  # 1.25 mm behind the front sheet, near the tilted back one
+    nrm = torch.tensor([[0.0, 0.0, 1.0]]).cuda()
+    normals, _ = _project(hi, pts, nrm)
+    assert normals[0, 2] > 0.99  # the front sheet's normal, not the back's 60° lean
+
+
+def test_surface_blur_is_seam_free_and_keeps_two_sides_apart():
+    """Two copies of one noisy patch (the texels either side of a UV seam: the same 3D points, other islands) come out
+    alike and less noisy; a sheet facing the other way 1 mm behind (a thin part's far side) keeps its own values; a texel
+    that agrees with no neighbour keeps its own."""
+    from steps.bake import surface_blur
+
+    rng = np.random.default_rng(2)
+    g = np.stack(np.meshgrid(np.arange(0, 0.1, 0.001), np.arange(0, 0.1, 0.001)), -1).reshape(-1, 2)
+    k = len(g)
+    flat, behind = np.c_[g, np.zeros(k)], np.c_[g, np.full(k, -0.001)]
+    pts = torch.tensor(np.r_[flat, flat, behind], dtype=torch.float32)
+    up = np.tile([0.0, 0, 1], (k, 1))
+    normals = torch.tensor(np.r_[up, up, -up], dtype=torch.float32)
+    ao = 0.6 + rng.normal(0, 0.1, k)
+    values = torch.tensor(np.r_[ao, ao, np.ones(k)], dtype=torch.float32)[:, None]
+    out = surface_blur(pts, normals, values, 0.002)[:, 0].numpy()
+    assert np.allclose(out[:k], out[k : 2 * k], atol=1e-6)  # both sides of the seam alike
+    assert out[:k].std() < 0.4 * ao.std()  # less grain
+    assert abs(out[:k].mean() - 0.6) < 0.02  # the same level
+    assert np.allclose(out[2 * k :], 1.0, atol=1e-6)  # the far side keeps its own
+    lone = torch.tensor([[0.5, 0.5, 0.5]])  # far from every other texel
+    pts, normals = torch.cat([pts, lone]), torch.cat([normals, torch.tensor([[1.0, 0, 0]])])
+    alone = surface_blur(pts, normals, torch.cat([values, torch.tensor([[0.25]])]), 0.002)
+    assert float(alone[-1, 0]) == 0.25
