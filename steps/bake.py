@@ -6,7 +6,7 @@ normal_smooth: 0, ao_rays: 256, ao_smooth: 2.0}
 kept), its loose crumbs dropped first; 0: off. `normal_smooth`, `ao_smooth`: a Gaussian over the surface (sigma in
 texels at texture_size; 0: off), seam-free as it blurs in 3D (`surface_blur`). A texel's hi normal comes from the
 closest hi point, or from a short ray along this mesh's normal when that surface faces it better (the far side of a
-thin part).
+thin part); with a cleaned solid up the chain (clean's hi_clean.ply) from that, the colour still from the raw mesh.
 `detaper` (2026-10-12): a flat prop's perspective taper undone after the sampling (the texture is read on the
 shape the picture gave, then the shape is squared: steps/_mesh.detaper; `metrics.detapered`).
 The input version's mesh.glb (library frame) is mapped back into the TRELLIS frame through the chain's
@@ -207,7 +207,7 @@ def run(op, in_dir, out_dir, params):
     progress(0.2, f"rasterizing {size * ss}² texels")
     face_id, bary, corners, w, pts, nrm = texels(size * ss)
     mask = face_id >= 0
-    hi, hi_n, project, p = None, nrm, None, None
+    hi, hi_n, project, p, normals_from, clean = None, nrm, None, None, None, None
     if source is not None:
         progress(0.5, "sampling the source's materials")
         hit, w_hit = _closest(_Hi(source.v, source.f, source.n), pts)
@@ -215,8 +215,15 @@ def run(op, in_dir, out_dir, params):
         del hit, w_hit
     else:
         if dev == "cuda":
-            hi = _Hi(*_load_ply(vol_dir / "hi_trellis.ply", int(params.get("hi_denoise", 6))))
+            rounds = int(params.get("hi_denoise", 6))
+            clean = _clean_hi(src, to_trellis, rounds)
+            # colour positions on the raw surface (the volume's); normals off Clean's solid when there is one
+            hi = _Hi(*_load_ply(vol_dir / "hi_trellis.ply", 0 if clean else rounds))
             hi_n, p = _project(hi, pts, nrm)
+            if clean is not None:
+                progress(0.45, f"normals from {clean[0]}'s cleaned surface")
+                hi_n, _ = _project(clean[1], pts, nrm)
+                normals_from = clean[0]
             project = lambda _, p=p: p
         progress(0.5, "sampling the volume")
         rgba, mr, m = bake_volume(
@@ -245,7 +252,17 @@ def run(op, in_dir, out_dir, params):
         img[mask] = local
         img, covered = box_filter((img * 0.5 + 0.5).mul(255).cpu().numpy(), mask.cpu().numpy(), ss)
         normal_map = fill_gutters((img + 0.5).clip(0, 255).astype(np.uint8), covered)
-    del pts, nrm, corners, w, hi_n, project, p, hi  # the big per-texel tensors: AO needs the VRAM
+    del (
+        pts,
+        nrm,
+        corners,
+        w,
+        hi_n,
+        project,
+        p,
+        hi,
+        clean,
+    )  # the big per-texel tensors: AO needs the VRAM
 
     progress(0.7, "levelling the UV seams")
     uv_np = uv.cpu().numpy()
@@ -335,6 +352,8 @@ def run(op, in_dir, out_dir, params):
     )
     if source is None:
         origin = {"volume_from": vol_dir.name}
+        if normals_from:
+            origin["normals_from"] = normals_from
     else:
         origin = {"source_from": vol_dir.name, "source_materials": len(source.mats)}
     return {"outputs": outputs, "metrics": metrics | origin}
@@ -363,6 +382,29 @@ class _Hi:
                 self.bvh = cumesh.cuBVH(v, f)
             else:
                 self.bvh = cumesh.cuBVH(self.v, self.f)
+
+
+def _clean_hi(version_dir: Path, to_trellis: np.ndarray, rounds: int):
+    """(its version's name, _Hi) of the nearest hi_clean.ply up the chain (Clean's cleaned solid, high-res) in the
+    TRELLIS frame, its normals smoothed `rounds` more (bake's hi_denoise); None when the chain has none (an import, an older Clean). The raw generator mesh still gives the colour positions: the volume is
+    aligned to it, the solid lies up to a voxel off (sampling there read empty voxels: rings)."""
+    import torch
+    import trimesh
+
+    try:
+        d, m, meta = find_source(
+            version_dir,
+            lambda _, meta: "hi_clean" in meta["outputs"],
+            "no hi_clean.ply up the chain of",
+        )
+    except StepError:
+        return None
+    hi = trimesh.load(d / meta["outputs"]["hi_clean"], process=False)
+    t = to_trellis @ m  # that version's frame → this one's → TRELLIS
+    v = torch.tensor(np.asarray(hi.vertices) @ t[:3, :3].T + t[:3, 3], dtype=torch.float32)
+    f = torch.tensor(np.asarray(hi.faces), dtype=torch.long)
+    n = axis_normals(v, f)
+    return d.name, _Hi(v, f, denoise_normals(v, f, n, rounds) if rounds > 0 else n)
 
 
 def _load_ply(path: Path, denoise: int = 0):

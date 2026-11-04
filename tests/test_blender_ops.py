@@ -704,3 +704,27 @@ def test_quadriflow_exports_smooth_normals(sphere, tmp_path):
         acc["count"] == pos["count"]
         and len(np.unique(n.reshape(-1, 3).round(4), axis=0)) > 0.5 * acc["count"]
     )
+
+
+def test_solid_cleanup_fills_a_hollow_double_skin(tmp_path):
+    """Two concentric shells 0.2 mm apart, both open at the top (what Clean got from a generated model)
+    become one closed solid with the sphere's volume."""
+    import math
+
+    import numpy as np
+    import trimesh
+
+    from steps.clean import solid_cleanup
+
+    parts = []
+    for r, flip in ((0.1, False), (0.0998, True)):
+        s = trimesh.creation.icosphere(subdivisions=4, radius=r)
+        keep = s.triangles_center[:, 2] < 0.07  # the cap off: an opening ~7 cm across
+        f = s.faces[keep][:, ::-1] if flip else s.faces[keep]
+        parts.append(trimesh.Trimesh(s.vertices, f, process=False))
+    skin = trimesh.util.concatenate(parts)
+    v, f, info = solid_cleanup(np.asarray(skin.vertices), np.asarray(skin.faces), tmp_path, res=120)
+    m = trimesh.Trimesh(v, f, process=False)
+    assert m.is_watertight and info["watertight"]
+    assert abs(abs(m.volume) / (4 / 3 * math.pi * 0.1**3) - 1) < 0.1  # filled, not a 0.2 mm skin
+    assert abs(m.area / (4 * math.pi * 0.1**2) - 1) < 0.15  # one surface, not two

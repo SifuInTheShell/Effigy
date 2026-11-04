@@ -434,6 +434,33 @@ def test_project_takes_the_near_side_of_a_thin_part():
     assert normals[0, 2] > 0.99  # the front sheet's normal, not the back's 60° lean
 
 
+def test_clean_hi_is_found_up_the_chain_and_brought_into_the_trellis_frame(tmp_path):
+    """bake reads normals off the nearest hi_clean.ply, mapped through the transforms recorded after it."""
+    import trimesh
+
+    from steps.bake import _clean_hi
+
+    def version(name, parent, outputs, metrics=None):
+        d = tmp_path / name
+        d.mkdir()
+        meta = {"parent": parent, "outputs": outputs, "metrics": metrics or {}}
+        (d / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        return d
+
+    version("001_trellis2", None, {"mesh": "hi.glb", "ovoxel": "ovoxel.npz"})
+    d = version("002_clean", "001_trellis2", {"mesh": "mesh.glb", "hi_clean": "hi_clean.ply"})
+    trimesh.creation.box(extents=(1, 1, 1)).export(d / "hi_clean.ply")
+    move = np.eye(4)
+    move[:3, 3] = [2, 0, 0]  # a later transform step moved the model 2 m along X
+    version("003_transform", "002_clean", {"mesh": "mesh.glb"}, {"transform": move.tolist()})
+    version("004_uv", "003_transform", {"mesh": "mesh.glb"})
+    to_trellis = np.diag([0.5, 0.5, 0.5, 1.0])
+    name, hi = _clean_hi(tmp_path / "004_uv", to_trellis, 0)
+    assert name == "002_clean"
+    assert np.allclose(hi.v.cpu().numpy().mean(0), [1.0, 0, 0], atol=1e-6)  # (+2 m) × 0.5
+    assert _clean_hi(tmp_path / "001_trellis2", to_trellis, 0) is None
+
+
 def test_surface_blur_is_seam_free_and_keeps_two_sides_apart():
     """Two copies of one noisy patch (the texels either side of a UV seam: the same 3D points, other islands) come out
     alike and less noisy; a sheet facing the other way 1 mm behind (a thin part's far side) keeps its own values; a texel

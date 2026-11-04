@@ -994,3 +994,18 @@ def test_smooth_normals_agree_across_a_uv_seam():
     radial = v2 / np.linalg.norm(v2, axis=1, keepdims=True)
     assert np.allclose(n[extra], n[[copy[e] for e in extra]], atol=1e-9)  # both sides alike
     assert (np.abs((n * radial).sum(1)) > 0.99).all()  # smooth: close to the sphere's normal
+
+
+def test_denoise_surface_smooths_noise_keeps_a_crease():
+    from steps._mesh import denoise_surface
+
+    box = trimesh.creation.box(extents=(1, 1, 1))
+    for _ in range(4):
+        box = box.subdivide()
+    rng = np.random.default_rng(3)
+    v0 = box.vertices + rng.normal(0, 0.003, box.vertices.shape)
+    v1 = denoise_surface(v0, box.faces, 10, 10)
+    top = (box.vertices[:, 1] > 0.49) & (np.abs(box.vertices[:, [0, 2]]).max(1) < 0.3)
+    assert np.std(v1[top, 1]) < 0.5 * np.std(v0[top, 1])  # the noise flattened
+    edge = (box.vertices[:, 1] > 0.49) & (box.vertices[:, 0] > 0.49)
+    assert np.abs(v1[edge] - box.vertices[edge]).max() < 0.02  # the box's edge still where it was

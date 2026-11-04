@@ -6,7 +6,9 @@ square it: a prop from a three-quarter picture, its long side turned onto X), pr
 just under a broad flat base, up to a tenth of the height, pressed flat onto it: a lifting eye mirrored under a
 block), drop_floating: "auto"|true|false (the small parts floating off the outside of a model that is otherwise one
 solid dropped, metrics.dropped_parts; "auto": a generated model's), hole: 0.03, min_component: 1e-5,
-rebuild: "auto"|true|false,
+rebuild: "auto"|true|false, cleanup: "auto"|true|false (2026-11-04: the model as a clean solid, see solid_cleanup;
+"auto": on for a generated model; writes hi_clean.ply, the surface bake reads its normals from),
+cleanup_resolution: 400,
 rebuild_resolution: 512}  (hole and min_component are fractions of the bounding-box diagonal / its
 square). Output is geometry only (UVs and textures come later from uv/bake); a rescale is recorded as
 metrics.transform so bake can map the mesh back into the volume.
@@ -410,6 +412,43 @@ def base_transform(v, height_m: float | None) -> np.ndarray:
     return m
 
 
+def solid_cleanup(v: np.ndarray, f: np.ndarray, out: Path, res: int = 400):
+    """(vertices, faces, info) of the model as a clean solid: its voxel solid at `res` along the longest side
+    (cracks up to ~2 voxels closed, the inside filled even through openings: remesh.solid_hull with fill), the
+    voxel steps rounded off by Blender (remesh._filled), then edge-aware denoised (_mesh.denoise_surface: bends
+    under ~60° smoothed, creases kept) and its largest part kept.
+    The rebuild alone leaves a generated model as a hollow double skin (two layers 0.1 mm apart, joined where the
+    surface is open, so drop_enclosed_parts keeps the inner one); frayed rims, cuts and specks (cracks, not noise)
+    go too. About a minute at 400."""
+    import time
+
+    import trimesh
+
+    from steps._mesh import denoise_surface
+    from steps.remesh import _filled, solid_hull
+
+    t0, info = time.time(), {}
+    hull = solid_hull(v, f, res=res, close=1, fill=True, info=info)
+    sv, sf = _filled(hull, info["pitch"], out)
+    sv = denoise_surface(sv, sf, 20, 20, sin2=0.8)
+    m = max(
+        trimesh.Trimesh(sv, sf, process=False).split(only_watertight=False), key=lambda x: x.area
+    )
+    return (
+        np.asarray(m.vertices),
+        np.asarray(m.faces),
+        {
+            "resolution": res,
+            "voxel_mm": round(info["pitch"] * 1000, 2),
+            "filled_gap_cm": info["filled_gap_cm"],
+            "hi_faces": len(m.faces),
+            "volume_l": round(abs(float(m.volume)) * 1000, 3),
+            "watertight": bool(m.is_watertight),
+            "seconds": round(time.time() - t0, 1),
+        },
+    )
+
+
 def run(op, in_dir, out_dir, params):
     if not in_dir:
         raise StepError("missing_input", "clean needs a parent version with a mesh")
@@ -419,17 +458,21 @@ def run(op, in_dir, out_dir, params):
         raise StepError("missing_input", f"{meta['version']} has no .glb")
     v, f = weld(*read_glb(Path(in_dir) / glb)[:2])
     # a generated model stands upright by default (the owner, 2026-10-13); straighten also squares it to the axes
-    level, floating = params.get("level", "auto"), params.get("drop_floating", "auto")
+    level, floating, cleanup = (
+        params.get(k, "auto") for k in ("level", "drop_floating", "cleanup")
+    )
     if not isinstance(params.get("press_to_floor", False), bool):
         raise StepError("bad_params", "press_to_floor: true or false")
-    if level not in (True, False, "auto") or floating not in (True, False, "auto"):
+    if any(x not in (True, False, "auto") for x in (level, floating, cleanup)):
         raise StepError(
             "bad_params",
-            'level and drop_floating: true, false or "auto" (on for a generated model)',
+            'level, drop_floating and cleanup: true, false or "auto" (on for a generated model)',
         )
-    if "auto" in (level, floating):
+    if "auto" in (level, floating, cleanup):
         generated = _generated(Path(in_dir))
-        level, floating = (generated if x == "auto" else x for x in (level, floating))
+        level, floating, cleanup = (
+            generated if x == "auto" else x for x in (level, floating, cleanup)
+        )
     diag = float(np.linalg.norm(v.max(0) - v.min(0)))
     before = mesh_report(v, f)
     rebuild = params.get("rebuild", "auto")
@@ -467,6 +510,20 @@ def run(op, in_dir, out_dir, params):
     v = v @ t[:3, :3].T + t[:3, 3]
     # one transform back to the parent's frame, the levelling included (bake follows it)
     t[:3, :3] = t[:3, :3] @ m.T
+    outputs = {"mesh": "mesh.glb", "report": "report.json"}
+    cleaned = None
+    if cleanup:
+        import trimesh
+
+        from steps.remesh import _cumesh_simplify
+
+        res = int(params.get("cleanup_resolution", 400))
+        progress(0.7, f"cleaning up: a solid at {res} voxels, denoised")
+        hv, hf, cleaned = solid_cleanup(v, f, Path(out_dir), res)
+        # bake reads its normals off this one (the raw generator surface keeps the colour positions)
+        trimesh.Trimesh(hv, hf, process=False).export(Path(out_dir) / "hi_clean.ply")
+        outputs["hi_clean"] = "hi_clean.ply"
+        v, f = (hv, hf) if len(hf) <= len(f) else _cumesh_simplify(hv, hf, len(f), True)
     write_glb(Path(out_dir) / "mesh.glb", v, f)
     rep = mesh_report(v, f)
     (Path(out_dir) / "report.json").write_text(json.dumps(rep, indent=2), encoding="utf-8")
@@ -484,9 +541,11 @@ def run(op, in_dir, out_dir, params):
         metrics["pressed"] = pressed
     if floated:
         metrics["dropped_parts"] = floated
+    if cleaned:
+        metrics["cleanup"] = cleaned
     if not np.allclose(t, np.eye(4)):
         metrics["transform"] = t.round(9).tolist()
-    return {"outputs": {"mesh": "mesh.glb", "report": "report.json"}, "metrics": metrics}
+    return {"outputs": outputs, "metrics": metrics}
 
 
 if __name__ == "__main__":
