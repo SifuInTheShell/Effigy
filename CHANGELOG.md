@@ -39,6 +39,9 @@ engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
   it should become under **It becomes**, and click **Redraw the painted part**. It is redrawn from every side that
   sees it, and nothing outside the paint changes. **Erase** (or Shift while painting) wipes a stroke that went too
   far; **Clear the paint** starts again; the paint has its own **Strength**.
+- **Smooth shading everywhere.** Cleaned, remeshed and unwrapped models were shown with flat facets (their files
+  had no normals, or one per quad), and the textured model had a shading crease along every UV seam. Every step
+  now writes smooth normals that agree across seams.
 
 ### Interface
 

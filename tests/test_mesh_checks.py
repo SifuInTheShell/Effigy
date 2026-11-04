@@ -977,3 +977,20 @@ def test_validate_holds_the_model_to_the_briefs_size(tmp_path):
     out.mkdir()
     validate.run("run", str(version(tmp_path / "x", tmp_path / "in.glb")), str(out), {})
     assert "size_drift_pct" not in json.loads((out / "checklist.json").read_text())["items"]
+
+
+def test_smooth_normals_agree_across_a_uv_seam():
+    """Vertices split at a UV seam (same position, two copies) get the same, smooth normal."""
+    from steps._mesh import smooth_normals
+
+    s = trimesh.creation.icosphere(subdivisions=2)
+    v, f = s.vertices, s.faces.copy()
+    seam = f[: len(f) // 2]
+    extra = np.unique(seam)
+    copy = {old: len(v) + i for i, old in enumerate(extra)}
+    v2 = np.r_[v, v[extra]]
+    f2 = np.r_[np.vectorize(copy.get)(seam), f[len(f) // 2 :]]  # half the sphere on its own copies
+    n = smooth_normals(v2, f2)
+    radial = v2 / np.linalg.norm(v2, axis=1, keepdims=True)
+    assert np.allclose(n[extra], n[[copy[e] for e in extra]], atol=1e-9)  # both sides alike
+    assert (np.abs((n * radial).sum(1)) > 0.99).all()  # smooth: close to the sphere's normal

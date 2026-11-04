@@ -683,3 +683,24 @@ def test_an_animation_file_comes_in_and_goes_back_onto_the_rig(tmp_path, monkeyp
         next(line for line in done.stdout.splitlines() if line.startswith("WORST")).split()[1]
     )
     assert worst < 0.01, f"hands and feet {worst:.3f} m off the original Walk"
+
+
+def test_quadriflow_exports_smooth_normals(sphere, tmp_path):
+    """The quad remesh's GLB carries smooth normals (not one per quad: flat shading)."""
+    import numpy as np
+
+    from steps import _anim
+
+    run_blender("quadriflow", [sphere], tmp_path / "q", {"target_faces": 400}, timeout=300)
+    doc, blob = _anim.read_glb(tmp_path / "q" / "mesh.glb")
+    prim = doc["meshes"][0]["primitives"][0]
+    acc = doc["accessors"][prim["attributes"]["NORMAL"]]
+    view = doc["bufferViews"][acc["bufferView"]]
+    n = np.frombuffer(
+        blob, "<f4", acc["count"] * 3, view.get("byteOffset", 0) + acc.get("byteOffset", 0)
+    )
+    pos = doc["accessors"][prim["attributes"]["POSITION"]]
+    assert (
+        acc["count"] == pos["count"]
+        and len(np.unique(n.reshape(-1, 3).round(4), axis=0)) > 0.5 * acc["count"]
+    )

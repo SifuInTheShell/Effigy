@@ -23,7 +23,7 @@ import numpy as np
 from PIL import Image
 
 from steps._common import StepError, library_to_trellis, load_ovoxel, main, progress
-from steps._mesh import detaper, textured, uv_overlap
+from steps._mesh import detaper, smooth_normals, textured, uv_overlap
 
 
 def find_source(
@@ -190,7 +190,9 @@ def run(op, in_dir, out_dir, params):
     uv = torch.tensor(mesh.visual.uv, dtype=torch.float32, device=dev)
     uv[:, 1] = 1 - uv[:, 1]  # trimesh's OpenGL UVs → glTF UVs (what the file holds)
     n = torch.tensor(
-        mesh.vertex_normals @ np.linalg.inv(to_trellis[:3, :3]), dtype=torch.float32, device=dev
+        smooth_normals(mesh.vertices, mesh.faces) @ np.linalg.inv(to_trellis[:3, :3]),
+        dtype=torch.float32,
+        device=dev,
     )
     n = torch.nn.functional.normalize(n, dim=1)
 
@@ -307,14 +309,14 @@ def run(op, in_dir, out_dir, params):
     if normal_map is not None:
         Image.fromarray(normal_map, "RGB").save(out / "normal.png")
         outputs["normal"] = "normal.png"
-    verts, normals = mesh.vertices, mesh.vertex_normals
+    verts, normals = mesh.vertices, smooth_normals(mesh.vertices, mesh.faces)
     if params.get(
         "detaper"
     ):  # after the sampling: the texture was read on the shape the picture gave
         verts, taper = detaper(np.asarray(mesh.vertices, np.float64))
         metrics["detapered"] = taper  # null: not a flat panel along X or Z, or no taper to undo
         if taper:
-            normals = trimesh.Trimesh(verts, mesh.faces, process=False).vertex_normals
+            normals = smooth_normals(verts, mesh.faces)
     opaque = source is None or all(
         getattr(x, "alphaMode", None) in (None, "OPAQUE") for x in source.mats
     )
