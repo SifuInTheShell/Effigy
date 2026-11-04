@@ -1,9 +1,9 @@
 """Re-bake (IMPLEMENTATION.md M3): full PBR + a normal map for any UV-mapped version, from the volume (M62: or, for an import, its own materials).
 
 params: {texture_size: 2048, normal_map: true, supersample: 2, ao: true, detaper: false, hi_denoise: 6,
-normal_smooth: 0}
+normal_smooth: 0, ao_rays: 256, ao_smooth: 2.0}
 `hi_denoise` (2026-11-04): rounds of edge-aware smoothing of the hi mesh's normals (bends under ~30° smoothed, creases
-kept), its loose crumbs dropped first; 0: off. `normal_smooth`: a Gaussian over the surface (sigma in
+kept), its loose crumbs dropped first; 0: off. `normal_smooth`, `ao_smooth`: a Gaussian over the surface (sigma in
 texels at texture_size; 0: off), seam-free as it blurs in 3D (`surface_blur`). A texel's hi normal comes from the
 closest hi point, or from a short ray along this mesh's normal when that surface faces it better (the far side of a
 thin part).
@@ -281,7 +281,10 @@ def run(op, in_dir, out_dir, params):
         # occlusion); where a torn outer shell shows the inner one, the AO map holds a tiny dark island (filled)
         inward, enclosed = ao_faces(v, f, n, bvh, voxel)
         n1[inward[fid[m1]]] *= -1
-        ao = ao_texels(bvh, p1, n1, voxel, 0.1 * diag)
+        ao = ao_texels(bvh, p1, n1, voxel, 0.1 * diag, rays=int(params.get("ao_rays", 256)))
+        # 32 rays a texel left a visible grain: more rays, then a seam-free blur over the surface
+        if sigma := float(params.get("ao_smooth", 2.0)) * texel_size(v, f, uv, size):
+            ao = surface_blur(p1, n1, ao[:, None], sigma)[:, 0]
         hidden = enclosed[fid[m1]]
         ao[hidden] = 1
         img = torch.ones(size, size, device=dev)

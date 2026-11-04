@@ -49,6 +49,8 @@ engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
 - **Smooth shading everywhere.** Cleaned, remeshed and unwrapped models were shown with flat facets (their files
   had no normals, or one per quad), and the textured model had a shading crease along every UV seam. Every step
   now writes smooth normals that agree across seams.
+- **Less grainy ambient occlusion.** The AO is traced with 256 rays a texel instead of 32 and smoothed over the
+  surface (`ao_rays`, `ao_smooth`, default 2 texels; 0 turns it off): 1.3 s instead of 0.4 s at 1024².
 
 ### Interface
 
@@ -65,7 +67,7 @@ engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
   - `motion`: `from`, `to`, `seconds`, `travel` and `turn`, to connect clips;
   - `anim`: `clearance`;
   - `refine`: `coverage`, and `op: "edit"` with `region`, `prompt` and `strength`;
-  - `bake`: `hi_denoise` and `normal_smooth`.
+  - `bake`: `hi_denoise`, `normal_smooth`, `ao_rays` and `ao_smooth`.
 
 ## 0.2.0 (2026-10-20)
 
