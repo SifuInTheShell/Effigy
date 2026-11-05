@@ -74,7 +74,8 @@ scraps floating off its outside (`drop_floating`, the same `"auto"`; `metrics.dr
 true}` also squares it to the axes: it levels its floor (a post with no floor to
 stand on, over twice as tall as wide, on its shaft's axis) and turns its
 long side onto X, the broad side facing +Z; a thin panel is only turned; `{"cleanup": true}` rebuilds a simple prop as one
-closed solid, default false: fine detail goes, a face melts, only the largest part stays, check `metrics.cleanup.parts_dropped`) -> `remesh` (`{"faces": 20000,
+closed solid, default false: use it when a one-piece prop with little fine detail (a crate, a barrel) came back torn or hollow, with frayed rims or
+specks after bake, or when you need it watertight; never on a character or a model in several pieces: fine detail goes, a face melts, only the largest part stays, check `metrics.cleanup.parts_dropped`) -> `remesh` (`{"faces": 20000,
 "topology": "tri"|"quad", "symmetry": false|"x"}`; check `metrics.hausdorff_pct`; thin boards with slits tear
 at any budget: `"close": 0.012` (metres) shuts the slits first; grooves narrower than it smooth out, the normal
 map keeps them; without `close` a generated prop that comes back over 5 % folded through itself is remeshed again
