@@ -158,20 +158,20 @@ requires-dist = [
 
 [tool.uv.sources]
 geosam2 = { path = "wheels/geosam2-0.1.0-py3-none-any.whl" }
-kimodo = { git = "https://github.com/nv-tlabs/kimodo.git", rev = "1aece8c124d73d255ceff5086d983b844c9f4e94" }
-py-soma-x = { git = "https://github.com/NVlabs/SOMA-X.git", rev = "e0f8ff0ecfa3edbbb6058b1e0f08822ee2f84ee5" }
+kimodo = { url = "https://github.com/nv-tlabs/kimodo/archive/1aece8c124d73d255ceff5086d983b844c9f4e94.zip" }
+py-soma-x = { url = "https://github.com/NVlabs/SOMA-X/archive/e0f8ff0ecfa3edbbb6058b1e0f08822ee2f84ee5.zip" }
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 cumesh = { path = "wheels/cumesh-0.0.1-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'" }
 flex-gemm = [
     { path = "wheels/flex_gemm-1.0.0-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'", group = "ml" },
-    { git = "https://github.com/JeffreyXiang/FlexGEMM.git", rev = "b2fadb29d41846c7981ade6801ffc689fae119cf", group = "moge" },
+    { url = "https://github.com/JeffreyXiang/FlexGEMM/archive/b2fadb29d41846c7981ade6801ffc689fae119cf.zip", group = "moge" },
 ]
 moge = { git = "https://github.com/microsoft/MoGe.git", rev = "74fbce054ebed49800de42d0ad0e83495065719a" }
-utils3d-moge = { git = "https://github.com/EasternJournalist/utils3d-moge.git", rev = "62f09d58509485564e24d5d9f6aac9ee9ebc0c37" }
-pipeline = { git = "https://github.com/EasternJournalist/pipeline.git", rev = "1c511390d90226c00c101f34b84df26a0f8789b4" }
+utils3d-moge = { url = "https://github.com/EasternJournalist/utils3d-moge/archive/62f09d58509485564e24d5d9f6aac9ee9ebc0c37.zip" }
+pipeline = { url = "https://github.com/EasternJournalist/pipeline/archive/1c511390d90226c00c101f34b84df26a0f8789b4.zip" }
 o-voxel = { path = "wheels/o_voxel-0.0.1-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'" }
-comfyui-skintokens-noblender = { git = "https://github.com/stevelittlefish/ComfyUI-SkinTokens-NoBlender", rev = "0f7cb09af87001333aa1127eb1df4a4b154487e7" }
+comfyui-skintokens-noblender = { url = "https://github.com/stevelittlefish/ComfyUI-SkinTokens-NoBlender/archive/0f7cb09af87001333aa1127eb1df4a4b154487e7.zip" }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
