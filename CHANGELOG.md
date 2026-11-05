@@ -51,11 +51,12 @@ engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
   now writes smooth normals that agree across seams.
 - **Less grainy ambient occlusion.** The AO is traced with 256 rays a texel instead of 32 and smoothed over the
   surface (`ao_rays`, `ao_smooth`, default 2 texels; 0 turns it off): 1.3 s instead of 0.4 s at 1024².
-- **Generated models cleaned into a solid.** Clean left a generated model as a hollow double skin (two surfaces a
-  tenth of a millimetre apart, joined at its openings), which remeshing and baking then struggled with. Clean now
-  rebuilds it as one closed solid: cracks closed, the inside filled, the surface smoothed where it is noisy and
-  kept where it is creased (`cleanup`, on for generated models; about a minute more). The bake reads its normals
-  from that cleaned surface, which removes the frayed rims, cuts and specks the raw surface baked in.
+- **Rebuild a model as one solid (optional).** Clean leaves a generated model as a hollow double skin (two surfaces
+  a tenth of a millimetre apart, joined at its openings), which remeshing and baking then struggle with. Tick
+  **Rebuild it as one solid** in Clean (`cleanup`, off by default; up to a minute more) and it comes back as one
+  closed solid: cracks closed, the inside filled, the surface smoothed where it is noisy and kept where it is
+  creased. The bake then reads its normals from that surface. It suits simple props: fine detail goes (a character's
+  face melts) and only the largest part stays (`metrics.cleanup.parts_dropped`).
 
 ### Interface
 

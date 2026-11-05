@@ -73,8 +73,8 @@ default `"auto"`: on when a trellis2 version is up the chain; `{"level": false}`
 scraps floating off its outside (`drop_floating`, the same `"auto"`; `metrics.dropped_parts`); `{"straighten":
 true}` also squares it to the axes: it levels its floor (a post with no floor to
 stand on, over twice as tall as wide, on its shaft's axis) and turns its
-long side onto X, the broad side facing +Z; a thin panel is only turned; a generated model is rebuilt as one
-clean solid, `cleanup`, default `"auto"`, `metrics.cleanup`) -> `remesh` (`{"faces": 20000,
+long side onto X, the broad side facing +Z; a thin panel is only turned; `{"cleanup": true}` rebuilds a simple prop as one
+closed solid, default false: fine detail goes, a face melts, only the largest part stays, check `metrics.cleanup.parts_dropped`) -> `remesh` (`{"faces": 20000,
 "topology": "tri"|"quad", "symmetry": false|"x"}`; check `metrics.hausdorff_pct`; thin boards with slits tear
 at any budget: `"close": 0.012` (metres) shuts the slits first; grooves narrower than it smooth out, the normal
 map keeps them; without `close` a generated prop that comes back over 5 % folded through itself is remeshed again

@@ -2134,6 +2134,13 @@ test("Prepare: level and square, close slits and square the taper reach their st
   await panel.getByRole("button", { name: "Clean", exact: true }).click();
   await expect.poll(() => posted.length).toBe(3);
   expect(posted[2]).toEqual(["clean", { level: true, straighten: true }]); // a generated model stands upright by default
+  await page.reload(); // a run closes the panel
+  await page.getByText("Run this step again").click();
+  await page.getByLabel("Rebuild it as one solid").check();
+  await panel.screenshot({ path: "test-results/prepare-solid-option.png" });
+  await panel.getByRole("button", { name: "Clean", exact: true }).click();
+  await expect.poll(() => posted.length).toBe(4);
+  expect(posted[3]).toEqual(["clean", { level: true, cleanup: true }]);
 });
 
 test("Setup: the app's port is chosen there and applies on the next start", async ({ page }) => {

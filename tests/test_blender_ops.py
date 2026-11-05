@@ -728,3 +728,18 @@ def test_solid_cleanup_fills_a_hollow_double_skin(tmp_path):
     assert m.is_watertight and info["watertight"]
     assert abs(abs(m.volume) / (4 / 3 * math.pi * 0.1**3) - 1) < 0.1  # filled, not a 0.2 mm skin
     assert abs(m.area / (4 * math.pi * 0.1**2) - 1) < 0.15  # one surface, not two
+
+
+def test_solid_cleanup_counts_the_parts_it_drops(tmp_path):
+    """Only the largest part stays; the metric says how many went, so a lost sword is not silent."""
+    import numpy as np
+    import trimesh
+
+    from steps.clean import solid_cleanup
+
+    body = trimesh.creation.icosphere(subdivisions=3, radius=0.2)
+    sword = trimesh.creation.box(extents=(0.1, 0.1, 0.4))
+    sword.apply_translation([0.6, 0, 0])
+    m = trimesh.util.concatenate([body, sword])
+    v, _, info = solid_cleanup(np.asarray(m.vertices), np.asarray(m.faces), tmp_path, res=80)
+    assert info["parts_dropped"] == 1 and np.ptp(v[:, 0]) < 0.45

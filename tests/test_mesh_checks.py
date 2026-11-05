@@ -1009,3 +1009,23 @@ def test_denoise_surface_smooths_noise_keeps_a_crease():
     assert np.std(v1[top, 1]) < 0.5 * np.std(v0[top, 1])  # the noise flattened
     edge = (box.vertices[:, 1] > 0.49) & (box.vertices[:, 0] > 0.49)
     assert np.abs(v1[edge] - box.vertices[edge]).max() < 0.02  # the box's edge still where it was
+
+
+def test_clean_rebuilds_a_solid_only_when_asked(tmp_path, monkeypatch):
+    """`cleanup` is opt-in, for a generated model too: on a character it melted the face and dropped loose parts."""
+    monkeypatch.setattr(clean, "_cumesh_clean", lambda v, f, *_: (v, f, 0))
+    monkeypatch.setattr(clean, "solid_cleanup", lambda v, f, out, res: (v, f, {"parts_dropped": 0}))
+    write_glb(tmp_path / "in.glb", *cube())
+    src = version(tmp_path / "010_trellis2", tmp_path / "in.glb")
+    meta = json.loads((src / "meta.json").read_text())
+    outputs = meta["outputs"] | {"ovoxel": "ovoxel.npz"}
+    (src / "meta.json").write_text(json.dumps(meta | {"outputs": outputs}))
+    for params, rebuilt in (({}, False), ({"cleanup": True}, True)):
+        out = tmp_path / f"out_{len(params)}"
+        out.mkdir()
+        res = clean.run("run", str(src), str(out), params)
+        assert ("hi_clean" in res["outputs"]) is rebuilt and (
+            "cleanup" in res["metrics"]
+        ) is rebuilt
+    with pytest.raises(StepError, match="cleanup"):
+        clean.run("run", str(src), str(out), {"cleanup": "auto"})
