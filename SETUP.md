@@ -214,6 +214,8 @@ their own (step 5, part 2): delete that folder too.
 | Warning about "symlinks" during downloads | Harmless. To silence it: Settings → System → For developers → Developer Mode on |
 | Browser shows nothing at http://127.0.0.1:8000 | Is the `run.bat` window still open, without a red error? Only one copy can run at a time |
 | `run.bat` says the port is in use | Another program has port 8000 (the Unreal editor's MCP plugin uses it). In the app folder run `set EFFIGY_PORT=8001` then `run.bat`, and pick a port for good in Setup → App address |
+| Install of the text-to-motion feature fails with `CMake must be installed` | Kimodo is compiled on your computer: it needs CMake and a C++ compiler on `PATH` |
+| Install of the Parallax layers feature fails with `Git executable not found` | MoGe comes from Git: install it (`winget install --id Git.Git -e`), close `run.bat`, start it again |
 | Job ends with `oom` | Close other GPU programs; use the suggested lower settings |
 | Red in step 5, part 1 | Update the driver (step 1). A GPU error: in PowerShell in the app folder run `.\.venv-ml\Scripts\python.exe -m tools.smoke_m1`: it names the failing piece (driver, CUDA, our kernels) |
 

@@ -66,6 +66,10 @@ engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
 - **No wrapped rows.** A slider shows its value on the same line; a tool's buttons fill the panel's width, and two
   side by side split it in half (Erase | Clear the paint, Region | Strength in Face from image).
 
+### Install
+
+- **The zip's first run no longer needs Git.** On a computer without it, `run.bat` stopped at the skinning environment. It and most optional features now download pinned archives instead. Still needed: Git for Parallax layers, CMake and a C++ compiler for text to motion ([SETUP.md](SETUP.md), Troubleshooting).
+
 ### For agents
 
 - New step parameters, all described in [mcp/SKILL.md](mcp/SKILL.md):
