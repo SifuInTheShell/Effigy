@@ -2861,6 +2861,7 @@ function PrepareForm(props: { asset: string; version: Meta; versions: Meta[]; ch
   const [straighten, setStraighten] = useState(false); // clean: also square it to the axes, long side onto X
   const [upright, setUpright] = useState(() => generated(props.versions, props.version)); // clean: level a generated model
   const [press, setPress] = useState(false); // clean: what hangs just under the base pressed onto it
+  const [solid, setSolid] = useState(false); // clean: rebuilt as one closed solid
   const [close, setClose] = useState(""); // remesh: slits up to this many mm shut first; "" = off
   const [detaper, setDetaper] = useState(false); // bake: a flat prop's perspective taper undone
   const [busy, run] = useBusy();
@@ -2879,7 +2880,7 @@ function PrepareForm(props: { asset: string; version: Meta; versions: Meta[]; ch
     has("clean") && h !== null && !(Number.isFinite(h) && h > 0) && "Height: a positive number of metres, or empty to keep the size.",
   ].filter(Boolean) as string[];
   const params: Record<string, object> = {
-    clean: { ...(h ? { height_m: h } : {}), level: upright, ...(straighten ? { straighten: true } : {}), ...(press ? { press_to_floor: true } : {}) },
+    clean: { ...(h ? { height_m: h } : {}), level: upright, ...(straighten ? { straighten: true } : {}), ...(press ? { press_to_floor: true } : {}), ...(solid ? { cleanup: true } : {}) },
     remesh: { faces: n, ...(quads ? { topology: "quad" } : {}), ...(mm ? { close: mm / 1000 } : {}) },
     bake: { texture_size: Number(size), ...(detaper ? { detaper: true } : {}) },
     validate: has("remesh") ? { max_triangles: triBudget(n, quads && "quad") } : prior ? { max_triangles: prior } : {},
@@ -2938,6 +2939,13 @@ function PrepareForm(props: { asset: string; version: Meta; versions: Meta[]; ch
         <small className="muted">
           A detail from the top can come back mirrored underneath (a lifting eye under a concrete block) and hold the model up off the ground: a small part
           under the middle of a broad flat base, up to a tenth of its height, is pressed flat onto it.
+        </small>
+        <label className="check">
+          <input type="checkbox" checked={solid} onChange={(e) => setSolid(e.target.checked)} /> Rebuild it as one solid
+        </label>
+        <small className="muted">
+          For a simple prop with a torn or hollow surface: it comes back closed and in one piece, up to a minute more. Fine detail goes (a face melts) and only
+          the largest part stays: leave it off for characters and for models in several pieces.
         </small>
       </div>
     ),
@@ -3331,6 +3339,7 @@ const STEP_HELP: Record<string, StepHelp> = {
       ["straighten", "true: also turn the long side onto X (a prop from a three-quarter picture); a thin panel is only turned"],
       ["press_to_floor", "true: a small part hanging just under a broad flat base (a mirrored lifting eye) pressed flat onto it"],
       ["drop_floating", 'true, false or "auto" (default: true for a generated model): small parts floating off the outside dropped'],
+      ["cleanup", "true: rebuilt as one closed solid, for a simple prop (default false: fine detail goes, only the largest part stays)"],
     ],
     example: { height_m: 1.8 },
   },

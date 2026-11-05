@@ -184,6 +184,7 @@ def write_textured(out: Path, mesh, mat, rgba: np.ndarray, extra: dict) -> dict:
     """The textured GLB and the loose maps; the ORM and normal maps are the input's (an AO-bearing ORM keeps
     its occlusionTexture). `extra`: further outputs the step wrote itself."""
     from steps._bake import write_glb
+    from steps._mesh import smooth_normals
 
     mr = mat.metallicRoughnessTexture
     mr = (
@@ -202,7 +203,7 @@ def write_textured(out: Path, mesh, mat, rgba: np.ndarray, extra: dict) -> dict:
         uv,
         rgba,
         mr,
-        mesh.vertex_normals,
+        smooth_normals(mesh.vertices, mesh.faces),  # as bake wrote them: the map's frame
         normal,
         occlusion=occlusion,
         alpha_mode=getattr(mat, "alphaMode", None),

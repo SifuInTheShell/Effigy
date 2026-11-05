@@ -683,3 +683,63 @@ def test_an_animation_file_comes_in_and_goes_back_onto_the_rig(tmp_path, monkeyp
         next(line for line in done.stdout.splitlines() if line.startswith("WORST")).split()[1]
     )
     assert worst < 0.01, f"hands and feet {worst:.3f} m off the original Walk"
+
+
+def test_quadriflow_exports_smooth_normals(sphere, tmp_path):
+    """The quad remesh's GLB carries smooth normals (not one per quad: flat shading)."""
+    import numpy as np
+
+    from steps import _anim
+
+    run_blender("quadriflow", [sphere], tmp_path / "q", {"target_faces": 400}, timeout=300)
+    doc, blob = _anim.read_glb(tmp_path / "q" / "mesh.glb")
+    prim = doc["meshes"][0]["primitives"][0]
+    acc = doc["accessors"][prim["attributes"]["NORMAL"]]
+    view = doc["bufferViews"][acc["bufferView"]]
+    n = np.frombuffer(
+        blob, "<f4", acc["count"] * 3, view.get("byteOffset", 0) + acc.get("byteOffset", 0)
+    )
+    pos = doc["accessors"][prim["attributes"]["POSITION"]]
+    assert (
+        acc["count"] == pos["count"]
+        and len(np.unique(n.reshape(-1, 3).round(4), axis=0)) > 0.5 * acc["count"]
+    )
+
+
+def test_solid_cleanup_fills_a_hollow_double_skin(tmp_path):
+    """Two concentric shells 0.2 mm apart, both open at the top (what Clean got from a generated model)
+    become one closed solid with the sphere's volume."""
+    import math
+
+    import numpy as np
+    import trimesh
+
+    from steps.clean import solid_cleanup
+
+    parts = []
+    for r, flip in ((0.1, False), (0.0998, True)):
+        s = trimesh.creation.icosphere(subdivisions=4, radius=r)
+        keep = s.triangles_center[:, 2] < 0.07  # the cap off: an opening ~7 cm across
+        f = s.faces[keep][:, ::-1] if flip else s.faces[keep]
+        parts.append(trimesh.Trimesh(s.vertices, f, process=False))
+    skin = trimesh.util.concatenate(parts)
+    v, f, info = solid_cleanup(np.asarray(skin.vertices), np.asarray(skin.faces), tmp_path, res=120)
+    m = trimesh.Trimesh(v, f, process=False)
+    assert m.is_watertight and info["watertight"]
+    assert abs(abs(m.volume) / (4 / 3 * math.pi * 0.1**3) - 1) < 0.1  # filled, not a 0.2 mm skin
+    assert abs(m.area / (4 * math.pi * 0.1**2) - 1) < 0.15  # one surface, not two
+
+
+def test_solid_cleanup_counts_the_parts_it_drops(tmp_path):
+    """Only the largest part stays; the metric says how many went, so a lost sword is not silent."""
+    import numpy as np
+    import trimesh
+
+    from steps.clean import solid_cleanup
+
+    body = trimesh.creation.icosphere(subdivisions=3, radius=0.2)
+    sword = trimesh.creation.box(extents=(0.1, 0.1, 0.4))
+    sword.apply_translation([0.6, 0, 0])
+    m = trimesh.util.concatenate([body, sword])
+    v, _, info = solid_cleanup(np.asarray(m.vertices), np.asarray(m.faces), tmp_path, res=80)
+    assert info["parts_dropped"] == 1 and np.ptp(v[:, 0]) < 0.45

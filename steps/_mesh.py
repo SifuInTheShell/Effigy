@@ -177,11 +177,32 @@ def textured(glb) -> bool:
         return bool(json.loads(f.read(n)).get("images"))
 
 
+def smooth_normals(vertices, faces) -> np.ndarray:
+    """Smooth vertex normals [V,3]: area-weighted face normals summed per position, so the copies of a vertex
+    split at a UV seam share one (no shading crease there); a vertex of no face gets +Y."""
+    v, f = np.asarray(vertices, np.float64), np.asarray(faces)
+    fn = np.cross(v[f[:, 1]] - v[f[:, 0]], v[f[:, 2]] - v[f[:, 0]])  # length = 2 × area
+    _, at = np.unique(np.round(v, 9), axis=0, return_inverse=True)
+    at = at.ravel()
+    acc = np.zeros((at.max() + 1, 3))
+    for k in range(3):
+        np.add.at(acc, at[f[:, k]], fn)
+    n = acc[at]
+    length = np.linalg.norm(n, axis=1, keepdims=True)
+    return np.where(length > 1e-20, n / length.clip(1e-20), [[0.0, 1.0, 0.0]])
+
+
 def write_glb(path, vertices, faces, uv=None) -> None:
-    """Untextured GLB (geometry, optional glTF UVs); textures come from bake."""
+    """Untextured GLB (geometry, optional glTF UVs, smooth normals: without NORMAL a viewer shades flat);
+    textures come from bake."""
     import trimesh
 
-    m = trimesh.Trimesh(np.asarray(vertices), np.asarray(faces), process=False)
+    m = trimesh.Trimesh(
+        np.asarray(vertices),
+        np.asarray(faces),
+        vertex_normals=smooth_normals(vertices, faces),
+        process=False,
+    )
     if uv is not None:
         gl = np.asarray(uv, np.float64).copy()
         gl[:, 1] = 1 - gl[:, 1]
@@ -607,3 +628,55 @@ def parts_inside(v, f, comps=None, samples: int = 100) -> dict | None:
             worst, 100 * odd.mean() * len(inbox) / len(every)
         )  # the sample's share, of the part
     return {"pct": round(float(worst), 1)}
+
+
+def denoise_surface(
+    vertices, faces, rounds: int = 10, moves: int = 10, sin2: float = 0.2
+) -> np.ndarray:
+    """Edge-aware denoising of a surface (bilateral normal filtering, then the vertices moved to fit; Zheng et al.
+    2011, Sun et al. 2007): the generator's faceting, spikes and small bumps go, creases stay. Each round a face's
+    normal becomes the area-weighted mean of its own and its edge neighbours', a neighbour weighted
+    exp(-2(1 - cos θ) / sin2) by the angle θ between them (sin2 0.2: 15° 0.71, 30° 0.26, 60° 0.007); then `moves`
+    times each vertex moves along its faces' filtered normals onto their planes. Winding need not agree (a
+    neighbour's normal is turned to the face's side first). Returns the new vertices [V,3]; faces unchanged."""
+    import torch
+
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    v = torch.tensor(np.asarray(vertices), dtype=torch.float64, device=dev)
+    f = torch.tensor(np.asarray(faces), dtype=torch.long, device=dev)
+    nf = len(f)
+    # edge neighbours: faces sharing a sorted edge key
+    e = torch.cat([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]]).sort(dim=1).values
+    key = e[:, 0] * len(v) + e[:, 1]
+    owner = torch.arange(nf, device=dev).repeat(3)
+    key, order = key.sort()
+    owner = owner[order]
+    same = key[1:] == key[:-1]
+    fa, fb = owner[:-1][same], owner[1:][same]
+
+    def normals():
+        n = torch.cross(v[f[:, 1]] - v[f[:, 0]], v[f[:, 2]] - v[f[:, 0]], dim=1)
+        area = n.norm(dim=1)
+        return n / area.clamp_min(1e-30)[:, None], area
+
+    n, area = normals()
+    for _ in range(rounds):
+        a, b = n[fa], n[fb]
+        dot = (a * b).sum(1)
+        w = torch.exp(-2 * (1 - dot.abs()) / sin2)
+        sgn = torch.where(dot < 0, -1.0, 1.0).to(n.dtype)[:, None]
+        acc = n * area[:, None]
+        acc.index_add_(0, fa, (w * area[fb])[:, None] * b * sgn)
+        acc.index_add_(0, fb, (w * area[fa])[:, None] * a * sgn)
+        n = torch.nn.functional.normalize(acc, dim=1)
+    count = torch.zeros(len(v), device=dev, dtype=v.dtype).index_add_(
+        0, f.reshape(-1), torch.ones(nf * 3, device=dev, dtype=v.dtype)
+    )
+    for _ in range(moves):
+        c = v[f].mean(1)
+        step = torch.zeros_like(v)
+        for k in range(3):
+            d = ((c - v[f[:, k]]) * n).sum(1, keepdim=True) * n
+            step.index_add_(0, f[:, k], d)
+        v = v + step / count.clamp_min(1)[:, None]
+    return v.cpu().numpy()

@@ -73,14 +73,16 @@ default `"auto"`: on when a trellis2 version is up the chain; `{"level": false}`
 scraps floating off its outside (`drop_floating`, the same `"auto"`; `metrics.dropped_parts`); `{"straighten":
 true}` also squares it to the axes: it levels its floor (a post with no floor to
 stand on, over twice as tall as wide, on its shaft's axis) and turns its
-long side onto X, the broad side facing +Z; a thin panel is only turned) -> `remesh` (`{"faces": 20000,
+long side onto X, the broad side facing +Z; a thin panel is only turned; `{"cleanup": true}` rebuilds a simple prop as one
+closed solid, default false: fine detail goes, a face melts, only the largest part stays, check `metrics.cleanup.parts_dropped`) -> `remesh` (`{"faces": 20000,
 "topology": "tri"|"quad", "symmetry": false|"x"}`; check `metrics.hausdorff_pct`; thin boards with slits tear
 at any budget: `"close": 0.012` (metres) shuts the slits first; grooves narrower than it smooth out, the normal
 map keeps them; without `close` a generated prop that comes back over 5 % folded through itself is remeshed again
 with its length / 150, `metrics.closed`; `"close": 0` never) -> `uv` -> `bake`
 (`{"texture_size": 2048, "normal_map": true}`: PBR + normal map from the generator's volume, or, for an imported model, from its own
 materials and textures (recipe: `import_file` -> `clean` -> `remesh` -> `uv` -> `bake` -> `rig_fit` -> `rig_skin` ->
-`anim` -> `export`; a foreign skeleton is dropped, ours is fitted; no materials at all: `missing_input`); a flat prop from a picture in perspective has one end shorter: `"detaper": true` squares it
+`anim` -> `export`; a foreign skeleton is dropped, ours is fitted; no materials at all: `missing_input`); `hi_denoise` 6,
+`normal_smooth` 0 and `ao_smooth` 2 (texels) soften the normals and the AO, 0 turns each off, `ao_rays` 256; a flat prop from a picture in perspective has one end shorter: `"detaper": true` squares it
 after the texture, the tall end kept; straighten it in clean first, `metrics.detapered` null means nothing was done) -> optional `project` (`{"region": "head"|"front"}`, sharper face from the picture) ->
 optional `refine` (`{"strength": 1}`, 4–6 min: the texture's fine detail redrawn from close-up views; the side
 the picture never showed is where a bake is weakest; a model wider than tall gets no view from above, which

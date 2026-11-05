@@ -1,6 +1,12 @@
 """Re-bake (IMPLEMENTATION.md M3): full PBR + a normal map for any UV-mapped version, from the volume (M62: or, for an import, its own materials).
 
-params: {texture_size: 2048, normal_map: true, supersample: 2, ao: true, detaper: false}
+params: {texture_size: 2048, normal_map: true, supersample: 2, ao: true, detaper: false, hi_denoise: 6,
+normal_smooth: 0, ao_rays: 256, ao_smooth: 2.0}
+`hi_denoise` (2026-11-04): rounds of edge-aware smoothing of the hi mesh's normals (bends under ~30° smoothed, creases
+kept), its loose crumbs dropped first; 0: off. `normal_smooth`, `ao_smooth`: a Gaussian over the surface (sigma in
+texels at texture_size; 0: off), seam-free as it blurs in 3D (`surface_blur`). A texel's hi normal comes from the
+closest hi point, or from a short ray along this mesh's normal when that surface faces it better (the far side of a
+thin part); with a cleaned solid up the chain (clean's hi_clean.ply) from that, the colour still from the raw mesh.
 `detaper` (2026-10-12): a flat prop's perspective taper undone after the sampling (the texture is read on the
 shape the picture gave, then the shape is squared: steps/_mesh.detaper; `metrics.detapered`).
 The input version's mesh.glb (library frame) is mapped back into the TRELLIS frame through the chain's
@@ -23,7 +29,7 @@ import numpy as np
 from PIL import Image
 
 from steps._common import StepError, library_to_trellis, load_ovoxel, main, progress
-from steps._mesh import detaper, textured, uv_overlap
+from steps._mesh import detaper, smooth_normals, textured, uv_overlap
 
 
 def find_source(
@@ -92,25 +98,15 @@ def load_source(d: Path, meta: dict, m: np.ndarray, dev):
 
 
 def vertex_frames(v, f, uv, n):
-    """Per-vertex tangents and bitangent signs from UVs (area-weighted, Gram-Schmidt): ≈ MikkTSpace."""
+    """Per-vertex tangents and bitangent signs from UVs: _bake.vertex_tangents, the frame the GLB's TANGENT holds."""
     import torch
 
-    p0, p1, p2 = v[f[:, 0]], v[f[:, 1]], v[f[:, 2]]
-    t0, t1, t2 = uv[f[:, 0]], uv[f[:, 1]], uv[f[:, 2]]
-    e1, e2, d1, d2 = p1 - p0, p2 - p0, t1 - t0, t2 - t0
-    r = d1[:, 0] * d2[:, 1] - d1[:, 1] * d2[:, 0]
-    r = torch.where(r.abs() < 1e-20, torch.full_like(r, 1e-20), r)
-    du = (e1 * d2[:, 1:] - e2 * d1[:, 1:]) / r[:, None]  # ∂P/∂u
-    up = (
-        -(e2 * d1[:, :1] - e1 * d2[:, :1]) / r[:, None]
-    )  # -∂P/∂v: glTF v runs down the image, "up" is -v
-    tan, bit = torch.zeros_like(v), torch.zeros_like(v)
-    for k in range(3):
-        tan.index_add_(0, f[:, k], du)
-        bit.index_add_(0, f[:, k], up)
-    tan = torch.nn.functional.normalize(tan - (tan * n).sum(1, keepdim=True) * n, dim=1)
-    sign = torch.where((torch.cross(n, tan, dim=1) * bit).sum(1) >= 0, 1.0, -1.0)
-    return tan, sign
+    from steps._bake import vertex_tangents
+
+    v, uv, n = (x.detach().cpu().numpy().astype(np.float64) for x in (v, uv, n))
+    t = vertex_tangents(v, f.detach().cpu().numpy(), uv, n)
+    t = torch.from_numpy(t).to(f.device)
+    return t[:, :3], t[:, 3]
 
 
 def run(op, in_dir, out_dir, params):
@@ -190,7 +186,9 @@ def run(op, in_dir, out_dir, params):
     uv = torch.tensor(mesh.visual.uv, dtype=torch.float32, device=dev)
     uv[:, 1] = 1 - uv[:, 1]  # trimesh's OpenGL UVs → glTF UVs (what the file holds)
     n = torch.tensor(
-        mesh.vertex_normals @ np.linalg.inv(to_trellis[:3, :3]), dtype=torch.float32, device=dev
+        smooth_normals(mesh.vertices, mesh.faces) @ np.linalg.inv(to_trellis[:3, :3]),
+        dtype=torch.float32,
+        device=dev,
     )
     n = torch.nn.functional.normalize(n, dim=1)
 
@@ -209,7 +207,7 @@ def run(op, in_dir, out_dir, params):
     progress(0.2, f"rasterizing {size * ss}² texels")
     face_id, bary, corners, w, pts, nrm = texels(size * ss)
     mask = face_id >= 0
-    hi, hi_n, project, p = None, nrm, None, None
+    hi, hi_n, project, p, normals_from, clean = None, nrm, None, None, None, None
     if source is not None:
         progress(0.5, "sampling the source's materials")
         hit, w_hit = _closest(_Hi(source.v, source.f, source.n), pts)
@@ -217,8 +215,15 @@ def run(op, in_dir, out_dir, params):
         del hit, w_hit
     else:
         if dev == "cuda":
-            hi = _Hi(*_load_ply(vol_dir / "hi_trellis.ply"))
+            rounds = int(params.get("hi_denoise", 6))
+            clean = _clean_hi(src, to_trellis, rounds)
+            # colour positions on the raw surface (the volume's); normals off Clean's solid when there is one
+            hi = _Hi(*_load_ply(vol_dir / "hi_trellis.ply", 0 if clean else rounds))
             hi_n, p = _project(hi, pts, nrm)
+            if clean is not None:
+                progress(0.45, f"normals from {clean[0]}'s cleaned surface")
+                hi_n, _ = _project(clean[1], pts, nrm)
+                normals_from = clean[0]
             project = lambda _, p=p: p
         progress(0.5, "sampling the volume")
         rgba, mr, m = bake_volume(
@@ -235,6 +240,8 @@ def run(op, in_dir, out_dir, params):
         )
     normal_map = None
     if params.get("normal_map", True):
+        if sigma := float(params.get("normal_smooth", 0)) * texel_size(v, f, uv, size):
+            hi_n = torch.nn.functional.normalize(surface_blur(pts, hi_n, hi_n, sigma), dim=1)
         tan, sign = vertex_frames(v, f, uv, n)
         t = torch.nn.functional.normalize((tan[corners] * w).sum(1), dim=1)
         t = torch.nn.functional.normalize(t - (t * nrm).sum(1, keepdim=True) * nrm, dim=1)
@@ -245,7 +252,17 @@ def run(op, in_dir, out_dir, params):
         img[mask] = local
         img, covered = box_filter((img * 0.5 + 0.5).mul(255).cpu().numpy(), mask.cpu().numpy(), ss)
         normal_map = fill_gutters((img + 0.5).clip(0, 255).astype(np.uint8), covered)
-    del pts, nrm, corners, w, hi_n, project, p, hi  # the big per-texel tensors: AO needs the VRAM
+    del (
+        pts,
+        nrm,
+        corners,
+        w,
+        hi_n,
+        project,
+        p,
+        hi,
+        clean,
+    )  # the big per-texel tensors: AO needs the VRAM
 
     progress(0.7, "levelling the UV seams")
     uv_np = uv.cpu().numpy()
@@ -281,7 +298,10 @@ def run(op, in_dir, out_dir, params):
         # occlusion); where a torn outer shell shows the inner one, the AO map holds a tiny dark island (filled)
         inward, enclosed = ao_faces(v, f, n, bvh, voxel)
         n1[inward[fid[m1]]] *= -1
-        ao = ao_texels(bvh, p1, n1, voxel, 0.1 * diag)
+        ao = ao_texels(bvh, p1, n1, voxel, 0.1 * diag, rays=int(params.get("ao_rays", 256)))
+        # 32 rays a texel left a visible grain: more rays, then a seam-free blur over the surface
+        if sigma := float(params.get("ao_smooth", 2.0)) * texel_size(v, f, uv, size):
+            ao = surface_blur(p1, n1, ao[:, None], sigma)[:, 0]
         hidden = enclosed[fid[m1]]
         ao[hidden] = 1
         img = torch.ones(size, size, device=dev)
@@ -307,14 +327,14 @@ def run(op, in_dir, out_dir, params):
     if normal_map is not None:
         Image.fromarray(normal_map, "RGB").save(out / "normal.png")
         outputs["normal"] = "normal.png"
-    verts, normals = mesh.vertices, mesh.vertex_normals
+    verts, normals = mesh.vertices, smooth_normals(mesh.vertices, mesh.faces)
     if params.get(
         "detaper"
     ):  # after the sampling: the texture was read on the shape the picture gave
         verts, taper = detaper(np.asarray(mesh.vertices, np.float64))
         metrics["detapered"] = taper  # null: not a flat panel along X or Z, or no taper to undo
         if taper:
-            normals = trimesh.Trimesh(verts, mesh.faces, process=False).vertex_normals
+            normals = smooth_normals(verts, mesh.faces)
     opaque = source is None or all(
         getattr(x, "alphaMode", None) in (None, "OPAQUE") for x in source.mats
     )
@@ -332,6 +352,8 @@ def run(op, in_dir, out_dir, params):
     )
     if source is None:
         origin = {"volume_from": vol_dir.name}
+        if normals_from:
+            origin["normals_from"] = normals_from
     else:
         origin = {"source_from": vol_dir.name, "source_materials": len(source.mats)}
     return {"outputs": outputs, "metrics": metrics | origin}
@@ -362,16 +384,163 @@ class _Hi:
                 self.bvh = cumesh.cuBVH(self.v, self.f)
 
 
-def _load_ply(path: Path):
+def _clean_hi(version_dir: Path, to_trellis: np.ndarray, rounds: int):
+    """(its version's name, _Hi) of the nearest hi_clean.ply up the chain (Clean's cleaned solid, high-res) in the
+    TRELLIS frame, its normals smoothed `rounds` more (bake's hi_denoise); None when the chain has none (an import, an older Clean). The raw generator mesh still gives the colour positions: the volume is
+    aligned to it, the solid lies up to a voxel off (sampling there read empty voxels: rings)."""
+    import torch
+    import trimesh
+
+    try:
+        d, m, meta = find_source(
+            version_dir,
+            lambda _, meta: "hi_clean" in meta["outputs"],
+            "no hi_clean.ply up the chain of",
+        )
+    except StepError:
+        return None
+    hi = trimesh.load(d / meta["outputs"]["hi_clean"], process=False)
+    t = to_trellis @ m  # that version's frame → this one's → TRELLIS
+    v = torch.tensor(np.asarray(hi.vertices) @ t[:3, :3].T + t[:3, 3], dtype=torch.float32)
+    f = torch.tensor(np.asarray(hi.faces), dtype=torch.long)
+    n = axis_normals(v, f)
+    return d.name, _Hi(v, f, denoise_normals(v, f, n, rounds) if rounds > 0 else n)
+
+
+def _load_ply(path: Path, denoise: int = 0):
+    """(vertices, faces, vertex normals) of the hi mesh; with `denoise` > 0 its loose crumbs dropped and its
+    normals smoothed that many rounds, edge-aware (bake's `hi_denoise`)."""
     import torch
     import trimesh
 
     hi = trimesh.load(path, process=False)
-    return (
-        torch.tensor(hi.vertices, dtype=torch.float32),
-        torch.tensor(hi.faces, dtype=torch.long),
-        torch.tensor(hi.vertex_normals, dtype=torch.float32),
+    v = torch.tensor(hi.vertices, dtype=torch.float32)
+    f = torch.tensor(hi.faces, dtype=torch.long)
+    if denoise > 0:
+        f = drop_crumbs(v, f)
+    n = axis_normals(v, f)
+    return v, f, denoise_normals(v, f, n, denoise) if denoise > 0 else n
+
+
+def drop_crumbs(v, f, share: float = 5e-5):
+    """`f` without the faces of the parts under `share` of the whole area: the loose crumbs a generated mesh carries
+    (its real small parts are far bigger)."""
+    import scipy.sparse as sp
+    import torch
+    from scipy.sparse.csgraph import connected_components
+
+    vn, fn = v.numpy().astype(np.float64), f.numpy()
+    g = sp.coo_matrix(
+        (np.ones(2 * len(fn), bool), (np.r_[fn[:, 0], fn[:, 1]], np.r_[fn[:, 1], fn[:, 2]])),
+        shape=(len(vn), len(vn)),
     )
+    k, label = connected_components(g, directed=False)
+    a, b, c = (vn[fn[:, i]] for i in range(3))
+    area = np.linalg.norm(np.cross(b - a, c - a), axis=1)
+    part = np.bincount(label[fn[:, 0]], weights=area, minlength=k)
+    return f[torch.from_numpy(part[label[fn[:, 0]]] >= share * area.sum())]
+
+
+def denoise_normals(v, f, n, rounds: int, sin2: float = 0.2, chunk: int = 1 << 22):
+    """Edge-aware smoothing of vertex normals whose signs are arbitrary (axis_normals): each round a vertex takes
+    the main axis of its own and its neighbours' n nᵀ, a neighbour weighted exp(-sin²θ / sin2) by the angle θ
+    between the two (sign free: n and -n are the same line). With sin2 0.2 a 15° bend weighs 0.72, 30° 0.29, 60°
+    0.02: the generator's faceting and small bumps are smoothed, creases kept. A round reaches one ring further."""
+    import torch
+
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    f, n = f.to(dev), n.to(dev)
+    e = torch.cat([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]]).sort(dim=1).values
+    key = torch.unique(e[:, 0] * len(n) + e[:, 1])
+    e0, e1 = key // len(n), key % len(n)
+    del e, key
+    for _ in range(rounds):
+        acc = n[:, :, None] * n[:, None, :]
+        for s in range(0, len(e0), chunk):
+            i, j = e0[s : s + chunk], e1[s : s + chunk]
+            a, b = n[i], n[j]
+            wt = torch.exp(-(1 - (a * b).sum(1).square()) / sin2)[:, None, None]
+            acc.index_add_(0, i, wt * b[:, :, None] * b[:, None, :])
+            acc.index_add_(0, j, wt * a[:, :, None] * a[:, None, :])
+        x = n  # power iteration from the old normal keeps its sign
+        for _ in range(4):
+            x = torch.nn.functional.normalize(torch.bmm(acc, x[:, :, None]).squeeze(2), dim=1)
+        n = x
+    return n.cpu()
+
+
+def texel_size(v, f, uv, size: int) -> float:
+    """The length on the mesh (its frame) one texel of a size² map covers: the median over the faces of
+    √(3D area / UV area), divided by the map's size."""
+    import torch
+
+    tri, t = v[f], uv[f]
+    a3 = torch.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0], dim=1).norm(dim=1)
+    d1, d2 = t[:, 1] - t[:, 0], t[:, 2] - t[:, 0]
+    a2 = (d1[:, 0] * d2[:, 1] - d1[:, 1] * d2[:, 0]).abs()
+    ok = a2 > 1e-12
+    return float(torch.sqrt(a3[ok] / a2[ok]).median()) / size if ok.any() else 0.0
+
+
+def surface_blur(pts, normals, values, sigma: float):
+    """A Gaussian (sigma in the mesh's units) of per-texel values [K,C] over the surface: each texel takes the texels
+    near it in 3D whatever UV island they are in, so both sides of a seam blur alike, weighted 0 (60° or more) to 1
+    (30° or less) by how their normals agree with its own (a thin part's far side stays out, a crease keeps its edge).
+    Texels are pooled into cubes of side sigma, each reading the 27 around its own; one with no match keeps its value."""
+    import torch
+
+    q = torch.floor(pts / sigma).long()
+    q -= q.min(0).values - 1  # ≥ 1: a neighbour one cube down stays ≥ 0
+    span = int(q.max()) + 2
+
+    def key(c):
+        return (c[:, 0] * span + c[:, 1]) * span + c[:, 2]
+
+    cubes, inv = torch.unique(key(q), return_inverse=True)
+    dev, m = pts.device, len(cubes)
+    total = values.new_zeros(m, values.shape[1]).index_add_(0, inv, values)
+    nsum = torch.zeros(m, 3, device=dev).index_add_(0, inv, normals)
+    count = torch.zeros(m, device=dev).index_add_(0, inv, torch.ones_like(inv, dtype=pts.dtype))
+    # ponytail: a cube's texels weighted at its centre, not one by one; per-texel pairs if that ever shows
+    centre = torch.zeros(m, 3, device=dev).index_add_(0, inv, pts) / count[:, None]
+    mean = torch.nn.functional.normalize(nsum, dim=1)
+    out = torch.zeros(len(pts), values.shape[1], device=dev, dtype=values.dtype)
+    weight = torch.zeros(len(pts), device=dev)
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                k = key(q + q.new_tensor([dx, dy, dz]))
+                i = torch.searchsorted(cubes, k).clamp(max=len(cubes) - 1)
+                w = torch.exp(-((pts - centre[i]) ** 2).sum(1) / (2 * sigma * sigma))
+                agree = ((mean[i] * normals).sum(1) - 0.5) / (0.87 - 0.5)  # 60° → 0, 30° → 1
+                w = w * (cubes[i] == k) * agree.clamp(0, 1)
+                out += w[:, None] * total[i]
+                weight += w * count[i]
+    return torch.where(weight[:, None] > 0, out / weight.clamp_min(1e-12)[:, None], values)
+
+
+def axis_normals(v, f, chunk: int = 1 << 21):
+    """Per-vertex normals that ignore winding: the main axis of the area-weighted outer products n nᵀ of the
+    faces around each vertex, sign arbitrary (_project turns each corner to the low mesh's side). A TRELLIS hi
+    mesh's winding is random: summed, as trimesh's vertex_normals does, neighbours cancel and every vertex gets a
+    near-random normal, an even grain all over the baked map."""
+    import torch
+
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    v, f = v.to(dev), f.to(dev)
+    acc = torch.zeros(len(v), 3, 3, device=dev)
+    for s in range(0, len(f), chunk):
+        c = f[s : s + chunk]
+        n = torch.cross(v[c[:, 1]] - v[c[:, 0]], v[c[:, 2]] - v[c[:, 0]], dim=1)  # |n| = 2 × area
+        outer = n[:, :, None] * n[:, None, :] / n.norm(dim=1).clamp_min(1e-30)[:, None, None]
+        for k in range(3):
+            acc.index_add_(0, c[:, k], outer)
+    # the dominant eigenvector by power iteration (cuSOLVER's batched eigh refuses millions of 3×3 at once),
+    # started from the matrix's longest column: on a surface the normal's eigenvalue dwarfs the other two
+    x = acc.gather(2, acc.norm(dim=1).argmax(1)[:, None, None].expand(-1, 3, 1)).squeeze(2)
+    for _ in range(12):
+        x = torch.nn.functional.normalize(torch.bmm(acc, x[:, :, None]).squeeze(2), dim=1)
+    return x.cpu()
 
 
 def _closest(hi: _Hi, pts):
@@ -404,9 +573,54 @@ def _project(hi: _Hi, pts, nrm):
     face, w = _closest(hi, pts)
     corners = hi.f[face]
     p = (hi.v[corners] * w[..., None]).sum(1)
-    normals = torch.nn.functional.normalize((hi.n[corners] * w[..., None]).sum(1), dim=1)
-    normals = torch.where((normals * nrm).sum(1, keepdim=True) < 0, -normals, normals)
+    normals = _hi_normal(hi, corners, w, nrm)
+    if hi.bvh is not None:
+        # facing: a thin part has its far side within reach too, and the closest point can be there,
+        # its normal at a steep angle to this surface's.
+        # A short ray along this mesh's normal, either way, finds the near side; its normal is taken when it
+        # faces this surface clearly better than the closest point's. The colour still comes from `p`.
+        reach = (
+            2 * (p - pts).norm(dim=1) + 2e-3
+        )  # TRELLIS frame: the model about 1 across, a voxel 1/1024
+        best = (normals * nrm).sum(1)
+        for way in (1.0, -1.0):
+            hit, fh, t = hi.bvh.ray_trace(pts, way * nrm)
+            ok = (fh >= 0) & (t <= reach)
+            if not ok.any():
+                continue
+            c = hi.f[fh.clamp_min(0)]
+            nh = _hi_normal(hi, c, _barycentric(hi.v[c], hit), nrm)
+            score = (nh * nrm).sum(1)
+            take = ok & (score > best + 0.1)
+            normals = torch.where(take[:, None], nh, normals)
+            best = torch.where(take, score, best)
     return normals, p
+
+
+def _hi_normal(hi: _Hi, corners, w, nrm):
+    """The hi normal at barycentric `w` of the faces `corners` [K,3], on the side of `nrm`: axis_normals' signs
+    are arbitrary, so each corner is turned to the texel's side before they are blended."""
+    import torch
+
+    cn = hi.n[corners]
+    cn = torch.where((cn * nrm[:, None]).sum(-1, keepdim=True) < 0, -cn, cn)
+    out = torch.nn.functional.normalize((cn * w[..., None]).sum(1), dim=1)
+    return torch.where((out * nrm).sum(1, keepdim=True) < 0, -out, out)
+
+
+def _barycentric(tri, p):
+    """Barycentric weights [K,3] of points p [K,3] in triangles tri [K,3,3] (clipped to the triangle)."""
+    import torch
+
+    a, b, c = tri[:, 0], tri[:, 1], tri[:, 2]
+    v0, v1, v2 = b - a, c - a, p - a
+    d00, d01, d11 = (v0 * v0).sum(1), (v0 * v1).sum(1), (v1 * v1).sum(1)
+    d20, d21 = (v2 * v0).sum(1), (v2 * v1).sum(1)
+    den = (d00 * d11 - d01 * d01).clamp_min(1e-30)
+    y = (d11 * d20 - d01 * d21) / den
+    z = (d00 * d21 - d01 * d20) / den
+    w = torch.stack([1 - y - z, y, z], 1).clamp_min(0)
+    return w / w.sum(1, keepdim=True).clamp_min(1e-12)
 
 
 if __name__ == "__main__":

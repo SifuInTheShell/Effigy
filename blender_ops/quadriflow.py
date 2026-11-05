@@ -76,6 +76,9 @@ bpy.data.objects.remove(surface)
 
 rep = mesh_report(obj)
 assert rep["faces"] == rep["quads"] and rep["non_manifold_edges"] == 0, f"not clean quads: {rep}"
+# smooth shading: otherwise the glTF exporter writes one normal per quad (flat)
+for poly in obj.data.polygons:
+    poly.use_smooth = True
 export_glb(Path(j["out_dir"]) / "mesh.glb", export_materials="NONE")
 bpy.ops.wm.obj_export(
     filepath=str(Path(j["out_dir"]) / "quads.obj"),

@@ -39,6 +39,24 @@ engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
   it should become under **It becomes**, and click **Redraw the painted part**. It is redrawn from every side that
   sees it, and nothing outside the paint changes. **Erase** (or Shift while painting) wipes a stroke that went too
   far; **Clear the paint** starts again; the paint has its own **Strength**.
+- **Cleaner normal maps.** The baked normal map no longer shows facets and breaks at every UV seam: the model now
+  carries the tangent frame its map was baked in, so every viewer and engine reads it the same way. The even grain
+  all over it is gone too: the generated surface's triangles face random ways, which made the normals it was baked
+  from random; they are now read whatever way a triangle faces. Thin parts read their own side, small loose bits
+  of the generated surface are skipped, and its faceting is smoothed while creases stay (`hi_denoise`, default 6;
+  0 turns it off). Optional: `normal_smooth` (texels, default 0) softens the normals further, without opening the
+  seams again.
+- **Smooth shading everywhere.** Cleaned, remeshed and unwrapped models were shown with flat facets (their files
+  had no normals, or one per quad), and the textured model had a shading crease along every UV seam. Every step
+  now writes smooth normals that agree across seams.
+- **Less grainy ambient occlusion.** The AO is traced with 256 rays a texel instead of 32 and smoothed over the
+  surface (`ao_rays`, `ao_smooth`, default 2 texels; 0 turns it off): 1.3 s instead of 0.4 s at 1024².
+- **Rebuild a model as one solid (optional).** Clean leaves a generated model as a hollow double skin (two surfaces
+  a tenth of a millimetre apart, joined at its openings), which remeshing and baking then struggle with. Tick
+  **Rebuild it as one solid** in Clean (`cleanup`, off by default; up to a minute more) and it comes back as one
+  closed solid: cracks closed, the inside filled, the surface smoothed where it is noisy and kept where it is
+  creased. The bake then reads its normals from that surface. It suits simple props: fine detail goes (a character's
+  face melts) and only the largest part stays (`metrics.cleanup.parts_dropped`).
 
 ### Interface
 
@@ -54,7 +72,9 @@ engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
   - `mocap`: `person` and `camera`;
   - `motion`: `from`, `to`, `seconds`, `travel` and `turn`, to connect clips;
   - `anim`: `clearance`;
-  - `refine`: `coverage`, and `op: "edit"` with `region`, `prompt` and `strength`.
+  - `refine`: `coverage`, and `op: "edit"` with `region`, `prompt` and `strength`;
+  - `clean`: `cleanup`;
+  - `bake`: `hi_denoise`, `normal_smooth`, `ao_rays` and `ao_smooth`.
 
 ## 0.2.0 (2026-10-20)
 
