@@ -7,7 +7,7 @@
 <p align="center">
   <b>Game-ready 3D assets and 2D sprites from a picture or a sentence, made on your own GPU.</b><br>
   Generate, clean, retopologize, texture, rig, animate and export, offline, on one 16 GB NVIDIA card.<br>
-  New in 0.2.0: an AMD Radeon RX 9070 runs the <i>Fast</i> chain too.
+  New in 0.3.0: cleaner baked textures, paint a part and redraw it, connect two animation clips.
 </p>
 
 <p align="center">
@@ -326,8 +326,8 @@ isn't there hasn't been run. Known limits:
   fits depend on a clean mesh (touching legs or a fused snout fail a skin check).
 - The brief step is template-based, no LLM in the loop. The detail pass can invent detail (a per-view keep/drop
   is open).
-- What came after 0.2.0 ([CHANGELOG.md](CHANGELOG.md): everyone in a video, a panning camera, hand locks,
-  transitions between clips, arms kept out of the body, extra detail views, painting a part to redraw) passes its
+- Parts of 0.3.0 ([CHANGELOG.md](CHANGELOG.md): everyone in a video, a panning camera, hand locks,
+  transitions between clips, arms kept out of the body, extra detail views, painting a part to redraw) pass their
   tests. Transitions, the extra detail views and the arm clearance have run on the reference laptop on one
   character; the video features and painting a part have not run on a GPU yet.
 - An experimental Hunyuan3D engine is designed but not built; if it ever is, its outputs are fenced as
