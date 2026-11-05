@@ -328,6 +328,9 @@ A freshly generated model shows small holes and loose bits, and has far more tri
 - **Press what hangs just under its base onto it**: a detail from the top can come back mirrored underneath (a
   lifting eye under a concrete block) and hold the model up off the ground. This presses a small part under the
   middle of a broad flat base flat onto it; legs and rims are left alone.
+- **Rebuild it as one solid**: for a simple prop with a torn or hollow surface. It comes back closed and in one
+  piece, up to a minute more, and the bake reads its normals from that surface. Fine detail goes (a face melts) and
+  only the largest part stays, so leave it off for characters and for models in several pieces.
 - **Square a flat prop's perspective taper**: for a fence, wall or sign drawn in perspective.
 
 If preparing stops halfway, **Continue preparation** picks it up. **Run this step again** repeats one step with

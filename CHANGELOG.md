@@ -4,7 +4,7 @@ What changed for people who use Effigy, newest first. Each release's download an
 [releases page](https://github.com/SifuInTheShell/Effigy/releases); what was built and measured, milestone by
 milestone, is in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) §4.
 
-## Unreleased (on `main` since 0.2.0)
+## 0.3.0 (2026-11-05)
 
 M64 to M68 were built in a cloud session without a GPU or Blender; the unit and interface tests pass. On the
 reference laptop (RTX 5080, 2026-10-30) so far: connecting clips (M65), the extra detail views (M66) and the arm
@@ -39,7 +39,7 @@ engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
   it should become under **It becomes**, and click **Redraw the painted part**. It is redrawn from every side that
   sees it, and nothing outside the paint changes. **Erase** (or Shift while painting) wipes a stroke that went too
   far; **Clear the paint** starts again; the paint has its own **Strength**.
-- **Cleaner normal maps.** The baked normal map no longer shows facets and breaks at every UV seam: the model now
+- **Cleaner normal maps** (this and the three below contributed by @rndmbt in #17). The baked normal map no longer shows facets and breaks at every UV seam: the model now
   carries the tangent frame its map was baked in, so every viewer and engine reads it the same way. The even grain
   all over it is gone too: the generated surface's triangles face random ways, which made the normals it was baked
   from random; they are now read whatever way a triangle faces. Thin parts read their own side, small loose bits
