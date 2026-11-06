@@ -68,6 +68,42 @@ def test_flat_volume_bakes_flat_colour_and_flat_normals(tmp_path):
     assert res["metrics"]["coverage"] > 0.5 and res["metrics"]["volume_from"] == "010_trellis2"
 
 
+def test_texture_edits_override_generator_until_explicitly_selected(tmp_path, monkeypatch):
+    from steps import _textures as tx
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    uv = library(tmp_path)
+    edited = tmp_path / "030_textures"
+    edited.mkdir()
+    tx.patch_glb(
+        uv / "mesh.glb", edited / "mesh.glb", {"basecolor": Image.new("RGB", (16, 16), "red")}, 0
+    )
+    (edited / "meta.json").write_text(
+        json.dumps(
+            {
+                "version": edited.name,
+                "step": "textures",
+                "parent": uv.name,
+                "outputs": {"mesh": "mesh.glb"},
+            }
+        )
+    )
+    for choice in ("auto", "current", "generator"):
+        out = tmp_path / choice
+        out.mkdir()
+        result = bake.run(
+            "run",
+            str(edited),
+            str(out),
+            {"texture_size": 256, "supersample": 1, "source": choice, "ao": False},
+        )
+        if choice == "generator":
+            assert result["metrics"]["volume_from"] == "010_trellis2"
+        else:
+            assert result["metrics"]["source_from"] == edited.name
+            assert "volume_from" not in result["metrics"]
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="the hi-surface projector needs CUDA")
 def test_flipped_hi_winding_still_bakes_flat_normals(tmp_path):
     """TRELLIS's hi mesh has random winding: its normals must be turned to the low mesh's side."""

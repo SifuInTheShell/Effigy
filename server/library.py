@@ -66,7 +66,7 @@ def version_dir(asset_id: str, version: str) -> Path:
     return d
 
 
-KINDS = {"2d"}  # research 15: a 2D asset (pictures, pixel art, sprite sheets); absent = a 3D asset
+KINDS = {"2d", "texture"}  # standalone material sets share the version store; absent = a 3D asset
 
 
 def create_asset(name: str, brief: dict | None = None, kind: str | None = None) -> dict:
@@ -438,6 +438,9 @@ UPLOAD_KINDS = {
     ".jpg": "image",
     ".jpeg": "image",
     ".webp": "image",
+    ".tif": "image",
+    ".tiff": "image",
+    ".tga": "image",
     ".glb": "mesh",
     ".mp4": "video",  # M34 motion from video
     ".mov": "video",

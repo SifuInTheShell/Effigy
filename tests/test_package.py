@@ -16,6 +16,12 @@ def test_zip_manifest():
         "SETUP.md",
         "MANUAL.md",
         "CHANGELOG.md",
+        "server/textures.py",
+        "steps/textures.py",
+        "steps/_textures.py",
+        "mcp/effigy_server.py",
+        "mcp/SKILL.md",
+        "docs/howto/work-with-textures.md",
     ]:
         assert must in files, must
     for folder in ["server", "steps", "engine", "blender_ops", "mcp", "prompts", "tools", "wheels"]:

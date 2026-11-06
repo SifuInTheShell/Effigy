@@ -58,7 +58,7 @@ BLENDER = {  # blender_ops/export.py formats
     "web": [{"kind": "usdz"}],
 }
 PROFILES_2D = ["godot-2d", "unreal-2d"]
-PROFILES = [*BLENDER, "print", "obj", *PROFILES_2D]
+PROFILES = [*BLENDER, "print", "obj", *PROFILES_2D, "textures"]
 LODS = {"unity", "unreal"}
 COLLISION = {
     "unreal": "UCX_{}_00",
@@ -353,7 +353,14 @@ def run(op, in_dir, out_dir, params):
             "restricted", "restricted version (experimental engine); see IMPLEMENTATION MX1"
         )
     outs = meta["outputs"]
-    if profile in PROFILES_2D:  # a sprite sheet (M53)
+    note = ""
+    if profile == "textures":
+        from steps import _textures as tx
+
+        maps, manifest = tx.load_set(Path(in_dir), int(params.get("material", 0)))
+        out = Path(out_dir) / profile
+        files = list(dict.fromkeys(tx.write_set(out, maps, manifest).values()))
+    elif profile in PROFILES_2D:  # a sprite sheet (M53)
         if not ("sheet" in outs and "data" in outs or "tile" in outs or "layers" in outs):
             raise StepError(
                 "missing_input",
@@ -384,6 +391,13 @@ def run(op, in_dir, out_dir, params):
     licenses = {"restricted": bool(meta.get("restricted")), "components": used}
     (out / "LICENSES.json").write_text(json.dumps(licenses, indent=2), encoding="utf-8")
     files = [*files, "CREDITS.txt", "LICENSES.json"]
+    if profile == "textures":
+        import zipfile
+
+        with zipfile.ZipFile(out / "textures.zip", "w", zipfile.ZIP_DEFLATED) as bundle:
+            for filename in files:
+                bundle.write(out / filename, filename)
+        files.append("textures.zip")
     result = {"outputs": {f: f"{profile}/{f}" for f in files}, "metrics": {"profile": profile}}
     return result | ({"note": note} if note else {})
 

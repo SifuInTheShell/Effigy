@@ -70,7 +70,7 @@ def _call(run, op: str, in_dir, out_dir: str, params: dict) -> tuple[str, dict]:
     finally:
         faulthandler.cancel_dump_traceback_later()
     res = res or {}
-    extra = {k: res[k] for k in ("models", "licenses", "note") if k in res}
+    extra = {k: res[k] for k in ("models", "licenses", "note", "restricted") if k in res}
     return "RESULT", {"outputs": res.get("outputs", {}), "metrics": res.get("metrics", {})} | extra
 
 

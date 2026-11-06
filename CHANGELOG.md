@@ -4,6 +4,56 @@ What changed for people who use Effigy, newest first. Each release's download an
 [releases page](https://github.com/SifuInTheShell/Effigy/releases); what was built and measured, milestone by
 milestone, is in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) §4.
 
+## 0.4.0 (2026-11-06)
+
+### Texture workspace
+
+- **A dedicated Textures task** alongside model and character editing. Inspect each material and map, compare
+  versions, overlay UVs, and preview a model, flat map, repeated tile or lit material surface. Edit maps, Upscale,
+  Enhance, Create new and Library are top-level workflow tabs.
+- **Standalone textures and materials**, with no model required. Start from a colour, generate an image or a
+  seamless tile, import maps, or extract a material from a model. The main Library filters models, 2D art and
+  textures/materials, with direct material creation, import and batch export.
+- **Paint texture maps** with round and square brushes, size, opacity and hardness controls, eraser, colour picker,
+  pen pressure, undo/redo and keyboard shortcuts. Zoom with the wheel or buttons, pan with the Hand tool,
+  Space-drag or middle-drag, and expand the painter for more room. Save keeps the original resolution and creates
+  a new version; failed saves retain the painting for retry.
+- **Improve older textures** with AI upscaling, resizing, colour adjustments, detail enhancement and retexturing.
+  Atlas upscaling isolates UV islands, while tileable maps use wrapped context. Data maps stay separate from colour
+  upscaling; normal-map resizing normalizes vectors and 16-bit height images retain their precision.
+- **Reusable material sets** pinned to a source version. Apply a library material to a model using its UV atlas or
+  repeating coordinates. Texture changes preserve the original model's geometry, skeleton and animation.
+- **Import separate or packed maps**: PNG, JPEG, WebP, TIFF and TGA; glTF/Unreal ORM, Unity HDRP Mask and Unity
+  metallic/smoothness packing; OpenGL or DirectX normals. Import a named material from a GLB, including materials
+  defined only by colour factors. Native Unity `.mat` and Unreal `.uasset` files need exported maps or a GLB.
+- **Export texture packages** with maps, material metadata, credits and licences. Brightness-derived surface maps
+  are explicitly labelled estimates. Painting normal maps and 16-bit height maps uses external image replacement
+  rather than the browser's 8-bit colour painter.
+
+### Setup and reliability
+
+- Installed feature tiles say **Ready to use**. **Verify installation** explicitly checks local files; complete
+  files on an external model drive no longer invoke the downloader just because Hugging Face metadata is absent.
+  Shared model groups update together after verification.
+- Z-Image-Turbo quantizes its transformer before loading the text encoder, reducing peak host-memory pressure.
+  First loads from external drives can still take several minutes; later image generations reuse the resident worker.
+- Animation-only GLBs are skipped when rendering model thumbnails, avoiding Blender's "no mesh" startup errors.
+- Re-baking automatically retains newer texture edits; an explicit source selector can use the original generated
+  volume. Texture controls and previews fit above the activity display, with an expanded painting view available.
+
+### For agents
+
+- MCP tools `inspect_textures`, `texture_map`, `edit_texture`, `extract_material` and `import_texture_set` expose
+  texture inspection, import, generation, editing, enhancement, upscaling and material reuse. `list_assets` filters
+  by asset kind; texture exports use `profile="textures"`. Image replacement supports externally painted maps.
+- All texture operations use versioned jobs and carry source licence/restriction metadata. See
+  [the texture guide](docs/howto/work-with-textures.md) and [MCP guide](mcp/SKILL.md).
+
+Live checks on the reference NVIDIA laptop covered standalone and animated-model upscaling, seamless generation
+from the external model drive, and preservation of animated geometry in Blender. Generative enhancement and
+retexturing reuse the existing AI steps; their new wrappers have regression tests, with broader visual assessment
+still ongoing. No new model dependencies were added.
+
 ## 0.3.0 (2026-11-05)
 
 M64 to M68 were built in a cloud session without a GPU or Blender; the unit and interface tests pass. On the

@@ -76,19 +76,30 @@ _PIPE = []  # resident worker (--serve): loaded once, ~26 s saved on every later
 
 def _pipeline():
     if not _PIPE:
-        from diffusers import ZImagePipeline
+        from diffusers import ZImagePipeline, ZImageTransformer2DModel
 
         progress(0.02, "loading Z-Image-Turbo")
-        pipe = ZImagePipeline.from_pretrained(MODEL, revision=REVISION, torch_dtype=torch.bfloat16)
+        # Quantize the large DiT before loading the text encoder. Loading both in bf16 first
+        # leaves little RAM for mapped checkpoint pages on a 32 GB machine (especially external disks).
+        transformer = ZImageTransformer2DModel.from_pretrained(
+            MODEL,
+            subfolder="transformer",
+            revision=REVISION,
+            dtype=torch.bfloat16,
+            disable_mmap=True,
+        )
         # bf16 DiT is ~12 GB: with the desktop's VRAM Windows pages it to shared memory (~3 s/step)
-        pipe.transformer.enable_layerwise_casting(
+        transformer.enable_layerwise_casting(
             storage_dtype=torch.float8_e4m3fn, compute_dtype=torch.bfloat16
         )
         # peft puts a LoRA in its base layer's `compute_dtype` when the layer has one (its rule for quantised
         # layers), else in the weight's dtype: fp8, which no matmul takes. The 2D styles (M50) compute in bf16.
-        for m in pipe.transformer.modules():
+        for m in transformer.modules():
             if isinstance(m, torch.nn.Linear) and m.weight.dtype == torch.float8_e4m3fn:
                 m.compute_dtype = torch.bfloat16
+        pipe = ZImagePipeline.from_pretrained(
+            MODEL, revision=REVISION, dtype=torch.bfloat16, transformer=transformer
+        )
         _PIPE.append(pipe)
     return _PIPE[0]
 

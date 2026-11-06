@@ -11,6 +11,12 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/setup/blender", (r) => r.fulfill({ json: { start: false, exe: null, found: null } }));
 });
 
+// A library refresh can still be inside route.fetch() when an assertion finishes.
+// Let those handlers complete before Playwright disposes their API responses.
+test.afterEach(async ({ page }) => {
+  if (!page.isClosed()) await page.unrouteAll({ behavior: "wait" });
+});
+
 const upload = async (request: any, name: string) => {
   const asset = await (await request.post("/api/assets", { data: { name } })).json();
   expect((await request.put(`/api/assets/${asset.id}/upload/two_tris.glb`, { data: GLB })).ok()).toBe(true);
@@ -1345,7 +1351,7 @@ test("Animate: pack clips and your motions; Generate motion and Add post the rig
   expect(posted[2]).toEqual(["anim", { clips: ["310_motion"] }]);
 });
 
-test("Tasks: five per 3D asset on one line, a task opens its newest checkpoint or its form, Tools opens a section (UX-06)", async ({ page }) => {
+test("Tasks: six per 3D asset on one line, a task opens its newest checkpoint or its form, Tools opens a section (UX-06)", async ({ page }) => {
   const posted = await mockAsset(page, "mock_tabs", [
     { version: "010_trellis2", step: "trellis2", parent: null, outputs: { mesh: "hi.glb", ovoxel: "ovoxel.npz" } },
     { version: "020_clean", step: "clean", parent: "010_trellis2", outputs: { mesh: "mesh.glb" } },
@@ -1358,9 +1364,9 @@ test("Tasks: five per 3D asset on one line, a task opens its newest checkpoint o
   await page.goto("/#/asset/mock_tabs?version=020_clean");
   const tabs = page.locator(".stages li button");
   const names = async () => (await tabs.allInnerTexts()).map((t) => t.replace(/\s+/g, " ").replace("✓ ", "").replace(" optional", "").trim());
-  await expect.poll(names).toEqual(["Reference", "Generate", "Prepare", "Character", "Finish"]);
+  await expect.poll(names).toEqual(["Reference", "Generate", "Prepare", "Textures", "Character", "Finish"]);
   await expect(page.locator(".stages [aria-current=step]")).toHaveText("Prepare");
-  await expect(page.locator(".stages small")).toHaveText("optional"); // Character
+  await expect(page.locator(".stages small")).toHaveText(["optional", "optional"]); // Textures and Character
   expect(new Set(await tabs.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)))).size).toBe(1); // one line at laptop width
   await page.screenshot({ path: "test-results/tasks-1280.png", clip: { x: 0, y: 0, width: 1280, height: 140 } });
   const reference = page.getByRole("button", { name: "Reference" });
@@ -1417,7 +1423,7 @@ test("Preparation states: a checked chain never says it stopped; an earlier step
   const names = async () => (await page.locator(".stages li button").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").replace("✓ ", "").replace(" optional", "").trim());
   await page.goto("/#/asset/mock_prep?version=040_uv");
   await expect(page.locator(".stages .chip")).toHaveText("Imported model");
-  await expect.poll(names).toEqual(["Prepare", "Character", "Finish"]);
+  await expect.poll(names).toEqual(["Prepare", "Textures", "Character", "Finish"]);
   await expect(panel).toContainText("Model prepared; checked.");
   await expect(panel).not.toContainText("stopped");
   await expect(panel.getByRole("button", { name: "Continue preparation" })).toHaveCount(0);
@@ -1621,6 +1627,18 @@ test("History: intermediate steps fold into one row; star and filter", async ({ 
 });
 
 test("Setup: a summary, cards with status and install buttons, a gated card, the credits and the advanced tables", async ({ page }) => {
+  await page.addInitScript(() => {
+    class SetupEvents extends EventTarget {
+      static OPEN = 1;
+      readyState = 1;
+      constructor() {
+        super();
+        (window as any).__setupEvents = this;
+      }
+      close() {}
+    }
+    (window as any).EventSource = SetupEvents;
+  });
   const m = (id: number, name: string, groups: string[], installed: boolean, bytes: number, partial = false) => ({
     id,
     name,
@@ -1697,14 +1715,14 @@ test("Setup: a summary, cards with status and install buttons, a gated card, the
   await expect(page.locator("#space")).toContainText("Freed 400 MB.");
   expect(cleaned).toBe("trash");
   await expect(page.locator("#space tr", { hasText: "Blender" }).getByRole("button")).toHaveCount(0); // needed: no cleanup
-  await expect(page.locator("#cap-concepts")).toContainText("Installed · 27 GB");
+  await expect(page.locator("#cap-concepts")).toContainText("Ready to use · 27 GB");
   await expect(page.locator("#cap-texture")).toContainText("Not installed · 3.0 GB to download");
   await expect(page.locator("#cap-texture").getByRole("button", { name: "Install", exact: true })).toBeVisible();
-  // M35b: files there but not all, or the environment missing: Repair; installed: Check and repair
+  // M35b: files there but not all, or the environment missing: Repair; ready: optional verification
   await expect(page.locator("#cap-fast")).toContainText("Needs a Hugging Face login first"); // the login comes first
   await expect(page.locator("#cap-mocap")).toContainText("Needs repair · 4.5 GB missing or damaged");
   await expect(page.locator("#cap-kimodo")).toContainText("Needs repair · its Python environment is not set up");
-  await expect(page.locator("#cap-concepts").getByRole("button", { name: "Check and repair" })).toBeVisible();
+  await expect(page.locator("#cap-concepts").getByRole("button", { name: "Verify installation" })).toBeVisible();
   await page.locator("#cap-mocap").getByRole("button", { name: "Repair" }).click();
   await page.locator("#cap-kimodo").getByRole("button", { name: "Repair" }).click();
   await expect.poll(() => installs).toEqual([
@@ -1718,6 +1736,16 @@ test("Setup: a summary, cards with status and install buttons, a gated card, the
   await expect(page.locator("#attributions .attribution", { hasText: "Built with DINOv3" })).toBeVisible();
   await page.getByText("Model files and licences").click();
   await expect(page.locator("#model-table tbody tr")).toHaveCount(6);
+  await page.locator("#cap-concepts").getByRole("button", { name: "Verify installation" }).click();
+  await expect.poll(() => installs.length).toBe(3);
+  expect(installs[2]).toEqual({ group: "concepts", repair: true });
+  const verification = "Verifying local file (no download): hub/models--Tongyi-MAI--Z-Image-Turbo/text_encoder/model-00001-of-00003.safetensors";
+  await page.evaluate((text) => {
+    const source = (window as any).__setupEvents;
+    source.dispatchEvent(new MessageEvent("job", { data: JSON.stringify({ job_id: "inst3", status: "running" }) }));
+    source.dispatchEvent(new MessageEvent("progress", { data: JSON.stringify({ job_id: "inst3", step: "install concepts", p: null, text }) }));
+  }, verification);
+  await expect(page.locator("#cap-concepts .status")).toHaveText(verification);
   await page.screenshot({ path: "test-results/setup-mock.png", fullPage: true });
 });
 
@@ -2125,7 +2153,7 @@ test("Prepare: level and square, close slits and square the taper reach their st
   await page.getByLabel("Square a flat prop's perspective taper").check();
   await panel.getByRole("button", { name: "Bake", exact: true }).click();
   await expect.poll(() => posted.length).toBe(2);
-  expect(posted[1]).toEqual(["bake", { texture_size: 2048, detaper: true }]);
+  expect(posted[1]).toEqual(["bake", { texture_size: 2048, source: "auto", detaper: true }]);
   // Clean: level and square; left unticked, nothing extra is sent
   await page.goto("/#/asset/mock_fence?version=020_clean");
   await page.getByText("Run this step again").click();
@@ -2984,6 +3012,8 @@ test("2D Finish: check the sprites, export them for Godot 2D or Paper2D, the che
   await panel.getByRole("button", { name: "Export for Unreal (Paper2D)" }).click();
   await expect.poll(() => posted.length).toBe(1);
   expect(posted[0]).toEqual(["export", { profile: "unreal-2d" }]);
+  // Let the completed export open before navigating to its earlier validation version.
+  await expect(panel).toContainText("Exported for Unreal (Paper2D)");
   // the check: the sheet in the view, the checklist and the 2D export beside it
   await page.goto("/#/asset/mock_fin2d?version=030_validate");
   await expect(page.locator(".pixel-view")).toBeVisible();

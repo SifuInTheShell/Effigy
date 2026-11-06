@@ -39,6 +39,16 @@ LIGHT = {
     "sprites",  # M52: Blender on the CPU (Workbench), no model
     "parts:rename",  # a step, or step:op
     "transform",  # numpy on the CPU: a still model turned, scaled and placed
+    "textures:import",
+    "textures:replace",
+    "textures:adjust",
+    "textures:settings",
+    "textures:resize",
+    "textures:apply",
+    "textures:extract",
+    "textures:surface",
+    "textures:create",
+    "textures:seamless",
 }  # rig_skin: SkinTokens on the GPU
 
 GPU = threading.Lock()  # ponytail: one global lock, it's one laptop GPU

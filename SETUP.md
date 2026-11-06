@@ -91,11 +91,17 @@ The page has five parts:
   3D generators (Fast, Faithful) and retexturing works: concepts and pictures, the 2D tools, importing your own
   model and preparing, rigging and exporting it, Blender.
 - Later, in **Setup**: each feature's card (**Install**, **Repair** when a file is missing or damaged or
-  its Python environment is out of date after an update, **Check and repair** to check every file's
-  fingerprint), **Where the models are** (move them), **Space on disk** (what takes room, safe cleanups),
+  its Python environment is out of date after an update, **Ready to use** when complete, and optional
+  **Verify installation** to check local file fingerprints), **Where the models are** (move them),
+  **Space on disk** (what takes room, safe cleanups),
   and every component's licence with the credit lines your game must carry ("Built with DINOv3"; exports
   write them into `CREDITS.txt` for you).
 - Something red you can't fix, or an install that fails twice: send me the activity bar's log.
+
+Model files can live on an external drive. Verification reads the configured location and downloads only missing
+or damaged files; it does not fetch complete weights again. A first Z-Image-Turbo load can take several minutes
+on an external drive, especially with limited free RAM. "Loading checkpoint shards" is local model loading;
+subsequent image generations reuse the loaded model until the worker is unloaded or the app restarts.
 
 ## Step 6: Make your first asset
 

@@ -84,6 +84,7 @@ def test_the_machine_check_marks_what_never_fits(monkeypatch):
         {"step": "trellis2", "param": "preset", "value": "faithful-hd", "need_gb": 19.4},
         {"step": "trellis2", "param": "preset", "value": "faithful-hq", "need_gb": 13.3},
         {"step": "trellis2", "param": "preset", "value": "faithful", "need_gb": 13.3},
+        {"step": "textures", "param": "op", "value": "enhance", "need_gb": 12.3},
         {"step": "refine", "param": "tile", "value": "lite", "need_gb": 12.3},
         {
             "step": "refine",
@@ -196,6 +197,9 @@ LAYOUTS = [
             "redraw",
             "depth",
             "layers",
+            "generate",
+            "enhance",
+            "retexture",
         }  # M55: MoGe-3 9.0, its inpaint 7.8
         | HQ_HD,
         6.76,
@@ -205,7 +209,7 @@ LAYOUTS = [
         12288,
         800,
         "warn",
-        {"faithful", "lite", "full", "redraw"} | HQ_HD,
+        {"faithful", "lite", "full", "redraw", "enhance"} | HQ_HD,
         10.42,
     ),
     # M46b/c: the HD preset and the full Tile are for bigger cards: listed, no warning

@@ -5,9 +5,9 @@
 <h1 align="center">Effigy</h1>
 
 <p align="center">
-  <b>Game-ready 3D assets and 2D sprites from a picture or a sentence, made on your own GPU.</b><br>
+  <b>Game-ready 3D assets, textures and 2D sprites from a picture or a sentence, made on your own GPU.</b><br>
   Generate, clean, retopologize, texture, rig, animate and export, offline, on one 16 GB NVIDIA card.<br>
-  New in 0.3.0: cleaner baked textures, paint a part and redraw it, connect two animation clips.
+  New in 0.4.0: a texture workspace, standalone materials, texture painting and AI upscaling.
 </p>
 
 <p align="center">
@@ -61,6 +61,17 @@
 </table>
 
 ## Capabilities
+
+### Textures and materials
+
+Open a model's **Textures** task, or create a **Texture / Material** without a model. Paint and replace maps,
+improve older textures with AI upscaling and enhancement, generate seamless tiles, and save reusable materials
+in the Library. Every edit creates a version and preserves the model's geometry, rig and animation.
+
+The painter includes round and square brushes, hardness and opacity, eraser, colour picker, undo/redo, zoom, pan
+and an expanded canvas. Import separate maps, glTF/Unreal ORM or Unity packed maps, or extract a named GLB
+material. Export a texture ZIP with maps, metadata and credits. Native `.mat`/`.uasset` files need exported maps
+or a GLB. [Working with textures](docs/howto/work-with-textures.md) covers the workflow.
 
 <table>
   <tr>
@@ -297,6 +308,11 @@ The `effigy` MCP server (`mcp/effigy_server.py`) gives any MCP client the whole 
 |---|---|---|---|
 | `list_assets`, `get_asset`, `get_version`, `describe_steps`, `look` (rendered previews the agent can see), `read_file`, `fit_check` | `create_asset`, `import_file`, `run_step`, `job_status`, `cancel_job` | `validate`, `export` | `open_in_blender`, `pull_from_blender`, `close_in_blender` |
 
+Texture/material workflows also expose `inspect_textures`, `texture_map`, `edit_texture`, `extract_material` and
+`import_texture_set`. Agents can create standalone materials, import separate or packed engine maps, edit/paint
+by map replacement, generate, enhance, upscale, apply pinned library materials and export texture packages.
+Use `list_assets(kind="texture")` to find them; [the agent guide](mcp/SKILL.md) documents the complete flow.
+
 Setup → **Connect an agent** prints the configuration for Claude Code, Claude Desktop, Codex, Cursor and
 Gemini CLI, with absolute paths: use that, not the repo's `.mcp.json`, which is relative and serves only a
 Claude Code session started inside the checkout. The API answers only local requests, so the agent runs on
@@ -326,6 +342,9 @@ isn't there hasn't been run. Known limits:
   fits depend on a clean mesh (touching legs or a fused snout fail a skin check).
 - The brief step is template-based, no LLM in the loop. The detail pass can invent detail (a per-view keep/drop
   is open).
+- Standalone generation makes colour images; derived surface maps are estimates. Texture enhancement and
+  retexturing can invent detail. The browser painter edits colour/scalar maps; use image replacement to retain
+  normal-map vector semantics or 16-bit height precision. See [0.4.0's checks and limits](CHANGELOG.md#040-2026-11-06).
 - Parts of 0.3.0 ([CHANGELOG.md](CHANGELOG.md): everyone in a video, a panning camera, hand locks,
   transitions between clips, arms kept out of the body, extra detail views, painting a part to redraw) pass their
   tests. Transitions, the extra detail views and the arm clearance have run on the reference laptop on one
@@ -386,6 +405,7 @@ only.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | processes, the GPU scheduler, the asset store, packaging |
 | [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) | milestones, frozen contracts, what was built and measured |
 | [docs/research/](docs/research/) | the surveys behind each choice: generators, texturing, rigging, motion, Blender, agents |
+| [Texture workspace research](docs/research/17-texture-workspace.md) | proposed model texture editing, standalone materials, AI upscaling and implementation order |
 | [docs/bench/](docs/bench/) | every measured number and sheet |
 
 ## Licence

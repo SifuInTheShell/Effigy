@@ -1,6 +1,7 @@
 // M39: Import: a model file (or a .zip of one with its textures) becomes an asset; import_model reads it in Blender, keeps a
 // skeleton the app knows and its clips, and brings anything else in as a still model (docs/IMPLEMENTATION.md M39)
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { NewTexture } from "./textures/Workspace";
 import { api, type Asset, type Meta } from "./api";
 import { useBusy } from "./hooks";
 import { actsAs } from "./workflow";
@@ -28,7 +29,10 @@ export function ImportPage(props: {
   const [inputKey, setInputKey] = useState(0); // remounts the file input to clear it
   const [busy, run] = useBusy();
   const made = useRef<string | null>(null); // the asset a failed upload created: retry in it, not in a new one
-  const [mode, setMode] = useState<"model" | "animation">("model"); // an animation goes onto a character (2026-10-12)
+  const [mode, setMode] = useState<"model" | "animation" | "texture">("model");
+  useEffect(() => {
+    if (!props.hidden && new URLSearchParams(location.hash.split("?")[1]).get("kind") === "texture") setMode("texture");
+  }, [props.hidden]);
   const choose = (f: File | null) => {
     setFile(null);
     setNote(null);
@@ -68,6 +72,7 @@ export function ImportPage(props: {
           <button aria-pressed={mode === "animation"} onClick={() => setMode("animation")}>
             An animation for a character
           </button>
+          <button aria-pressed={mode === "texture"} onClick={() => setMode("texture")}>Textures / Materials</button>
         </div>
         {mode === "model" ? (
           <>
@@ -115,6 +120,8 @@ export function ImportPage(props: {
               {busy ? "Importing…" : "Import"}
             </button>
           </>
+        ) : mode === "texture" ? (
+          <NewTexture importOnly chain={props.chain} onCreated={props.onCreated} onError={props.onError} missing={() => false} />
         ) : (
           <AnimationImport assets={props.assets} chain={props.chain} onError={props.onError} />
         )}

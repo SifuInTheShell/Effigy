@@ -35,6 +35,13 @@ export type CopyResult = {
   skipped: { asset_id: string; version: string; reason: string }[];
 };
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
+export type TextureRole = "basecolor" | "roughness" | "metallic" | "normal" | "ao" | "height" | "emissive";
+export type TextureMaterial = {
+  index: number; name: string; maps: Partial<Record<TextureRole, { width: number; height: number; mode: string; color_space: string }>>;
+  settings: Record<string, any>; tileable: boolean; uv?: boolean; reason?: string;
+  can_generate: boolean; can_upscale: boolean;
+};
+export type TextureInventory = { model: boolean; mesh?: string; materials: TextureMaterial[]; rigged?: boolean; animated?: boolean; manifest?: Record<string, any> };
 export type Presets = Record<string, Record<string, Record<string, unknown>>>;
 export type Model = {
   id: number;
@@ -108,7 +115,10 @@ async function call<T>(method: string, path: string, body?: BodyInit | object): 
 export const api = {
   assets: () => call<Asset[]>("GET", "/api/assets"),
   asset: (id: string) => call<{ asset: Asset; versions: Meta[] }>("GET", `/api/assets/${id}`),
-  createAsset: (name: string, kind?: "2d") => call<Asset>("POST", "/api/assets", kind ? { name, kind } : { name }),
+  createAsset: (name: string, kind?: "2d" | "texture") => call<Asset>("POST", "/api/assets", kind ? { name, kind } : { name }),
+  textures: (id: string, version: string) => call<TextureInventory>("GET", `/api/assets/${id}/versions/${version}/textures`),
+  textureUV: (id: string, version: string, material: number) => call<{ triangles: number[][][] }>("GET", `/api/assets/${id}/versions/${version}/textures/uv?material=${material}`),
+  extractTexture: (id: string, version: string, material: number, name: string) => call<{ asset: Asset; version: Meta }>("POST", `/api/assets/${id}/versions/${version}/textures/extract`, { material, name }),
   renameAsset: (id: string, name: string) => call<Asset>("PATCH", `/api/assets/${id}`, { name }),
   archiveAsset: (id: string, archived: boolean) => call<Asset>("PATCH", `/api/assets/${id}`, { archived }),
   patchTags: (id: string, tags: string[]) => call<Asset>("PATCH", `/api/assets/${id}`, { tags }),

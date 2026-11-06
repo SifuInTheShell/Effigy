@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import "./styles.css";
+import { NewTexture, TextureWorkspace } from "./textures/Workspace";
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { api, fileUrl, waitJob, type Asset, type BlenderSetup, type PortInfo, type TrashEntry, type CopyResult, type Check, type Drive, type Env, type FitQuality, type Folder, type HfStatus, type JobStatus, type Licence, type Meta, type Model, type AgentSetup, type Preset, type Presets, type Storage, type StorageItem } from "./api";
@@ -95,7 +96,7 @@ function parse(hash: string): Route {
     };
   return {
     page:
-      hash === "#/new" ? "new" : hash === "#/import" ? "import" : hash === "#/setup" || hash === "#models" ? "setup" : hash === "#/welcome" ? "welcome" : "library",
+      hash.split("?")[0] === "#/new" ? "new" : hash.split("?")[0] === "#/import" ? "import" : hash === "#/setup" || hash === "#models" ? "setup" : hash === "#/welcome" ? "welcome" : "library",
   };
 }
 /** The Setup page at one capability's card (UX-12): where a blocked action sends the user. */
@@ -620,9 +621,12 @@ const libHash = (v: LibView, base = "#/") => {
 
 const FILTERS: Record<string, (a: Asset) => boolean> = {
   All: () => true,
+  Models: (a) => !a.kind || a.kind === "3d",
+  "2D": (a) => a.kind === "2d",
   Mine: (a) => !isTest(a),
   Bench: (a) => a.id.startsWith("bench_"),
   Golden: (a) => a.id.startsWith("golden_"),
+  Textures: (a) => a.kind === "texture",
 };
 
 function Library(props: {
@@ -686,6 +690,15 @@ function Library(props: {
             New asset
           </a>
         )}
+      </div>
+      <div className="library-categories" role="group" aria-label="Asset types">
+        {[["All", "All assets"], ["Models", "Models"], ["2D", "2D art"], ["Textures", "Textures / Materials"]].map(([key, title]) => (
+          <button key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{title}<span className="muted">{total.filter((a) => !a.archived && FILTERS[key](a)).length}</span></button>
+        ))}
+        <div className="library-material-actions">
+          <a className="button" href="#/new?kind=texture">New material</a>
+          <a className="button" href="#/import?kind=texture">Import material</a>
+        </div>
       </div>
       {total.length > 0 && (
         <div className="row library-tools" role="search">
@@ -858,7 +871,7 @@ function Card(props: { a: Asset; dup: boolean; credit: string; picking: boolean;
   const stamp = a.updated ?? a.created;
   const url = `/api/assets/${a.id}/turntable?v=${encodeURIComponent(a.updated ?? "")}`;
   const enter = () => {
-    if (prefersStill()) return;
+    if (a.kind === "texture" || a.kind === "2d" || prefersStill()) return;
     hover.current = true;
     clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
@@ -901,6 +914,7 @@ function Card(props: { a: Asset; dup: boolean; credit: string; picking: boolean;
           {props.dup && ` · ${a.id}`}
         </span>
         <span className="chips">
+          {a.kind === "texture" && <span className="chip">Texture / Material</span>}
           {a.restricted && <span className="chip bad">Restricted</span>}
           {a.imported && (
             <span className="chip" title="Imported: Effigy does not know this file's licence">
@@ -1019,10 +1033,11 @@ function BatchExport(props: { assets: Asset[]; onClose: () => void }) {
             lines.push({ ok: false, text: `${a.name}: skipped, ${SKIPS.restricted}` });
             continue;
           }
-          const same = (x: (typeof versions)[number]) => x.step === "export" && x.parent === pick.version && JSON.stringify(x.params) === JSON.stringify({ profile });
+          const destination = a.kind === "texture" || (!hasGlb(pick) && !!pick.outputs.material) ? "textures" : profile;
+          const same = (x: (typeof versions)[number]) => x.step === "export" && x.parent === pick.version && JSON.stringify(x.params) === JSON.stringify({ profile: destination });
           let ex = versions.filter(same).at(-1)?.version;
           if (!ex) {
-            const { job_id } = await api.run(a.id, "export", pick.version, { profile });
+            const { job_id } = await api.run(a.id, "export", pick.version, { profile: destination });
             const j = await waitJob(job_id);
             if (j.status !== "done" || !j.version) throw new Error(j.error?.message ?? `the export ${j.status}`);
             ex = j.version;
@@ -1070,7 +1085,8 @@ function BatchExport(props: { assets: Asset[]; onClose: () => void }) {
           ))}
         </ul>
       )}
-      <div className="dests">
+      <p className="muted">Textures and materials export as map sets with metadata and credits. The destination below applies to models.</p>
+      <div className="dests" hidden={props.assets.every((a) => a.kind === "texture")}>
         {EXPORTS.map((e) => (
           <label key={e.id} className="choice">
             <input type="radio" name="batch-profile" checked={profile === e.id} onChange={() => setProfile(e.id)} />
@@ -1148,7 +1164,10 @@ function NewAsset(props: {
   onError: (e: unknown) => void;
 }) {
   const [mode, setMode] = useState<Mode>("describe");
-  const [dim, setDim] = useState<"3d" | "2d">("3d"); // the 2D track (research 15, M50): a picture stays a picture
+  const [dim, setDim] = useState<"3d" | "2d" | "texture">("3d");
+  useEffect(() => {
+    if (!props.hidden && new URLSearchParams(location.hash.split("?")[1]).get("kind") === "texture") setDim("texture");
+  }, [props.hidden]);
   const [kind2, setKind2] = useState("picture"); // the owner, 2026-10-13: a picture as described, the first kind
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -1253,6 +1272,20 @@ function NewAsset(props: {
         props.onError(e);
       }
     });
+  if (dim === "texture") return (
+    <div className="page" hidden={props.hidden}>
+      <div className="head"><h1>New asset</h1></div>
+      <div className="form">
+        <h2>Texture / Material</h2>
+        <div className="modes" role="group" aria-label="Make">
+          <button onClick={() => setDim("3d")}>A 3D model</button>
+          <button onClick={() => setDim("2d")}>A 2D picture or sprite</button>
+          <button aria-pressed>Texture / Material</button>
+        </div>
+        <NewTexture chain={props.chain} onCreated={props.onCreated} onError={props.onError} missing={props.missing} />
+      </div>
+    </div>
+  );
   return (
     <div className="page" hidden={props.hidden}>
       <div className="head">
@@ -1265,7 +1298,8 @@ function NewAsset(props: {
             [
               ["3d", "A 3D model"],
               ["2d", "A 2D picture or sprite"],
-            ] as ["3d" | "2d", string][]
+              ["texture", "Texture / Material"],
+            ] as ["3d" | "2d" | "texture", string][]
           ).map(([d, title]) => (
             <button
               key={d}
@@ -1462,6 +1496,8 @@ function Workspace(props: {
   const [rigView, setRigView] = useState<RigView | null>(null);
   const [picked, setPicked] = useState("image_0"); // the 2D track: the picture of a set the panel works on
   const [animEditing, setAnimEditing] = useState(false); // M37: the animation editor's timeline under the view
+  const [textureOpen, setTextureOpen] = useState(false);
+  useEffect(() => setTextureOpen(false), [props.asset?.id]);
   const pixelEd = usePixelEditor(); // M56: the pixel editor, its canvas in the view and its tools in the panel
   // another version shown (a pick, or the save's new version) ends the editing; a switch with unsaved edits asked first
   useEffect(() => {
@@ -1530,6 +1566,24 @@ function Workspace(props: {
     );
   const stage = phaseOf(versions, v);
   const kind = props.asset?.kind ?? sel.kind;
+  const textureEdits: Chain = (asset, parent, steps) => props.chain(asset, parent, steps.map(([step, params]) => {
+    if (step === "refine") return ["textures", { ...params, op: (params as Record<string, unknown>).op === "edit" ? "edit" : "enhance", mask_source: v.version }];
+    if (step === "project") return ["textures", { ...params, op: "project" }];
+    return [step, params];
+  }));
+  if (kind === "texture" || textureOpen) return (
+    <TextureWorkspace
+      asset={props.asset ?? { id, name, created: "", kind }} version={v} versions={versions}
+      chain={props.chain} pick={props.pick} missing={props.missing}
+      onExit={kind === "texture" ? undefined : () => setTextureOpen(false)}
+      onOpen={(asset, version) => { props.onRenamed(); location.hash = assetHash(asset, version); }}
+      active={active ? <ActiveJob job={active} onCancel={props.onCancel} /> : undefined}
+      regionTools={hasGlb(v) ? <>
+        <DetailPanel key={v.version} asset={id} version={v} versions={versions} missing={props.missing("refine")} chain={textureEdits} />
+        {generated(versions, v) && <FacePanel asset={id} version={v} chain={textureEdits} />}
+      </> : undefined}
+    />
+  );
   // M53: a check or an export of a sprite sheet: shown with its sheet, its panel the 3D one (the checklist, the files)
   const sheetOf = ["validate", "export"].includes(v.step) ? versions.find((x) => x.version === v.parent && is2D(x)) : undefined;
   const tasks = kind === "2d" ? TASKS_2D : TASKS_3D;
@@ -1601,6 +1655,7 @@ function Workspace(props: {
     if (t.id === "generate") return at("prep", "generate");
     if (t.id === "prepare") return at("trellis2", "prepare");
     if (t.id === "character") return rig && stage === 2 ? () => reveal("character") : null;
+    if (t.id === "textures") return glb ? () => setTextureOpen(true) : null;
     if (t.id === "finish" && is2D(v)) return () => reveal("finish"); // M53: a sheet's check and export
     if (t.id === "finish") return glb && stage >= 2 && v.step !== "export" ? () => reveal("finish") : null;
     if (t.id === "pixelize") return document.getElementById("pixelize") ? () => reveal("pixelize") : null; // 2D: the shown picture's form
@@ -1730,7 +1785,7 @@ function Workspace(props: {
           {tasks.map((t, i) => {
             if (imported && kind !== "2d" && i < 2) return null; // no reference and no generation behind an imported model
             const to = target(i);
-            const open = to ? () => props.pick(to.version) : opens(t);
+            const open = t.id === "textures" ? opens(t) : to ? () => props.pick(to.version) : opens(t);
             return (
               <li key={t.id}>
                 {/* opens the newest checkpoint of that task on this branch, or where the task is configured; never runs a step */}
@@ -1994,7 +2049,7 @@ function FacePanel(props: { asset: string; version: Meta; chain: Chain }) {
   return (
     <section id="face">
       <h3>Face from image</h3>
-      {v.step === "project" && (
+      {(v.step === "project" || (v.step === "textures" && m.operation === "project")) && (
         <>
           <p className={m.skipped ? "note warn" : "muted"}>
             {m.skipped
@@ -2113,7 +2168,7 @@ function DetailPanel(props: { asset: string; version: Meta; versions: Meta[]; ch
   return (
     <section id="detail">
       <h3>Texture detail</h3>
-      {v.step === "refine" && (
+      {(v.step === "refine" || (v.step === "textures" && ["enhance", "edit"].includes(String(m.operation)))) && (
         <>
           <p className="muted">
             {m.op === "edit"
@@ -2864,6 +2919,7 @@ function PrepareForm(props: { asset: string; version: Meta; versions: Meta[]; ch
   const [solid, setSolid] = useState(false); // clean: rebuilt as one closed solid
   const [close, setClose] = useState(""); // remesh: slits up to this many mm shut first; "" = off
   const [detaper, setDetaper] = useState(false); // bake: a flat prop's perspective taper undone
+  const [bakeSource, setBakeSource] = useState("auto");
   const [busy, run] = useBusy();
   const v = props.version;
   const todo = (props.only ? RECIPE.filter(([s]) => s === props.only) : RECIPE.slice(RECIPE.findIndex(([s]) => s === props.from) + 1)).filter(
@@ -2882,10 +2938,21 @@ function PrepareForm(props: { asset: string; version: Meta; versions: Meta[]; ch
   const params: Record<string, object> = {
     clean: { ...(h ? { height_m: h } : {}), level: upright, ...(straighten ? { straighten: true } : {}), ...(press ? { press_to_floor: true } : {}), ...(solid ? { cleanup: true } : {}) },
     remesh: { faces: n, ...(quads ? { topology: "quad" } : {}), ...(mm ? { close: mm / 1000 } : {}) },
-    bake: { texture_size: Number(size), ...(detaper ? { detaper: true } : {}) },
+    bake: { texture_size: Number(size), source: bakeSource, ...(detaper ? { detaper: true } : {}) },
     validate: has("remesh") ? { max_triangles: triBudget(n, quads && "quad") } : prior ? { max_triangles: prior } : {},
   };
   const advanced = [
+    has("bake") && (
+      <label key="bake-source">
+        Texture source
+        <select value={bakeSource} onChange={(e) => setBakeSource(e.target.value)}>
+          <option value="auto">Automatic — keep texture edits</option>
+          <option value="current">Transfer current textures</option>
+          {generated(props.versions, v) && <option value="generator">Bake original generator detail</option>}
+        </select>
+        <small className="muted">Transferring current textures keeps later colour edits. Original generator detail restores the generated appearance.</small>
+      </label>
+    ),
     has("remesh") && (
       <label key="topology">
         Topology
@@ -3420,6 +3487,7 @@ const STEP_HELP: Record<string, StepHelp> = {
     params: [
       ["texture_size", "1024, 2048 or 4096 (4096 bakes without supersampling)"],
       ["normal_map", "true: also bake surface detail as a normal map"],
+      ["source", "auto: keep later texture edits; current: transfer current materials; generator: restore original generator detail"],
       ["detaper", "true: a flat prop's perspective taper undone after the texture (straighten it in clean first)"],
     ],
     example: { texture_size: 2048 },
@@ -5995,8 +6063,8 @@ function Setup(props: {
     const big = gpu?.too_big?.find((t) => t.group === g);
     if (big && !complete) return key("off", `Needs a bigger card · about ${big.need_gb} GB of video memory, this one allows ${gpu?.budget_gb} GB`);
     if (job?.status === "queued") return key("busy", "Queued · starts after the install before it");
-    if (job?.status === "running") return key("busy", `Installing · ${job.text ?? "starting"}`);
-    if (complete && !envNote) return key("ok", `Installed · ${gb0(here)}`, undefined, "Every file is there at its size; Check and repair also checks their fingerprints.");
+    if (job?.status === "running") return key("busy", job.text || "Starting…");
+    if (complete && !envNote) return key("ok", `Ready to use · ${gb0(here)}`, undefined, "All required model files are present at their expected sizes and the Python environment is ready.");
     if (job?.status === "failed" && job.error?.code !== "gated") return key("bad", "Install failed · try again", ["Try again", false], job.error?.message);
     if (gate || job?.error?.code === "gated") return key("off", "Needs a Hugging Face login first", ["Install", false]);
     if (complete) return key("bad", `Needs repair · ${envNote}`, ["Repair", false]);
@@ -6037,7 +6105,10 @@ function Setup(props: {
         </a>
       </div>
       <h2>What this app can do</h2>
-      <p className="muted">Each feature needs some files on this computer. Install the ones you want to use.</p>
+      <p className="muted">
+        Features marked Ready to use need no further setup. Install any others you want to use. Verify installation is optional: it checks the
+        installation and downloads model files only if they are missing or damaged.
+      </p>
       <div className="cards caps">
         {feats.map(({ g, title, what, st }) => {
           const gate = models.find((m) => m.groups.includes(g) && GATED.some(([p]) => m.name.startsWith(p)));
@@ -6062,8 +6133,8 @@ function Setup(props: {
               )}
               {st.job?.status === "queued" && <button onClick={() => props.guard(api.cancel(st.job!.job_id))}>Cancel</button>}
               {st.ok && (
-                <button className="small" onClick={() => install(g, true)}>
-                  Check and repair
+                <button className="small" title="Optional: check the installation and replace missing or damaged model files." onClick={() => install(g, true)}>
+                  Verify installation
                 </button>
               )}
               {gate && !gate.installed && (

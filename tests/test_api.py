@@ -352,6 +352,8 @@ def test_install_runs_download_models(client, tmp_path, monkeypatch):
     monkeypatch.setenv("EFFIGY_MODELS", str(tmp_path / "models"))
     monkeypatch.setattr(jobs, "_python", lambda step: sys.executable)  # stands in for .venv-ml
     monkeypatch.setattr(install, "venv_state", lambda venv: "ok")  # no uv sync here
+    # This fake downloader writes a few bytes, independent of the host drive's real free space.
+    monkeypatch.setattr(install.models, "missing_bytes", lambda group: 0)
 
     r = client.post("/api/models/install", json={"group": "fast"})
     assert r.status_code == 202, r.text
