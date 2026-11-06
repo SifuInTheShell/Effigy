@@ -61,6 +61,28 @@ def _render(glb: Path, dst: Path) -> bool:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _has_mesh(path: Path) -> bool:
+    """Motion GLBs contain bones/animation only. Inspect JSON without loading texture buffers."""
+    try:
+        with path.open("rb") as source:
+            header = source.read(20)
+            if header[:4] != b"glTF" or header[16:20] != b"JSON":
+                return False
+            doc = json.loads(source.read(int.from_bytes(header[12:16], "little")))
+        meshes = doc.get("meshes", [])
+        return any(
+            "mesh" in node
+            and 0 <= node["mesh"] < len(meshes)
+            and any(
+                "POSITION" in p.get("attributes", {})
+                for p in meshes[node["mesh"]].get("primitives", [])
+            )
+            for node in doc.get("nodes", [])
+        )
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+
 def _make(d: Path, outputs: dict, dst: Path, nearest: bool = False) -> bool:
     files = {k: v for k, v in outputs.items() if isinstance(v, str) and (d / v).is_file()}
     own = next(
@@ -69,7 +91,7 @@ def _make(d: Path, outputs: dict, dst: Path, nearest: bool = False) -> bool:
     if own:
         _fit([d / own], dst, nearest=nearest)
         return True
-    glb = next((v for v in files.values() if v.lower().endswith(".glb")), None)
+    glb = next((v for v in files.values() if v.lower().endswith(".glb") and _has_mesh(d / v)), None)
     if glb and _render(d / glb, dst):
         return True
     cands = [d / files[k] for k in sorted(files) if k.startswith("cand_")]
@@ -99,16 +121,29 @@ def version_thumb(asset_id: str, version: str) -> Path | None:
 
 def _glbs(asset_id: str, meta: dict) -> list[Path]:
     d = library.root() / asset_id / meta["version"]
-    return [d / v for v in meta.get("outputs", {}).values() if str(v).lower().endswith(".glb")]
+    return [
+        d / v
+        for v in meta.get("outputs", {}).values()
+        if str(v).lower().endswith(".glb") and _has_mesh(d / v)
+    ]
 
 
 def asset_version(asset_id: str) -> str | None:
     """The version an asset's card shows: the textured model first (the version worth picking up again),
     then any model, then the newest with any thumbnail."""
     newest = library.versions(asset_id)[::-1]
-    models = [m for m in newest if m.get("step") != "export" and _glbs(asset_id, m)]
+    kind = json.loads((library.asset_dir(asset_id) / "asset.json").read_text(encoding="utf-8")).get(
+        "kind"
+    )
+    models = [
+        m for m in newest if kind != "texture" and m.get("step") != "export" and _glbs(asset_id, m)
+    ]
     looks = [m for m in models if any(textured(g) for g in _glbs(asset_id, m))]
+    seen = set()
     for m in looks + models + newest:
+        if m["version"] in seen:
+            continue
+        seen.add(m["version"])
         if version_thumb(asset_id, m["version"]):
             return m["version"]
     return None

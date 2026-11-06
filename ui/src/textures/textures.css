@@ -1,0 +1,445 @@
+.texture-workspace {
+  display: block;
+  padding: 1.3rem 1.8rem;
+  --texture-preview-height: clamp(190px, calc(100dvh - 480px), 440px);
+}
+.texture-workspace .toolbar {
+  position: static;
+  inset: auto;
+  transform: none;
+  pointer-events: auto;
+  display: flex;
+  gap: 0.6rem;
+}
+.texture-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-bottom: 0.8rem;
+  flex-wrap: wrap;
+}
+.texture-head h1 {
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+  margin: 0.25rem 0;
+}
+.texture-head h1 span {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted, #a1a9b6);
+}
+.texture-head label {
+  font-size: 0.8rem;
+}
+.texture-back {
+  gap: 0.65rem;
+  padding-inline: 1.1rem;
+  white-space: nowrap;
+}
+.texture-back span {
+  font-size: 1.25rem;
+}
+.texture-workspace .toolbar .primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+  min-height: 44px;
+}
+.texture-workspace .toolbar .primary:hover:not(:disabled) {
+  background: #f6c785;
+}
+.texture-view-toolbar .modes {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.texture-view-toolbar .modes button {
+  white-space: nowrap;
+  min-height: 38px;
+  padding-inline: 0.75rem;
+}
+.texture-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  align-items: start;
+  gap: 1.4rem;
+}
+.texture-stage {
+  min-width: 0;
+  position: sticky;
+  top: 0;
+  border: 1px solid var(--line, #343b47);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--panel, #171d27);
+}
+.texture-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+.texture-panel h2 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+.texture-panel h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.texture-panel .stack {
+  gap: 0.75rem;
+}
+.texture-view-toolbar {
+  padding: 0.7rem;
+  border-bottom: 1px solid var(--line, #343b47);
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.texture-view-toolbar label {
+  font-size: 0.8rem;
+}
+.texture-map-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+.texture-map-list button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 0.65rem 0.7rem;
+  text-align: left;
+}
+.texture-map-list small {
+  opacity: 0.65;
+  font-size: 0.72rem;
+  margin-top: 0.2rem;
+  font-variant-numeric: tabular-nums;
+}
+.texture-tabs {
+  min-height: 56px;
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 0.35rem;
+  margin-bottom: 1.1rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.texture-tabs button {
+  flex: 1 0 auto;
+  white-space: nowrap;
+  min-height: 44px;
+  padding: 0.6rem 1.2rem;
+  font-size: 0.9rem;
+  border-color: transparent;
+  background: transparent;
+}
+.texture-tabs button[aria-selected="true"] {
+  color: var(--accent);
+  background: var(--raised);
+  border-color: var(--accent);
+  box-shadow: inset 0 -2px var(--accent);
+}
+.texture-workspace button[aria-pressed="true"],
+.texture-new button[aria-pressed="true"] {
+  border-color: var(--accent, #d2a475);
+  background: rgba(192, 148, 96, 0.16);
+}
+.texture-model-canvases {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: var(--texture-preview-height);
+}
+.texture-model-canvases.comparing {
+  grid-template-columns: 1fr 1fr;
+}
+.texture-model-canvases figure {
+  margin: 0;
+  position: relative;
+  min-width: 0;
+}
+.texture-model-canvases canvas {
+  width: 100%;
+  height: var(--texture-preview-height);
+  display: block;
+}
+.texture-model-canvases figcaption {
+  position: absolute;
+  top: 0.7rem;
+  left: 0.8rem;
+  pointer-events: none;
+  background: #141922c9;
+  padding: 0.25rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+}
+.texture-surface > canvas {
+  display: block;
+  width: 100%;
+  height: var(--texture-preview-height);
+  background: radial-gradient(ellipse at center, #323c48, #151b24);
+}
+.texture-surface .toolbar {
+  padding: 0.8rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.texture-surface .toolbar label {
+  font-size: 0.8rem;
+}
+.texture-surface input[type="number"] {
+  width: 60px;
+}
+.texture-surface input[type="range"] {
+  width: 80px;
+}
+.texture-images {
+  min-height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 1.5rem;
+  overflow: auto;
+  background-color: #252b35;
+  background-image:
+    linear-gradient(45deg, #303744 25%, transparent 25%),
+    linear-gradient(-45deg, #303744 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #303744 75%),
+    linear-gradient(-45deg, transparent 75%, #303744 75%);
+  background-size: 20px 20px;
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
+}
+.texture-images figure {
+  min-width: 0;
+  margin: 0;
+  flex: 1;
+  text-align: center;
+}
+.texture-images img {
+  display: block;
+  width: 100%;
+  height: var(--texture-preview-height);
+  object-fit: contain;
+}
+.texture-images figcaption {
+  padding-top: 0.6rem;
+  font-size: 0.8rem;
+}
+.texture-map-image {
+  position: relative;
+}
+.texture-uv-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: var(--texture-preview-height);
+  object-fit: contain;
+  pointer-events: none;
+}
+.texture-map-figure figcaption label {
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+.texture-tiled {
+  width: min(100%, 620px);
+  aspect-ratio: 1;
+  background-size: 33.333333% 33.333333%;
+  background-repeat: repeat;
+}
+.texture-foot {
+  padding: 0.65rem 0.9rem;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  color: var(--muted, #a1a9b6);
+  border-top: 1px solid var(--line, #343b47);
+}
+.texture-range > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.texture-range output {
+  color: var(--muted, #a1a9b6);
+  font-variant-numeric: tabular-nums;
+}
+.texture-export {
+  border-top: 1px solid var(--line, #343b47);
+  padding-top: 1rem;
+}
+.texture-export a {
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+.texture-new {
+  max-width: 650px;
+}
+.texture-import-maps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+}
+.texture-import-maps input {
+  max-width: 100%;
+  font-size: 0.8rem;
+}
+.texture-painter {
+  padding: 0.7rem;
+  min-width: 0;
+}
+.texture-painter .toolbar {
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.texture-painter .toolbar label {
+  font-size: 0.8rem;
+}
+.texture-paint-canvas {
+  display: block;
+  max-width: none;
+  max-height: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  touch-action: none;
+  cursor: crosshair;
+  background: repeating-conic-gradient(#343a45 0% 25%, #242a34 0% 50%) 0 0 /
+    16px 16px;
+  box-shadow: 0 0 0 1px #687080;
+}
+.texture-paint-viewport {
+  overflow: auto;
+  height: clamp(180px, calc(100dvh - 560px), 460px);
+  background: #151922;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+.texture-paint-stage {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+.texture-workspace .texture-brush-settings {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border: 0;
+  padding: 0.5rem 0;
+  margin: 0;
+}
+.texture-brush-settings label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.2rem;
+}
+.texture-brush-settings input,
+.texture-brush-settings select {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+}
+.texture-brush-settings input[type="color"] {
+  height: 30px;
+  padding: 2px;
+}
+.texture-brush-settings select {
+  padding-block: 4px;
+}
+.texture-brush-settings output {
+  font-variant-numeric: tabular-nums;
+  min-width: 3.2em;
+}
+.texture-paint-navigation {
+  margin-bottom: 0.5rem;
+}
+.texture-paint-navigation output {
+  min-width: 3.5em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.texture-paint-tools button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.texture-painter .texture-paint-help {
+  font-size: 0.75rem;
+  margin: 0.5rem 0 0;
+  max-width: none;
+}
+.texture-stage:has(.texture-painter.is-expanded) {
+  z-index: 60;
+}
+.texture-painter.is-expanded {
+  position: fixed;
+  z-index: 50;
+  inset: 70px 16px 70px;
+  overflow: auto;
+  background: var(--panel, #171d27);
+  border: 1px solid var(--line, #343b47);
+  border-radius: 10px;
+  box-shadow: 0 12px 48px #0009;
+}
+@media (max-width: 1000px) {
+  .texture-workspace .texture-brush-settings {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.texture-playback {
+  padding: 0.8rem;
+}
+@media (max-width: 1000px) {
+  .texture-layout {
+    grid-template-columns: minmax(0, 1fr) 290px;
+  }
+  .texture-workspace {
+    padding: 1rem;
+  }
+  .texture-head {
+    align-items: flex-start;
+  }
+}
+@media (max-width: 760px) {
+  .texture-head {
+    flex-direction: column;
+  }
+  .texture-layout {
+    grid-template-columns: 1fr;
+  }
+  .texture-stage {
+    position: static;
+  }
+  .texture-surface > canvas,
+  .texture-model-canvases canvas {
+    height: clamp(200px, calc(100dvh - 420px), 350px);
+  }
+  .texture-model-canvases {
+    min-height: 200px;
+  }
+  .texture-images {
+    min-height: 300px;
+  }
+  .texture-head h1 {
+    font-size: 1.3rem;
+  }
+}

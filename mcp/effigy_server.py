@@ -62,11 +62,11 @@ STOP = ToolAnnotations(  # cancelling throws away the work done so far
 )
 
 INSTRUCTIONS = (
-    "Effigy: a local 3D asset pipeline. An asset holds versions (001_upload, 002_clean...), each made "
-    "by a step from a parent version; nothing is overwritten. Usual order: import_file, or run_step brief, "
-    "concepts, prep; then trellis2, clean, remesh, uv, bake, rig_fit, rig_skin, anim, validate, export. "
-    "Steps are jobs, one GPU job at a time: a result with status running has a job_id, poll job_status. "
-    "look shows a version; describe_steps and the resource effigy://guide have the params and the how-to."
+    "Effigy: local 3D, 2D and texture/material assets. Versions are append-only. Find assets with list_assets "
+    "(kind=texture for materials). inspect_textures and texture_map inspect maps; edit_texture creates, "
+    "generates, paints via replacement, upscales, enhances or applies materials. import_texture_set imports "
+    "PBR/engine maps; extract_material saves a model material; export profile textures packages it. "
+    "Jobs return job_id: poll job_status. describe_steps and effigy://guide document every workflow."
 )
 server = MCPServer("effigy", instructions=INSTRUCTIONS)
 
@@ -109,6 +109,7 @@ def _file_url(asset_id: str, version: str, name: str) -> str:
 # --- what the UI calls a version (ui/src/workflow.ts `label`) ---------------------------------
 
 STEP_LABELS = {
+    "textures": "Texture edit",
     "brief": "Description",
     "concepts": "Concept images",
     "prep": "Cut-out reference",
@@ -142,12 +143,29 @@ PROFILES = {
     "print": "3D print",
     "godot-2d": "Godot 2D",  # M53: a sprite sheet (pixelize, sprites)
     "unreal-2d": "Unreal Paper2D",
+    "textures": "Texture set",
 }
 
 
 def label(m: dict) -> str:
     step, out = m["step"], m.get("outputs", {})
     par, met = m.get("params") or {}, m.get("metrics") or {}
+    if step == "textures":
+        return {
+            "upscale": "Upscaled texture",
+            "resize": "Resized texture",
+            "generate": "Generated texture",
+            "retexture": "New texture set",
+            "replace": "Replaced map",
+            "apply": "Applied material",
+            "import": "Imported material",
+            "enhance": "Enhanced texture",
+            "surface": "Estimated surface maps",
+            "extract": "Saved material",
+            "adjust": "Adjusted texture",
+            "create": "New texture",
+            "seamless": "Repeating texture",
+        }.get(par.get("op"), "Texture edit")
     if step == "upload":
         if any(k != "model" and f.endswith(".glb") for k, f in out.items()):
             return "Imported model"
@@ -182,19 +200,23 @@ def label(m: dict) -> str:
 
 
 @server.tool(annotations=READ)
-def list_assets(query: str = "", limit: int = 30, offset: int = 0) -> dict:
+def list_assets(query: str = "", limit: int = 30, offset: int = 0, kind: str = "") -> dict:
     """Use this first to find an asset id: lists the library, newest first, optionally only assets whose
     name or id contains `query`. Returns {assets: [{id, name, created, versions, newest: {version, label}}],
-    total}; page with limit (1-100) and offset."""
+    total}; page with limit (1-100) and offset. kind: texture (standalone materials), 2d, 3d, or empty for all."""
     q = query.lower()
     found = [a for a in api("GET", "/api/assets") if q in a["id"].lower() or q in a["name"].lower()]
+    if kind not in ("", "texture", "2d", "3d"):
+        raise ToolError("bad_params: kind must be texture, 2d, 3d or empty")
+    found = [a for a in found if not kind or a.get("kind", "3d") == kind]
     found.sort(key=lambda a: a.get("updated", ""), reverse=True)
     page = []
     for a in found[max(0, offset) :][: max(1, min(limit, 100))]:
         vs = api("GET", f"/api/assets/{_q(a['id'])}")["versions"]
         newest = {"version": vs[-1]["version"], "label": label(vs[-1])} if vs else None
         page.append(
-            {k: a[k] for k in ("id", "name", "created")} | {"versions": len(vs), "newest": newest}
+            {k: a[k] for k in ("id", "name", "created")}
+            | {"kind": a.get("kind", "3d"), "versions": len(vs), "newest": newest}
         )
     return {"assets": page, "total": len(found)}
 
@@ -220,7 +242,12 @@ def get_asset(asset_id: str) -> dict:
         }
         for m in a["versions"]
     ]
-    return {"id": asset_id, "name": a["asset"].get("name"), "versions": versions}
+    return {
+        "id": asset_id,
+        "name": a["asset"].get("name"),
+        "kind": a["asset"].get("kind", "3d"),
+        "versions": versions,
+    }
 
 
 @server.tool(annotations=READ)
@@ -412,7 +439,8 @@ def create_asset(name: str, kind: str = "") -> dict:
     """Use this to start an asset from a description: then run_step(asset_id, null, "brief", {prompt,
     category}). Returns {asset_id}: the name in lower case, other characters as _, cut at 36 characters (and
     _2, _3 when taken), so use the id it returns. kind="2d" for a picture, pixel-art or sprite asset (no 3D
-    model); leave it empty for a 3D asset. To start from a file use import_file."""
+    model); kind="texture" for a standalone material, then edit_texture op=create or generate.
+    Leave it empty for a 3D asset. To start from a file use import_file or import_texture_set."""
     body = {"name": name} | ({"kind": kind} if kind else {})
     return {"asset_id": api("POST", "/api/assets", body)["id"]}
 
@@ -432,7 +460,7 @@ MODELS = {
     ".stl",
     ".zip",
 }
-PICTURES = {".png", ".jpg", ".jpeg", ".webp"}
+PICTURES = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".tga"}
 VIDEOS = {".mp4", ".mov", ".webm"}
 
 
@@ -509,6 +537,34 @@ def import_file(
             "status": "uploaded",
             "note": f"a new version {upload} of {asset_id}, nothing ran",
         }
+    if kind == "texture":
+        if ext in PICTURES:
+            return head | _start(
+                asset_id,
+                upload,
+                "textures",
+                {"op": "import", "uploads": {"basecolor": upload}},
+                wait_s,
+                ctx,
+            )
+        if ext == ".glb":
+            return head | _start(
+                asset_id,
+                upload,
+                "textures",
+                {
+                    "op": "extract",
+                    "source_asset": asset_id,
+                    "source_version": upload,
+                    "source_material": 0,
+                },
+                wait_s,
+                ctx,
+            )
+        return head | {
+            "status": "uploaded",
+            "note": "For a standalone material, use exported PBR images or an embedded-texture GLB; native engine containers need export first.",
+        }
     if ext in VIDEOS:
         return head | {
             "status": "uploaded",
@@ -522,6 +578,145 @@ def import_file(
     if source and source.get("kind") == "2d" and ext in PICTURES:
         head["next"] = 'on the prep: canon {"look": "render"}, then prep on that, then trellis2'
     return head | _start(asset_id, upload, step, params, wait_s, ctx)
+
+
+TEXTURE_ROLES = {"basecolor", "roughness", "metallic", "normal", "ao", "height", "emissive"}
+TEXTURE_OPS = {
+    "create",
+    "generate",
+    "import",
+    "replace",
+    "adjust",
+    "settings",
+    "resize",
+    "upscale",
+    "enhance",
+    "edit",
+    "project",
+    "retexture",
+    "apply",
+    "extract",
+    "surface",
+    "seamless",
+}
+
+
+@server.tool(annotations=READ)
+def inspect_textures(asset_id: str, version: str) -> dict:
+    """Use this before editing textures: lists material slots, maps, dimensions, colour spaces, settings,
+    UV/AI capabilities and restrictions for a model or standalone material. Choose a material index from this result."""
+    return api("GET", f"/api/assets/{_q(asset_id)}/versions/{_q(version)}/textures")
+
+
+@server.tool(annotations=READ, structured_output=False)
+def texture_map(
+    asset_id: str, version: str, role: str = "basecolor", material: int = 0, size: int = 1024
+) -> list:
+    """Use this to see a material's basecolor, roughness, metallic, normal, ao, height or emissive map.
+    Returns a PNG preview up to size 256-2048. Original resolution/bit depth is retained in exports, not this preview."""
+    if role not in TEXTURE_ROLES:
+        raise ToolError("bad_params: choose an existing texture map role")
+    from PIL import Image as PILImage
+
+    data = api(
+        "GET",
+        f"/api/assets/{_q(asset_id)}/versions/{_q(version)}/textures/image?material={material}&role={_q(role)}",
+        raw=True,
+    )
+    with PILImage.open(io.BytesIO(data)) as image:
+        image = image.convert("RGBA")
+        image.thumbnail((max(256, min(size, 2048)),) * 2)
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+    return [Image(data=output.getvalue(), format="png")]
+
+
+@server.tool(annotations=ADD)
+def edit_texture(
+    asset_id: str,
+    parent: str | None,
+    op: str,
+    params: dict | None = None,
+    wait_s: float = 40,
+    ctx: Context = None,
+) -> dict:
+    """Use this for every texture workflow; saves a new version and keeps model geometry, rigs and animation.
+    op: create (color,size,tileable), generate (prompt,size,tileable; standalone colour), upscale (role,size),
+    resize (role,size; normals normalized), enhance (prompt,strength), edit (prompt,region upload,mask_source),
+    project (reference face), retexture (image=prep version,size; model colour/roughness/metallic),
+    adjust (role,brightness,contrast,saturation,hue), settings (roughness,metallic,alpha_mode),
+    replace/import (uploads={role:upload version},normal_convention), surface (estimated missing maps),
+    seamless (edge blend), apply (source_asset,source_version,source_material,mapping=atlas|repeat,repeat,rotation),
+    extract (source_asset,source_version,source_material). material selects the destination slot; role defaults
+    basecolor; size is width 64-4096 with a 16MP limit. Paint externally, import_file(asset_id=...), then replace.
+    AI upscales colour/emissive only. Standalone surface maps are estimates, not full-PBR synthesis.
+    For warm repeated generation use run_step concepts (op=image|tile), then textures (op=settings) on its result.
+    describe_steps("textures") and effigy://guide give detailed params. Poll job_status if still running."""
+    if op not in TEXTURE_OPS:
+        raise ToolError("bad_params: unknown texture operation; see describe_steps('textures')")
+    return _start(asset_id, parent, "textures", {**(params or {}), "op": op}, wait_s, ctx)
+
+
+@server.tool(annotations=ADD)
+def extract_material(asset_id: str, version: str, material: int = 0, name: str = "") -> dict:
+    """Use this to save one model material into a new standalone Texture / Material asset. Copies its maps,
+    settings, credits and restrictions; later source edits do not change it. Returns asset and version metadata."""
+    return api(
+        "POST",
+        f"/api/assets/{_q(asset_id)}/versions/{_q(version)}/textures/extract",
+        {"material": material, "name": name},
+    )
+
+
+@server.tool(annotations=ADD)
+def import_texture_set(
+    name: str,
+    paths: dict[str, str] | None = None,
+    packed_path: str = "",
+    packing: str = "orm",
+    normal_convention: str = "OpenGL",
+    tileable: bool = False,
+    wait_s: float = 40,
+    ctx: Context = None,
+) -> dict:
+    """Use this to import base images or exported engine PBR maps into a new standalone material.
+    paths maps basecolor/roughness/metallic/normal/ao/height/emissive to absolute PNG/JPEG/WebP/TIFF/TGA paths.
+    packed_path optionally imports glTF/Unreal ORM (R AO,G roughness,B metallic), Unity HDRP unity_mask
+    (R metallic,G AO,A smoothness), or unity_metallic (R metallic,A smoothness); smoothness is inverted.
+    Separate maps override packed channels. normal_convention: OpenGL or DirectX. Each image <=16MP.
+    Native .mat/.uasset files need exported textures; for embedded-texture GLB use import_file(kind="texture").
+    Returns asset_id and job result. Poll job_status if running. All source files are copied, never modified."""
+    paths = paths or {}
+    if set(paths) - TEXTURE_ROLES or not (paths or packed_path):
+        raise ToolError("bad_params: supply known map roles or packed_path")
+    if packing not in ("orm", "unity_mask", "unity_metallic") or normal_convention not in (
+        "OpenGL",
+        "DirectX",
+    ):
+        raise ToolError("bad_params: choose a supported packing and normal convention")
+    for value in [*paths.values(), *([packed_path] if packed_path else [])]:
+        path = Path(value)
+        if not path.is_absolute() or not path.is_file() or path.suffix.lower() not in PICTURES:
+            raise ToolError(
+                f"bad_path: {value!r} must be an absolute path to a supported texture image"
+            )
+        if path.stat().st_size > 2**30:
+            raise ToolError("too_large: each upload is limited to 1 GB")
+    asset_id = create_asset(name, kind="texture")["asset_id"]
+    uploads = {
+        role: import_file(path=path, asset_id=asset_id)["upload"] for role, path in paths.items()
+    }
+    params = {
+        "op": "import",
+        "uploads": uploads,
+        "tileable": tileable,
+        "normal_convention": normal_convention,
+    }
+    parent = next(reversed(uploads.values())) if uploads else None
+    if packed_path:
+        parent = import_file(path=packed_path, asset_id=asset_id)["upload"]
+        params.update(packed_upload=parent, packing=packing)
+    return {"asset_id": asset_id} | _start(asset_id, parent, "textures", params, wait_s, ctx)
 
 
 @server.tool(annotations=ADD)
@@ -549,7 +744,8 @@ def export(
     ctx: Context = None,
 ) -> dict:
     """Use this to export a version for godot|unreal|unity|web|print|obj, or a sprite sheet (pixelize,
-    sprites) for godot-2d|unreal-2d (files + CREDITS.txt + LICENSES.json). options: lods, collision. to_folder: an existing absolute directory; the files are
+    sprites) for godot-2d|unreal-2d, or profile textures for a standalone/model material ZIP and individual maps.
+    options: lods, collision; textures takes material (slot index). Includes CREDITS.txt + LICENSES.json. to_folder: an existing absolute directory; the files are
     also copied into a new <asset>_<profile> folder in it (an existing one is refused). Returns {status,
     version, files}, or running + job_id."""
     target = None

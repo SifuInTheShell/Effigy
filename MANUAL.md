@@ -9,6 +9,10 @@ This manual explains every part of the app. Installing it is in **[SETUP.md](SET
 **[docs/howto/](docs/howto/)** has guided walk-throughs, such as [animating a pixel-art
 character](docs/howto/animate-a-pixel-art-character.md).
 
+For model texture edits and standalone materials, see [Working with textures](docs/howto/work-with-textures.md):
+open a model's **Textures** task, or choose **New asset → Texture / Material**. Both support versioned map edits,
+painting, AI upscaling, generation, reusable material sets and texture export.
+
 ## Contents
 
 1. [Starting the app](#1-starting-the-app)
@@ -118,6 +122,8 @@ versions it has and when it last changed. Chips on a card:
 ### Finding assets
 
 - **Search by name, id or tag**.
+- Asset type: **All assets**, **Models**, **2D art**, or **Textures / Materials**. **New material** and
+  **Import material** open the standalone texture workflow directly.
 - Sort: **Recently changed**, **Changed longest ago**, **Name A–Z**.
 - Show: **All**, **Mine**, **Archived** (**Bench** and **Golden** are the app's own test assets).
 - **Tag**: one of your tags.
@@ -155,10 +161,28 @@ it needs.
 | **Generate** (the 3D model) | **Pixelize** (pixel art) |
 | **Prepare** (cleaned, simplified, textured) | **Layers** (parallax) |
 | **Character** (optional: skeleton, skin, animation) | **Tiles** (seamless) |
+| **Textures** (map editing and material reuse) | |
 | **Finish** (check and export) | **Edit** (the pixel editor) |
 | | **Finish** (check and export) |
 
 A model you imported starts at **Prepare**.
+
+### The texture workspace
+
+Open **Textures** on a model, or **New asset → Texture / Material** to work without a model. The workspace's
+top-level tabs choose **Edit maps**, **Upscale**, **Enhance**, **Create new**, or **Library**. Select the material
+and map on the right; **Model / Material**, **Map**, **Tiling**, and **Paint map** choose the preview.
+
+**Paint map** has round and square brushes, size, opacity, hardness, eraser, colour picker, undo/redo, zoom and
+pan. **Expand painter** gives it more space. Painting uses the original image resolution regardless of zoom.
+**Save painted map** creates a version; failed saves keep your edits. Normal maps and 16-bit height maps use
+external image replacement to preserve their data. The eraser removes opacity; use a transparent material alpha
+mode to see it on the model.
+
+Import separate maps, packed Unity or glTF/Unreal maps, or a named material from a GLB. Apply a pinned Library
+material to a model or extract one to reuse later. Export a texture package with maps, material metadata and
+credits. Native engine `.mat` and `.uasset` containers need exported maps or GLB files. The complete guide is
+[Working with textures](docs/howto/work-with-textures.md).
 
 ### The panel
 
@@ -812,7 +836,9 @@ Each feature needs some files on your computer. A card per feature says what it 
 The status and its button:
 
 - **Not installed** → **Install**. Installs wait their turn (**Queued**, with **Cancel**).
-- **Installed** → **Check and repair** checks every file's fingerprint.
+- **Ready to use**: installed files and the feature's environment are present. No further setup is needed.
+  **Verify installation** optionally reads local files and checks their fingerprints; it fetches only missing or
+  damaged files. Features that share model files update together after verification.
 - **Needs repair** (a file missing or damaged, or its Python environment out of date after an update) →
   **Repair**.
 - **Install failed** → **Try again**.
@@ -928,6 +954,7 @@ versions cannot be exported.
 |---|---|
 | 3D view | drag: orbit · scroll: zoom · right-drag: pan |
 | Painting a part (Texture detail) | drag on the model: paint (with **Erase** on: erase) · **Shift**+drag: the other one · drag beside it: orbit |
+| Texture map painter | **B/E/I/H** brush/eraser/picker/hand · wheel or **+/−** zoom · **0** fit · Space-drag or middle-drag pan · Alt-click pick colour · **[ / ]** size · **Ctrl+Z / Ctrl+Shift+Z** undo/redo · **Esc** restore expanded view |
 | Time bar (3D clips, 2D sheets, animation editor) | **Space** play/pause · **←** **→** a frame · **Home** **End** first/last frame |
 | Animation editor | **I** key the bone · **X** / **Delete** delete keys · **Ctrl+Z** / **Ctrl+Shift+Z** undo/redo · **Esc** cancel a drag · **Ctrl+wheel** zoom the timeline |
 | Skeleton editor | **G** move · **R** rotate · **Shift+click** add to the selection · **Esc** cancel a drag · **Ctrl+Z** / **Ctrl+Shift+Z** |

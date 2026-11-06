@@ -1,9 +1,58 @@
 ---
 name: effigy
-description: Make game-ready 3D assets with Effigy from a description, a picture or a file - generate, clean, rig, animate, check, export - as versions in a local library, one GPU job at a time.
+description: Make game-ready 3D, 2D and texture/material assets with Effigy - generate, edit, upscale, reuse, rig, animate and export - as versions in a local library, one GPU job at a time.
 ---
 
 # Effigy for agents
+
+## Textures and materials
+
+Textures are their own assets (`kind="texture"`), and can also be edited on a model after rigging/animation.
+All operations write a new version. `list_assets(kind="texture")` finds reusable materials; `get_asset`
+returns the asset kind and its version tree. `inspect_textures(asset_id, version)` lists material slots,
+available map roles, sizes, settings and AI capabilities. `texture_map` shows a selected map as a bounded image.
+Height previews are for inspection; export keeps the original bit depth.
+
+- Start blank: `create_asset("Painted timber", kind="texture")`, then
+  `edit_texture(asset, None, "create", {"color": "#72614b", "size": 512, "tileable": True})`.
+- Generate colour: `edit_texture(asset, parent, "generate", {"prompt": "woven linen, even lighting",
+  "size": 1024, "tileable": True})`. Repeated generations can reuse the image worker with
+  `run_step(asset, parent, "concepts", {"op": "tile", "size": 1024, "prompt": "..."})`, followed by
+  `edit_texture(asset, generated_version, "settings", {"tileable": True})`. Wait for each job before using its result.
+  Standalone generation produces colour, not a learned full-PBR set.
+- Import authored maps: `import_texture_set("Cloth", paths={"basecolor": "F:/textures/cloth.png",
+  "normal": "F:/textures/cloth-normal.tga"}, normal_convention="OpenGL", tileable=True)`.
+  `packed_path` plus `packing="orm"` splits glTF/Unreal R AO/G roughness/B metallic;
+  `unity_mask` splits HDRP R metallic/G AO/A smoothness; `unity_metallic` splits R metallic/A smoothness.
+  Roughness becomes 1 minus smoothness; separate maps override packed channels. TIFF height can retain 16 bits.
+  Native `.mat`/`.uasset` containers need exported image files. `import_file(path="...glb", kind="texture")`
+  extracts the first material from a GLB with embedded maps. Other slots: inspect the uploaded version, then
+  `edit_texture(..., "extract", {"source_asset": asset, "source_version": upload, "source_material": index})`.
+- Colour painting or replacement: edit an image externally, `import_file(path=..., asset_id=asset)` to upload
+  without running prep, then `edit_texture(asset, original_parent, "replace", {"uploads": {"basecolor": upload}})`.
+  This preserves other maps. DirectX normal import flips green into OpenGL +Y.
+- Upscale old colour/emissive maps: `edit_texture(asset, parent, "upscale", {"role": "basecolor", "size": 4096})`.
+  Data maps stay unchanged. Model atlases isolate UV charts; standalone tiles use wrapped borders.
+  `resize` supports data maps and normal-vector resampling. Each output is limited to 16 megapixels.
+- Enhance: `edit_texture(asset, parent, "enhance", {"prompt": "fine woven threads", "strength": .4})`.
+  Inspect identity and seams afterward. Model region edits use op `edit` with `region` (uploaded UV mask),
+  `mask_source` (the model version the mask was painted on), `prompt` and `strength`; stale geometry/UV masks fail.
+  `project` copies a compatible reference face. `retexture` uses `image` (a same-asset prep version with
+  image_rgb.png) to generate model colour, roughness and metallic, keeping existing normal/AO maps.
+- `adjust` changes a selected map (brightness/contrast; colour saturation/hue); `settings` changes roughness,
+  metallic, alpha_mode or tileability. `seamless` blends standalone borders. `surface` estimates missing height,
+  normals and scalar maps from brightness; these are artistic estimates, not recovered physical properties.
+- `extract_material(asset, model_version, material=0, name="Reusable cloth")` saves a standalone asset.
+  Apply with `edit_texture(model, parent, "apply", {"source_asset": material_asset, "source_version": pinned_version,
+  "material": 0, "mapping": "repeat", "repeat": 3, "rotation": 0})`. Repeating requires a tileable source;
+  `mapping="atlas"` requires matching atlas layout. Optional `roles` chooses maps. Copies retain credits and restrictions.
+- `export(asset, version, "textures", options={"material": 0})` produces a ZIP, individual maps, metadata and
+  credits; `to_folder` uses the same existing-directory copy workflow as model export.
+
+`describe_steps("textures")` documents every operation/parameter. Generative model editing requires one standard
+PBR mesh/material with UV0 and no texture transforms. Always inspect capabilities and poll `job_status` when a
+tool returns `running`. For a later bake, `source="current"` transfers edited textures; `source="generator"`
+explicitly restores older generator detail. Automatic selection keeps later texture edits.
 
 An **asset** is a folder of **versions** (`001_upload`, `002_clean`, ...). Every step reads a parent
 version and writes a new one; nothing is overwritten and **you cannot delete**: the library is append-only
@@ -14,7 +63,7 @@ several (try two remeshes, keep both). `get_asset` shows the tree with labels as
 
 - **One GPU job at a time.** Jobs queue; do not start a second heavy step while one runs. A tool waits at
   most `wait_s` (default 40, max 45) and then returns `{"status": "running", "job_id"}`: call
-  `job_status(job_id, wait_s=40)` until `done`. Generating takes minutes, a first run loads models (~35 s).
+  `job_status(job_id, wait_s=40)` until `done`. Generating takes minutes; first model loading can take several minutes on an external drive.
 - Running the identical request (asset, step, parent, params) while it runs returns that job: retrying is safe.
 - Cancelling your call cancels the job it started. `cancel_job(job_id)` stops any job.
 - Errors read `code: message, how to fix`; fix the cause and run the step again (a new version).

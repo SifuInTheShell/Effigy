@@ -26,7 +26,7 @@ def test_canon_writes_the_image_and_its_gate(tmp_path, monkeypatch):
             seen.update(n=len(image), steps=num_inference_steps, extra=extra, prompt=prompt)
             return type("R", (), {"images": [image[0]]})
 
-    monkeypatch.setattr(canon, "_load", lambda: Pipe())
+    monkeypatch.setattr(canon, "_load", lambda off=False: Pipe())
     monkeypatch.setattr(canon, "REFERENCE", src / "image.png")
     monkeypatch.setattr(canon._birefnet, "load", lambda: None)
     monkeypatch.setattr(canon._birefnet, "matte", lambda m, rgb: np.ones(rgb.shape[:2]))

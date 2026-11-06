@@ -13,7 +13,14 @@ contracts), §6 (never-do) as needed. Install steps are `SETUP.md`; what changed
 
 ---
 
-## 1. Where things stand (2026-11-05: 0.3.0 out; M64 to M68 still to validate on the laptop)
+## 1. Where things stand (2026-11-06: 0.4.0 texture workspace)
+
+- **0.4.0 (2026-11-06)**: dedicated model/standalone texture workflows, material Library/import/export,
+  the map painter, AI upscaling and the complete MCP surface. Research: `docs/research/17-texture-workspace.md`;
+  implementation and live GPU/Blender evidence: `docs/audit/texture-workspace.md`; user guide:
+  `docs/howto/work-with-textures.md`. Setup verification respects the external model directory and does not
+  re-download complete files. The first external-drive Z-Image load can still take several minutes.
+  Older M64–M68 visual checks below remain open where stated; they are not implied complete by this release.
 
 - **0.3.0 (2026-11-05)**: M64 to M68, the UI's texture tools, the bake fixes of PR #17 and the zip's first run without
   Git (PR #20). Clean's `cleanup` is opt-in: on by default it melted a generated character's face and dropped separate

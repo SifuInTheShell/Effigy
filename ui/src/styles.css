@@ -480,6 +480,27 @@ th {
 .modes button {
   min-height: 48px;
 }
+.library-categories {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.library-categories > button {
+  gap: 10px;
+  white-space: nowrap;
+}
+.library-categories > button[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--raised);
+}
+.library-material-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
 .choices {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

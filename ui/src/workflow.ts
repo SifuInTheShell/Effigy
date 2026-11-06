@@ -22,7 +22,7 @@ export function ancestors(versions: Meta[], m: Meta | null | undefined): Meta[] 
 export const source = (versions: Meta[], m: Meta | null) => ancestors(versions, m).find((a) => a.step !== "validate" && a.step !== "export") ?? null;
 
 /** M39: the step a version acts as: an import_model with clips as anim, with a skin as rig_skin; any other as itself. */
-export const actsAs = (m: Meta) => (m.step !== "import_model" ? m.step : m.outputs.rigged_anim ? "anim" : m.outputs.rigged ? "rig_skin" : "import_model");
+export const actsAs = (m: Meta) => (["import_model", "textures"].includes(m.step) ? m.outputs.rigged_anim ? "anim" : m.outputs.rigged ? "rig_skin" : m.step : m.step);
 
 // volume lineage (the generator's ovoxel.npz): only then can textures be baked; imported meshes have none
 export const generated = (versions: Meta[], m: Meta) => ancestors(versions, m).some((a) => "ovoxel" in a.outputs);
@@ -50,6 +50,7 @@ export const TASKS_3D: Task[] = [
   { id: "reference", label: "Reference", needs: "a picture or a description" },
   { id: "generate", label: "Generate", needs: "a cut-out reference" },
   { id: "prepare", label: "Prepare", needs: "a model to prepare" },
+  { id: "textures", label: "Textures", needs: "a model", optional: true },
   { id: "character", label: "Character", needs: "a prepared model", optional: true },
   { id: "finish", label: "Finish", needs: "a prepared model" },
 ];
@@ -74,10 +75,11 @@ export function taskOf(versions: Meta[], m: Meta, kind?: string): number {
     if (step === "concepts" && m.params?.op === "tile") return 3;
     return 0;
   }
-  if (step === "validate" || step === "export") return 4;
-  if (step === "mocap") return 3; // a motion from a video: its parent is the video's upload, not the model
-  if (step === "sprites" || step === "pixelize") return 3; // M52: the character's animations drawn for 2D
-  return Math.min(phaseOf(versions, m), 3); // Rig and Animate are one task, Character
+  if (step === "validate" || step === "export") return 5;
+  if (m.step === "textures" || m.step === "refine" || m.step === "project" || (m.step === "trellis2" && m.params.op === "texture")) return 3;
+  if (step === "mocap" || step === "sprites" || step === "pixelize") return 4;
+  const phase = phaseOf(versions, m);
+  return phase >= 3 ? 4 : phase;
 }
 
 export type PrepState = { state: "completed" | "active" | "interrupted" | "historical"; next?: Meta; remaining: string[] };
@@ -118,7 +120,7 @@ export function phaseOf(versions: Meta[], m: Meta): number {
 
 /** M42: the version a batch exports: the newest starred one that is at least prepared, else the newest such (raw generated meshes and exports left out). */
 export function exportPick(versions: Meta[]): Meta | undefined {
-  const ok = versions.filter((m) => m.step !== "export" && hasGlb(m) && phaseOf(versions, m) >= 2);
+  const ok = versions.filter((m) => m.step !== "export" && ((!!m.outputs.material && !hasGlb(m)) || (hasGlb(m) && phaseOf(versions, m) >= 2)));
   return ok.filter((m) => m.starred).at(-1) ?? ok.at(-1);
 }
 
@@ -142,6 +144,7 @@ const STEPS: Record<string, string> = {
   bake: "Textured model",
   project: "Face from image",
   refine: "Refined texture",
+  textures: "Texture edit",
   rig_fit: "Skeleton",
   rig_skin: "Skinned model",
   anim: "Animated model",
@@ -155,6 +158,7 @@ const STEPS: Record<string, string> = {
 };
 
 export function label(m: Meta): string {
+  if (m.step === "textures") return ({ upscale: "Upscaled texture", resize: "Resized texture", generate: "Generated texture", retexture: "New texture set", replace: "Replaced map", apply: "Applied material", import: "Imported material", enhance: "Enhanced texture", surface: "Estimated surface maps", extract: "Saved material", adjust: "Adjusted texture", create: "New texture", seamless: "Repeating texture" } as Record<string, string>)[String(m.params.op)] ?? "Texture edit";
   if (m.step === "upload") return hasGlb(m) ? "Imported model" : m.outputs.model ? "Original file" : "Uploaded picture";
   if (m.step === "import_model") return { anim: "Imported animation", rig_skin: "Imported rig" }[actsAs(m)] ?? "Imported model";
   if (m.step === "export") return `Export: ${PROFILE_NAMES[String(m.metrics?.profile)] ?? m.metrics?.profile ?? ""}`;
@@ -260,7 +264,7 @@ export const EXPORTS_2D: { id: string; name: string; what: string; next: string;
     next: "Enable Paper2D, import the .paper2dsprites, then select an animation's sprites and choose Create Flipbook.",
   },
 ];
-export const PROFILE_NAMES: Record<string, string> = Object.fromEntries([...EXPORTS, ...EXPORTS_2D].map((e) => [e.id, e.name]));
+export const PROFILE_NAMES: Record<string, string> = { ...Object.fromEntries([...EXPORTS, ...EXPORTS_2D].map((e) => [e.id, e.name])), textures: "Texture set" };
 
 // concepts' gate names (steps/_image.py) in words; hard gates reject, the others only rank
 export const GATES: Record<string, string> = {

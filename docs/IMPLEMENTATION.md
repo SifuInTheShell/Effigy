@@ -3720,6 +3720,26 @@ above are the contract; each milestone's "As built" note lands here.
     a brass buckle": the belt round the back too (`views`, `region_seen` recorded); (3) `strength` 0.5 on (1): the
     lock keeps more of its shape; (4) `seconds`, `peak_vram_gb` recorded. `docs/bench/m68.md` gets them.
 
+- **M69 Texture workspace (0.4.0, 2026-11-06)**: research 17. A `textures` step handles standalone material sets
+  and map-only changes to original GLBs. Image edits append buffers and rebind the selected material, preserving
+  mesh/UV/skin/animation structures. The local API inspects maps/UVs and extracts materials; MCP exposes inspection,
+  imports, all 16 texture operations and texture package exports. CPU operations use the normal light-job path;
+  AI operations retain GPU admission/cancellation and licence propagation. Library materials pin source versions.
+  - UI: a Textures task on models and a standalone Texture / Material creation/import route; model/map/tiling/paint
+    views; workflow tabs for edit/upscale/enhance/create/library; map painter with brushes, eraser, picker, pressure,
+    zoom/pan, expanded canvas, bounded patch history and immutable saves. Typed main Library and batch texture export.
+  - Imports: separate images, packed ORM/Unity maps, explicit normal conventions and named GLB materials.
+    Native game-engine containers require exported images or a GLB. No new learned models or dependencies.
+  - Limits: 16 megapixels per map, 4K selected output width; atlas SR at most 4,096 UV charts; UV overlay at most
+    100,000 triangles. Data maps keep their semantics and height images retain 16-bit precision. Surface estimation
+    is explicitly heuristic. Browser colour painting excludes normal maps and high-precision height maps.
+  - Related fixes: re-bakes prefer newer texture edits, Setup distinguishes local verification from downloading,
+    complete external caches skip downloader metadata work, Z-Image loads/quantizes the transformer before the
+    text encoder, and motion-only GLBs are skipped for mesh thumbnails.
+  - Evidence and remaining visual limits: `docs/audit/texture-workspace.md`; live SR and generation ran on the
+    reference laptop, animated geometry was compared in Blender. Generative wrappers have preservation regressions;
+    broader visual assessment of enhancement/retexturing remains ongoing.
+
 ## 5. Bench procedure (reference laptop)
 
 1. Plugged in, "max" power profile, hybrid graphics (iGPU drives the display), browser set to

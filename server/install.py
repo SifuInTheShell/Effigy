@@ -223,7 +223,12 @@ def _work(job: jobs.Job) -> None:
                 _environment(job, venv, deep=repair and venv == own)
             if repair:
                 _drop_damaged(job, group)
-            _download(job, group)
+            # A moved local_dir may have lost HF's download metadata while its weights are intact.
+            # Only invoke the downloader when our manifest actually finds files to replace.
+            if any(models.state(e)["bad"] for e in _entries(group)):
+                _download(job, group)
+            else:
+                _say(job, 1, "Model files are complete; no download needed")
             bad = [f"{e['where']}/{r}" for e in _entries(group) for r in models.state(e)["bad"]]
             if bad:
                 raise _Failed("failed", f"{len(bad)} files still missing or damaged, e.g. {bad[0]}")
@@ -370,7 +375,7 @@ def _drop_damaged(job: jobs.Job, group: str) -> None:
                 continue
             bad = f.stat().st_size != size
             if not bad and sha:
-                _say(job, None, f"Checking {name}")
+                _say(job, None, f"Verifying local file (no download): {name}")
                 bad = _sha256(job, f) != sha
             if bad:
                 damaged.append((f, name))
@@ -404,7 +409,11 @@ def _progress(job: jobs.Job, group: str, stop: threading.Event) -> None:
             have = sum(_on_disk(e) for e in _entries(group))
         except OSError:  # a file renamed while counting: the next round counts it
             continue
-        _say(job, min(have / want, 0.99), f"{have / 1e9:.1f} of {want / 1e9:.1f} GB")
+        _say(
+            job,
+            min(have / want, 0.99),
+            f"Downloading missing or damaged files · {have / 1e9:.1f} of {want / 1e9:.1f} GB present",
+        )
 
 
 def _download(job: jobs.Job, group: str) -> None:

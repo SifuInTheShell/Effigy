@@ -31,6 +31,7 @@ from server import (
     models,
     settings,
     storage,
+    textures,
     thumbs,
 )
 from server.library import ApiError
@@ -74,6 +75,35 @@ class RunStep(BaseModel):
     dedupe: bool = (
         False  # the MCP bridge: an identical queued or running job is returned, not doubled
     )
+
+
+class ExtractTexture(BaseModel):
+    material: int = 0
+    name: str = ""
+
+
+@app.get("/api/assets/{asset_id}/versions/{version}/textures")
+def texture_inventory(asset_id: str, version: str):
+    return textures.inspect(asset_id, version)
+
+
+@app.get("/api/assets/{asset_id}/versions/{version}/textures/image")
+def texture_image(asset_id: str, version: str, material: int = 0, role: str = "basecolor"):
+    return Response(
+        textures.image(asset_id, version, material, role),
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
+
+
+@app.get("/api/assets/{asset_id}/versions/{version}/textures/uv")
+def texture_uv(asset_id: str, version: str, material: int = 0):
+    return textures.uv(asset_id, version, material)
+
+
+@app.post("/api/assets/{asset_id}/versions/{version}/textures/extract", status_code=201)
+def extract_texture(asset_id: str, version: str, body: ExtractTexture):
+    return textures.extract(asset_id, version, body.material, body.name)
 
 
 @app.get("/api/health")

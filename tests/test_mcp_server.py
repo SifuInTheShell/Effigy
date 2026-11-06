@@ -38,6 +38,8 @@ READ_ONLY = {
     "read_file",
     "job_status",
     "fit_check",
+    "inspect_textures",
+    "texture_map",
 }
 ALL = READ_ONLY | {
     "create_asset",
@@ -49,6 +51,9 @@ ALL = READ_ONLY | {
     "export",
     "open_in_blender",
     "pull_from_blender",
+    "edit_texture",
+    "extract_material",
+    "import_texture_set",
 }
 
 
@@ -91,6 +96,17 @@ def test_tools_annotations_and_instructions():
         assert tool.description.startswith("Use this") and len(tool.description) < 2048, name
     assert tools["run_step"].input_schema["required"] == ["asset_id", "parent", "step"]
     assert [str(r.uri) for r in resources] == ["effigy://guide"]
+
+
+def test_every_texture_operation_is_exposed_by_mcp():
+    import importlib.util
+
+    from steps.textures import OPS
+
+    spec = importlib.util.spec_from_file_location("effigy_texture_contract", SERVER)
+    bridge = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bridge)
+    assert bridge.TEXTURE_OPS == OPS
 
 
 @pytest.fixture
@@ -164,6 +180,99 @@ def test_read_file_and_describe_steps(live):
     assert "profile" in one["doc"] and "godot" in one["doc"]
     assert listed["total"] == 1 and listed["assets"][0]["newest"]["label"] == "_echo"
     assert [v["label"] for v in got["versions"]][:1] == ["Imported model"]
+
+
+@needs_ml
+def test_texture_workflow_through_mcp(live, tmp_path):
+    from PIL import Image
+
+    from steps import _textures as tx
+
+    endpoint, _ = live
+    packed = tmp_path / "unity-mask.tga"
+    Image.new("RGBA", (64, 64), (80, 160, 0, 200)).save(packed)
+    model = tmp_path / "material.glb"
+    tx.patch_glb(
+        ROOT / "tests/fixtures/two_tris.glb",
+        model,
+        {"basecolor": Image.new("RGB", (64, 64), "red")},
+        0,
+    )
+
+    async def go():
+        async with session(endpoint) as s:
+            _, imported = await call(
+                s,
+                "import_texture_set",
+                name="Engine cloth",
+                packed_path=str(packed),
+                packing="unity_mask",
+                tileable=True,
+            )
+            asset, version = imported["asset_id"], imported["version"]["version"]
+            _, info = await call(s, "inspect_textures", asset_id=asset, version=version)
+            image, _ = await call(
+                s, "texture_map", asset_id=asset, version=version, role="roughness"
+            )
+            _, resized = await call(
+                s,
+                "edit_texture",
+                asset_id=asset,
+                parent=version,
+                op="resize",
+                params={"role": "roughness", "size": 128},
+            )
+            _, saved = await call(
+                s,
+                "extract_material",
+                asset_id=asset,
+                version=resized["version"]["version"],
+                name="Saved cloth",
+            )
+            _, applied = await call(
+                s,
+                "edit_texture",
+                asset_id=asset,
+                parent=version,
+                op="apply",
+                params={
+                    "source_asset": saved["asset"]["id"],
+                    "source_version": saved["version"]["version"],
+                },
+            )
+            _, exported = await call(
+                s,
+                "export",
+                asset_id=asset,
+                version=applied["version"]["version"],
+                profile="textures",
+            )
+            _, listed = await call(s, "list_assets", kind="texture")
+            _, model_import = await call(s, "import_file", path=str(model), kind="texture")
+            _, model_info = await call(
+                s,
+                "inspect_textures",
+                asset_id=model_import["asset_id"],
+                version=model_import["version"]["version"],
+            )
+            _, docs = await call(s, "describe_steps", step="textures")
+            bad, _ = await call(s, "edit_texture", asset_id=asset, parent=version, op="invented")
+            return imported, info, image, resized, exported, listed, model_info, docs, bad
+
+    imported, info, image, resized, exported, listed, model_info, docs, bad = anyio.run(go)
+    assert imported["status"] == "done"
+    assert not info["model"] and set(info["materials"][0]["maps"]) == {
+        "roughness",
+        "metallic",
+        "ao",
+    }
+    assert image.content[0].type == "image"
+    assert resized["version"]["metrics"]["maps"]["roughness"]["width"] == 128
+    assert exported["status"] == "done" and "textures.zip" in exported["version"]["outputs"]
+    assert listed["total"] == 2 and all(a["kind"] == "texture" for a in listed["assets"])
+    assert not model_info["model"] and "basecolor" in model_info["materials"][0]["maps"]
+    assert "packed_upload" in docs["doc"] and "mask_source" in docs["doc"]
+    assert bad.is_error
 
 
 @needs_ml

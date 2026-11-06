@@ -150,12 +150,25 @@ def run(op, in_dir, out_dir, params):
     if getattr(mesh.visual, "uv", None) is None:
         raise StepError("missing_input", f"{glb} has no UVs: run the uv step first")
     dev = "cuda" if torch.cuda.is_available() else "cpu"
-    try:
-        vol_dir, frame = find_volume(src)
-    except (
-        StepError
-    ):  # no generator volume up the chain: an import, its own materials are the colour
-        vol_dir = None
+    choice = params.get("source", "auto")
+    if choice not in ("auto", "current", "generator"):
+        raise StepError("bad_params", "bake source: auto, current or generator")
+    # A texture edit supersedes the older generator volume unless the user asks for it explicitly.
+    edited, d = False, src
+    while (d / "meta.json").is_file():
+        ancestor = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+        if ancestor.get("step") in ("project", "refine", "textures"):
+            edited = True
+        if "ovoxel" in ancestor.get("outputs", {}) or not ancestor.get("parent"):
+            break
+        d = d.parent / ancestor["parent"]
+    vol_dir = None
+    if choice == "generator" or (choice == "auto" and not edited):
+        try:
+            vol_dir, frame = find_volume(src)
+        except StepError:
+            if choice == "generator":
+                raise
     if vol_dir:
         vol, source = load_ovoxel(vol_dir / "ovoxel.npz"), None
     else:

@@ -17,7 +17,7 @@ const m = (version: string, step: string, parent: string | null, outputs: Record
 });
 const GLB = { mesh: "mesh.glb" };
 
-test("taskOf: every step of a generated character lands in one of the five tasks; an import starts at Prepare; a 2D asset goes by step", () => {
+test("taskOf: every step of a generated character lands in one of the six tasks; an import starts at Prepare; a 2D asset goes by step", () => {
   const vs = [
     m("010_brief", "brief", null, {}),
     m("020_concepts", "concepts", "010_brief", { cand_0: "c.png" }),
@@ -42,7 +42,7 @@ test("taskOf: every step of a generated character lands in one of the five tasks
   const task = (v: string) => TASKS_3D[taskOf(vs, vs.find((x) => x.version === v)!)].id;
   expect(["010_brief", "020_concepts", "030_prep"].map(task)).toEqual(["reference", "reference", "reference"]);
   expect(task("040_trellis2")).toBe("generate");
-  expect(["050_clean", "060_bake", "070_project", "080_parts", "160_trellis2"].map(task)).toEqual(["prepare", "prepare", "prepare", "prepare", "prepare"]);
+  expect(["050_clean", "060_bake", "070_project", "080_parts", "160_trellis2"].map(task)).toEqual(["prepare", "prepare", "textures", "prepare", "textures"]);
   expect(["090_rig_fit", "100_rig_skin", "110_motion", "120_mocap", "130_anim"].map(task)).toEqual(["character", "character", "character", "character", "character"]);
   expect(["170_sprites", "180_pixelize"].map(task)).toEqual(["character", "character"]); // M52: the animations drawn for 2D
   expect(["140_validate", "150_export"].map(task)).toEqual(["finish", "finish"]);

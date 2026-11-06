@@ -1,10 +1,14 @@
 """Library thumbnails (server/thumbs.py): pictures, the concepts grid, a parent's for non-visual versions."""
 
 import json
+import shutil
+from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from server import thumbs
+from steps import _glb
 
 
 def _version(asset, name, parent, outputs, files=()):
@@ -52,6 +56,63 @@ def test_a_video_preview_is_not_a_picture(tmp_path, monkeypatch):
     _version(a, "020_mocap", "010_bake", {"preview": "preview.mp4"})
     (a / "020_mocap" / "preview.mp4").write_bytes(b"\0\0\0ftypmp42")
     assert thumbs.version_thumb("dancer", "020_mocap") == a / "010_bake" / thumbs.CACHE
+
+
+def test_motion_only_glb_uses_parent_thumbnail_without_rendering(tmp_path, monkeypatch):
+    monkeypatch.setenv("EFFIGY_LIBRARY", str(tmp_path))
+    a = tmp_path / "dancer"
+    a.mkdir()
+    (a / "asset.json").write_text(json.dumps({"id": "dancer", "name": "dancer"}))
+    _version(a, "001_upload", None, {"preview": "preview.png"}, ["preview.png"])
+    _version(a, "002_mocap", "001_upload", {"clip": "clip.glb", "preview": "preview.mp4"})
+    clip = a / "002_mocap" / "clip.glb"
+    _glb.write(
+        clip,
+        {
+            "asset": {"version": "2.0"},
+            "nodes": [{"name": "hips"}],
+            "animations": [{"channels": [], "samplers": []}],
+        },
+        bytearray(),
+    )
+    (clip.parent / "preview.mp4").write_bytes(b"video")
+
+    def unexpected_render(*args):
+        raise AssertionError("A motion-only GLB must never reach Blender's mesh renderer")
+
+    monkeypatch.setattr(thumbs, "_render", unexpected_render)
+    assert not thumbs._has_mesh(clip)
+    assert thumbs._glbs("dancer", {"version": "002_mocap", "outputs": {"clip": "clip.glb"}}) == []
+    assert thumbs.asset_thumb("dancer") == a / "001_upload" / thumbs.CACHE
+
+
+def test_render_selects_mesh_even_when_motion_clip_is_first(tmp_path, monkeypatch):
+    _glb.write(
+        tmp_path / "clip.glb",
+        {"asset": {"version": "2.0"}, "nodes": [{"name": "hips"}]},
+        bytearray(),
+    )
+    shutil.copyfile(Path(__file__).parent / "fixtures/two_tris.glb", tmp_path / "mesh.glb")
+    rendered = []
+    monkeypatch.setattr(thumbs, "_render", lambda path, dst: rendered.append(path.name) or True)
+    assert thumbs._make(tmp_path, {"clip": "clip.glb", "mesh": "mesh.glb"}, tmp_path / "thumb.png")
+    assert rendered == ["mesh.glb"]
+
+
+def test_material_thumbnail_prefers_extracted_maps_over_source_model(tmp_path, monkeypatch):
+    monkeypatch.setenv("EFFIGY_LIBRARY", str(tmp_path))
+    a = tmp_path / "cloth"
+    a.mkdir()
+    (a / "asset.json").write_text(json.dumps({"id": "cloth", "name": "Cloth", "kind": "texture"}))
+    _version(a, "001_upload", None, {"mesh": "mesh.glb"})
+    shutil.copyfile(Path(__file__).parent / "fixtures/two_tris.glb", a / "001_upload" / "mesh.glb")
+    _version(a, "002_textures", "001_upload", {"preview": "preview.png"}, ["preview.png"])
+    monkeypatch.setattr(
+        thumbs,
+        "_render",
+        lambda *args: pytest.fail("material thumbnails must not render the source model"),
+    )
+    assert thumbs.asset_thumb("cloth") == a / "002_textures" / thumbs.CACHE
 
 
 def test_pixel_art_thumbnails_keep_whole_pixels(tmp_path, monkeypatch):

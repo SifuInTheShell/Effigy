@@ -14,6 +14,50 @@ from steps import concepts
 from steps._common import StepError
 
 
+def test_large_transformer_is_quantized_before_loading_remaining_pipeline(monkeypatch):
+    import sys
+
+    import torch
+
+    events = []
+    linear = torch.nn.Linear(2, 2)
+    linear.weight.data = linear.weight.data.to(torch.float8_e4m3fn)
+
+    class Transformer:
+        @classmethod
+        def from_pretrained(cls, model, **kwargs):
+            assert kwargs["subfolder"] == "transformer"
+            assert kwargs["disable_mmap"] is True
+            events.append("transformer")
+            return cls()
+
+        def enable_layerwise_casting(self, **kwargs):
+            assert kwargs["storage_dtype"] == torch.float8_e4m3fn
+            events.append("quantized")
+
+        def modules(self):
+            return [linear]
+
+    class Pipeline:
+        @classmethod
+        def from_pretrained(cls, model, **kwargs):
+            assert events == ["transformer", "quantized"]
+            assert isinstance(kwargs["transformer"], Transformer)
+            assert linear.compute_dtype == torch.bfloat16
+            events.append("pipeline")
+            return cls()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "diffusers",
+        SimpleNamespace(ZImagePipeline=Pipeline, ZImageTransformer2DModel=Transformer),
+    )
+    monkeypatch.setattr(concepts, "_PIPE", [])
+    first = concepts._pipeline()
+    assert concepts._pipeline() is first
+    assert events == ["transformer", "quantized", "pipeline"]
+
+
 class _Part:
     def to(self, *_):
         return self

@@ -137,6 +137,24 @@ def test_repair_fetches_damaged_files_again(fake):
     assert (".venv-fx",) not in synced[1:]  # the environment imports: no reinstall
 
 
+@pytest.mark.parametrize("repair", [False, True])
+def test_complete_models_in_chosen_folder_do_not_start_downloader(fake, monkeypatch, repair):
+    mod, _, _ = fake
+    assert wait(install.install("fx")).status == "done"
+    from server import settings
+
+    monkeypatch.delenv("EFFIGY_MODELS")
+    monkeypatch.setattr(settings, "_cache", {"models": str(mod)})
+
+    def unexpected_download(job, group):
+        pytest.fail("complete model files must be reused without invoking the downloader")
+
+    monkeypatch.setattr(install, "_download", unexpected_download)
+    job = wait(install.install("fx", repair=repair))
+    assert job.status == "done", job.error
+    assert all(r["installed"] for r in models.listing())
+
+
 def test_repair_reinstalls_an_environment_that_does_not_import(fake, monkeypatch):
     _, synced, _ = fake
     wait(install.install("fx"))
