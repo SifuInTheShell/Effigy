@@ -65,6 +65,35 @@ def test_quadriflow_unwrap_thumb(sphere, tmp_path):
     assert (tmp_path / "t" / "thumb.png").read_bytes()[:4] == b"\x89PNG"
 
 
+def test_uv_blender_unwrapper_few_islands_no_folds(tmp_path):
+    """M70 (issue #18): the uv step's Blender unwrapper (normal-cone charts + SLIM) on a lumpy blob: a handful of
+    islands (7; the Smart Project unwrap it replaced made 40), nothing folded or stacked, an even texel density, the
+    scratch folder gone."""
+    import numpy as np
+    import trimesh
+
+    from steps import uv
+    from steps._mesh import read_glb, uv_report, write_glb
+
+    src = tmp_path / "src"
+    src.mkdir()
+    m = trimesh.creation.icosphere(subdivisions=4)
+    x, y, z = m.vertices.T
+    lumps = 1 + 0.25 * np.sin(3 * x) * np.sin(4 * y + 1) * np.sin(5 * z + 2)
+    write_glb(src / "mesh.glb", m.vertices * lumps[:, None], m.faces)
+    (src / "meta.json").write_text(json.dumps({"version": "src", "outputs": {"mesh": "mesh.glb"}}))
+    out = tmp_path / "out"
+    out.mkdir()
+    res = uv.run("run", str(src), str(out), {"unwrapper": "blender"})
+    rep = uv_report(*[read_glb(out / "mesh.glb")[i] for i in (2, 1, 0)])
+    assert res["metrics"]["unwrapper"] == "blender" and not (out / "_unwrap").exists()
+    assert res["metrics"]["charts"] >= rep["islands"] - 1 and res["metrics"]["folded_faces"] < 10, (
+        res
+    )
+    assert rep["in_0_1"] and rep["overlap"] < 0.001 and 2 <= rep["islands"] <= 15, rep
+    assert 0.8 < rep["texel_density_p10_p90"][0] and rep["texel_density_p10_p90"][1] < 1.25, rep
+
+
 def test_relative_out_dir(sphere, tmp_path, monkeypatch):
     r"""The library root is relative by default; Blender once wrote to C:\library\… on Windows."""
     monkeypatch.chdir(tmp_path)

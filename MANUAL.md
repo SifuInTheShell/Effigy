@@ -342,6 +342,8 @@ A freshly generated model shows small holes and loose bits, and has far more tri
 
 - **Topology**: **Triangles** (game-ready, smallest) or **Quads** (clean loops for rigging and sculpting; the budget
   then counts quads).
+- **UV layout**: **Fast** (the default, on the GPU) or **Fewer seams** (in Blender on the CPU, seconds to a few
+  minutes): a curved, organic model comes out in a few large pieces, so fewer seams show in the textures.
 - **Close slits up to (mm)**: shuts hairline slits, such as between the boards of a fence (12 works well). Left
   empty, a generated prop whose simplified surface comes back folded through itself is simplified again with its
   slits shut, by itself.

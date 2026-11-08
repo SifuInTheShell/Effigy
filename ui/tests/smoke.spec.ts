@@ -2169,6 +2169,13 @@ test("Prepare: level and square, close slits and square the taper reach their st
   await panel.getByRole("button", { name: "Clean", exact: true }).click();
   await expect.poll(() => posted.length).toBe(4);
   expect(posted[3]).toEqual(["clean", { level: true, cleanup: true }]);
+  // Unwrap: the default sends nothing extra; "Fewer seams" picks the Blender unwrapper (M70)
+  await page.goto("/#/asset/mock_fence?version=040_uv");
+  await page.getByText("Run this step again").click();
+  await page.getByLabel("UV layout").selectOption("blender");
+  await panel.getByRole("button", { name: "Unwrap", exact: true }).click();
+  await expect.poll(() => posted.length).toBe(5);
+  expect(posted[4]).toEqual(["uv", { unwrapper: "blender" }]);
 });
 
 test("Setup: the app's port is chosen there and applies on the next start", async ({ page }) => {

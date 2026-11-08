@@ -154,6 +154,12 @@ def test_fill_holes_recomputes_bad_hole_centres():
     assert torch.allclose(m.v[4], torch.tensor([0.5, 0.5, 0.0])) and len(m.f) == 4
 
 
+def test_uv_refuses_an_unknown_unwrapper(tmp_path):
+    with pytest.raises(StepError) as e:
+        uv.run("run", str(tmp_path), str(tmp_path), {"unwrapper": "uvgami"})
+    assert e.value.code == "bad_params"
+
+
 def test_weld_joins_uv_seams():
     from steps._mesh import weld
 

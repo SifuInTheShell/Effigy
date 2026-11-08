@@ -2918,6 +2918,7 @@ function PrepareForm(props: { asset: string; version: Meta; versions: Meta[]; ch
   const [press, setPress] = useState(false); // clean: what hangs just under the base pressed onto it
   const [solid, setSolid] = useState(false); // clean: rebuilt as one closed solid
   const [close, setClose] = useState(""); // remesh: slits up to this many mm shut first; "" = off
+  const [unwrapper, setUnwrapper] = useState("cumesh"); // uv: M70 "blender" = fewer, bigger islands, slower
   const [detaper, setDetaper] = useState(false); // bake: a flat prop's perspective taper undone
   const [bakeSource, setBakeSource] = useState("auto");
   const [busy, run] = useBusy();
@@ -2938,6 +2939,7 @@ function PrepareForm(props: { asset: string; version: Meta; versions: Meta[]; ch
   const params: Record<string, object> = {
     clean: { ...(h ? { height_m: h } : {}), level: upright, ...(straighten ? { straighten: true } : {}), ...(press ? { press_to_floor: true } : {}), ...(solid ? { cleanup: true } : {}) },
     remesh: { faces: n, ...(quads ? { topology: "quad" } : {}), ...(mm ? { close: mm / 1000 } : {}) },
+    uv: unwrapper === "cumesh" ? {} : { unwrapper },
     bake: { texture_size: Number(size), source: bakeSource, ...(detaper ? { detaper: true } : {}) },
     validate: has("remesh") ? { max_triangles: triBudget(n, quads && "quad") } : prior ? { max_triangles: prior } : {},
   };
@@ -2960,6 +2962,19 @@ function PrepareForm(props: { asset: string; version: Meta; versions: Meta[]; ch
           <option value="tri">Triangles (game-ready, smallest)</option>
           <option value="quad">Quads (clean loops for rigging and sculpting)</option>
         </select>
+      </label>
+    ),
+    has("uv") && (
+      <label key="unwrapper">
+        UV layout
+        <select value={unwrapper} onChange={(e) => setUnwrapper(e.target.value)}>
+          <option value="cumesh">Fast (GPU)</option>
+          <option value="blender">Fewer seams (Blender, slower)</option>
+        </select>
+        <small className="muted">
+          Fewer seams lays a curved, organic model out in a few large pieces: fewer seams to show in the textures and an even texture resolution. It runs
+          in Blender on the CPU and takes from seconds to a few minutes.
+        </small>
       </label>
     ),
     has("remesh") && (
@@ -3477,7 +3492,10 @@ const STEP_HELP: Record<string, StepHelp> = {
     title: "UV unwrap",
     what: "Lays the mesh out flat so textures can be painted onto it.",
     needs: "A version with a mesh (usually after remesh).",
-    params: [["cone_deg", "how much a chart may curve before it's cut (default 90)"]],
+    params: [
+      ["unwrapper", 'cumesh (default, GPU) or blender: fewer, bigger islands with shorter seams on organic models, slower (CPU)'],
+      ["cone_deg", "how much a chart may curve before it's cut (default 90; blender: 60)"],
+    ],
     example: {},
   },
   bake: {
