@@ -473,7 +473,7 @@ machine.
   (nvdiffrast decoy), `engine/trellis2/o-voxel-windows.patch`, `engine/trellis2/PATCHES.md`,
   `tools/smoke_m1.py`, `tests/test_nvdiffrast_decoy.py`, `pyproject.toml` (path sources to `wheels/`).
 - **Tasks**: build in CI on windows-2022 for cp312 / torch 2.8.0+cu128 / CUDA 12.8.1 /
-  `TORCH_CUDA_ARCH_LIST="8.9;12.0"`: cumesh (main ≥ 2026-05-09), flex_gemm (main), o_voxel (upstream +
+  `TORCH_CUDA_ARCH_LIST="8.6;8.9;12.0"` (8.6 since issue #16): cumesh (main ≥ 2026-05-09), flex_gemm (main), o_voxel (upstream +
   PR #185's o-voxel MSVC fixes as a patch file). The repo is private, so the workflow commits the wheels
   to `wheels/` and `pyproject.toml` references them as `{ path = "wheels/<wheel>", marker =
   "sys_platform == 'win32'" }`; lock. Register a decoy `nvdiffrast` before `import o_voxel` (it imports
@@ -3276,10 +3276,10 @@ above are the contract; each milestone's "As built" note lands here.
   - **`machine.check`**: `too_big` lists the 3D model by its presets (`param: "preset"`). What the reference card
     (15.92 GB, `REFERENCE_GB`) runs and this one cannot is a warning; more than that is for bigger cards only. So
     the laptop is `ok`, with `faithful-hd` greyed out in the menu.
-  - **Compute capability** (`machine.sm()`, `MIN_SM` 8.9; the owner skipped an 8.6 build):
-    - Our CUDA wheels (cumesh, flex_gemm, o_voxel) are built for 8.9 and 12.0 with no PTX.
-    - An RTX 30 card (3090, A5000, A6000) gets a `warn`: "The 3D model steps are not supported: the 3D models need
-      an RTX 40 or 50 series card ... Pictures, pixel art, motion and the rest run". Every preset is greyed out
+  - **Compute capability** (`machine.sm()`, `MIN_SM` 8.6; 8.9 until issue #16 added the 8.6 build):
+    - Our CUDA wheels (cumesh, flex_gemm, o_voxel) are built for 8.6, 8.9 and 12.0 with no PTX.
+    - An older card (an RTX 20 is 7.5) gets a `warn`: "The 3D model steps are not supported: the 3D models need
+      an RTX 30 series card or newer ... Pictures, pixel art, motion and the rest run". Every preset is greyed out
       with that `reason`.
     - The pre-flight refuses `trellis2`, `clean`, `remesh`, `uv` and `bake` with a new error code, `unsupported`
       (`depth`'s FlexGEMM is the pure-Triton build and runs). `sm()` is read once per app run.
@@ -3294,9 +3294,9 @@ above are the contract; each milestone's "As built" note lands here.
     Faithful HD is greyed out ("Needs about 19.4 GB ... this GPU allows 14.6 GB").
   - **Tests**:
     - `test_gpu_safeguards.py`: the card layouts by preset; the best fit on 30.5, 22.6, 14.66 and 10.42 GB and with no
-      GPU; 1536's needs and RAM; the step-down; `{"preset": "best"}` on a 24 and a 16 GB card; an RTX 3090 told
-      and refused.
-    - Playwright: the 16 GB default; a 24 GB card's default; the user's pick kept over a reload; an RTX 30 card's
+      GPU; 1536's needs and RAM; the step-down; `{"preset": "best"}` on a 24 and a 16 GB card; an RTX 3090 let
+      through and a TITAN RTX (7.5) told and refused.
+    - Playwright: the 16 GB default; a 24 GB card's default; the user's pick kept over a reload; an RTX 20 card's
       reason with Generate disabled.
   - **`tools/bench`**: labels a chain by its preset when it names no weights.
   - **The quality check** (`docs/bench/m46.md` "M46b", `m46b_2k_vs_4k.jpg`):

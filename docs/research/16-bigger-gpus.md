@@ -118,6 +118,9 @@ Gaps for bigger cards:
 | ~30.5 GB | **5090** (sm_120) | ✔ |
 | 46+ GB | RTX 6000 Ada (sm_89), RTX PRO 6000 Blackwell (sm_120) ✔; A6000 (sm_86) ✘ | as listed |
 
+**Update (issue #16):** the wheels are now built for `8.6;8.9;12.0`, so the sm_86 rows above become ✔ once
+`wheels.yml` has run; `MIN_SM` is 8.6.
+
 The 3090 is probably the most common 24 GB card among hobbyists. Covering it means building the wheels with
 `8.6;8.9;12.0`: one `wheels.yml` run, the owner's call (build minutes). Either way, `machine.check` should read the
 compute capability and say so, instead of passing the card and failing in the first generation.

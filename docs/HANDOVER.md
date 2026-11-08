@@ -119,7 +119,8 @@ contracts), §6 (never-do) as needed. Install steps are `SETUP.md`; what changed
   - **Default**: the best one the card runs is the default and marked "Recommended for this GPU"; the user's pick
     is kept. On the laptop that is `faithful-hq`.
   - **Agents and chains**: `{"preset": "best"}`, and the `hero-character` chain.
-  - **RTX 30 cards**: told the 3D steps are not supported (our wheels are 8.9/12.0 only) and refused; the rest runs.
+  - **Cards below RTX 30** (compute capability < 8.6): told the 3D steps are not supported and refused; the rest runs.
+    RTX 30 cards (8.6) are supported since issue #16: the wheels carry sm_86 once `wheels.yml` has run.
   - **Next**: M46c (Setup offers the full refine Tile on cards that fit it).
 - **2026-10-13: M46a the budget skips the offload** (merged; IMPLEMENTATION "M46a").
   - **What it does**: canon (FLUX.2 klein) and motion (Kimodo's text encoder) keep their models whole on the GPU when

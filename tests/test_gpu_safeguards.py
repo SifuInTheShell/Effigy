@@ -308,18 +308,29 @@ def test_the_best_fit_is_the_default_and_a_1536_job_steps_down(monkeypatch, tmp_
                 time.sleep(0.05)
 
 
-def test_an_rtx_30_card_is_told_the_3d_steps_are_not_supported(monkeypatch, tmp_path):
-    """M46b: our CUDA wheels are built for 8.9 and 12.0 only: an RTX 3090 (8.6) is no 'ok' card for the 3D model;
-    Setup says so, the generator menu greys every preset out with the reason, the 3D steps are refused, the rest runs."""
+def test_an_rtx_30_card_runs_the_3d_model(monkeypatch):
+    """Issue #16: the wheels carry sm_86, so an RTX 3090 (8.6) is a card like a 4090: no warning, nothing greyed out."""
     monkeypatch.setattr(machine, "_ram_gb", lambda: 63.7)
     monkeypatch.setattr(machine, "_long_paths", lambda: None)
     monkeypatch.setattr(machine, "_gpu", lambda: ("NVIDIA GeForce RTX 3090", 24.0, "617.42"))
     monkeypatch.setattr(machine, "sm", lambda: 8.6)
     gpu = machine.check()[0]
+    assert "No 3D model" not in gpu["detail"]
+    assert not [b for b in gpu["too_big"] if b.get("reason") == machine.UNSUPPORTED]
+
+
+def test_an_rtx_20_card_is_told_the_3d_steps_are_not_supported(monkeypatch, tmp_path):
+    """M46b: our CUDA wheels are built for 8.6, 8.9 and 12.0 only: a TITAN RTX (7.5) is no 'ok' card for the 3D model;
+    Setup says so, the generator menu greys every preset out with the reason, the 3D steps are refused, the rest runs."""
+    monkeypatch.setattr(machine, "_ram_gb", lambda: 63.7)
+    monkeypatch.setattr(machine, "_long_paths", lambda: None)
+    monkeypatch.setattr(machine, "_gpu", lambda: ("NVIDIA TITAN RTX", 24.0, "617.42"))
+    monkeypatch.setattr(machine, "sm", lambda: 7.5)
+    gpu = machine.check()[0]
     assert (
         gpu["level"] == "warn"
         and "No 3D model can be made" in gpu["detail"]
-        and "8.6" in gpu["detail"]
+        and "7.5" in gpu["detail"]
     )
     marked = {b["value"]: b.get("reason") for b in gpu["too_big"] if b["step"] == "trellis2"}
     assert set(marked) == set(presets.GENERATE) and set(marked.values()) == {machine.UNSUPPORTED}
@@ -338,7 +349,7 @@ def test_an_rtx_30_card_is_told_the_3d_steps_are_not_supported(monkeypatch, tmp_
             assert time.time() < end, job
             time.sleep(0.05)
         assert (
-            job["error"]["code"] == "unsupported" and "RTX 40 or 50" in job["error"]["message"]
+            job["error"]["code"] == "unsupported" and "RTX 30 series" in job["error"]["message"]
         ), job
 
 

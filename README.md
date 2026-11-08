@@ -267,7 +267,7 @@ page. All of them allow commercial use of what they produce; three carry an attr
 | A-pose | FLUX.2-klein-4B; DWPose | Apache-2.0; Apache-2.0 |
 | 3D, *Fast* | TRELLIS.2-4B, TRELLIS-image-large | MIT |
 | 3D, *Faithful* | Pixal3D (+ NAF); DINOv3 | MIT (Apache-2.0); DINOv3 licence, "Built with DINOv3" |
-| Mesh kernels | TRELLIS.2's CuMesh, flex_gemm, o_voxel, built for sm_89 and sm_120 (`wheels/`), and with HIP for AMD gfx1201 (`wheels/rocm/`) | MIT |
+| Mesh kernels | TRELLIS.2's CuMesh, flex_gemm, o_voxel, built for sm_86, sm_89 and sm_120 (`wheels/`), and with HIP for AMD gfx1201 (`wheels/rocm/`) | MIT |
 | Face from the image | Real-ESRGAN (4× upscale; also picture upscale) + our projection | BSD-3-Clause |
 | Texture detail | Z-Image-Turbo + Fun-ControlNet-Union 2.1 (Tile; also picture redraw) | Apache-2.0 |
 | Parts | GeoSAM2 | Apache-2.0 |
@@ -286,7 +286,7 @@ you can't ship) is in [docs/PLAN.md §6](docs/PLAN.md#6-licence-policy).
 
 | | |
 |---|---|
-| **GPU** | An NVIDIA card with 16 GB (the reference is an RTX 5080 Laptop; 12 GB works for the *Fast* engine, best effort). The bundled CUDA kernels are built for the RTX 40 and 50 series; older cards need a rebuild (`.github/workflows/wheels.yml`). |
+| **GPU** | An NVIDIA card with 16 GB (the reference is an RTX 5080 Laptop; 12 GB works for the *Fast* engine, best effort). The bundled CUDA kernels are built for the RTX 30, 40 and 50 series (RTX 30: untested here, see issue #16); older cards need a rebuild (`.github/workflows/wheels.yml`). |
 | **AMD GPU** | An AMD Radeon RX 9070 or 9070 XT runs the *Fast* chain end to end, about as fast as the reference laptop ([bench](docs/bench/amd-rocm.md)). `run.bat` sees the card and installs the AMD (ROCm) environment by itself ([how-to](docs/howto/amd-rocm-windows.md)). Not on AMD yet: *Faithful*, the character chain, motion from text or video, and other AMD cards. |
 | **OS** | Windows 11, driver 575 or newer. Linux runs from source with the same `uv sync`, but the three kernel wheels are Windows builds: bring your own. |
 | **Disk** | 70–160 GB, mostly models; they can live on another drive. |

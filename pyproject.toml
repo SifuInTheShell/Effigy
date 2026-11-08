@@ -23,7 +23,7 @@ dev = [
     "ruff>=0.6",
 ]
 # .venv-ml: UV_PROJECT_ENVIRONMENT=.venv-ml uv sync --frozen --group ml
-# Our sm_120 CUDA wheels (wheels.yml builds and commits them; Windows only, the steps that need them
+# Our sm_86/89/120 CUDA wheels (wheels.yml builds and commits them; Windows only, the steps that need them
 # don't run on Linux CI)
 ml = [
     "cumesh==0.0.1; sys_platform == 'win32'",

@@ -18,7 +18,7 @@ import torch
 print(torch.__version__, torch.version.cuda, torch.cuda.get_device_name(0))
 print("arch", torch.cuda.get_device_capability(0), "built for", torch.cuda.get_arch_list())
 
-# unit cube (12 triangles) simplified to 8: proves the sm_120 kernels load and run
+# unit cube (12 triangles) simplified to 8: proves this card's kernels (sm_86/89/120) load and run
 v = torch.tensor([[x, y, z] for x in (0, 1) for y in (0, 1) for z in (0, 1)], dtype=torch.float32)
 f = torch.tensor(
     [

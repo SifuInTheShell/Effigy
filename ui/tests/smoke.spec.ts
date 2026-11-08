@@ -3439,9 +3439,9 @@ test("Generate: the best preset for the card by default, the user's pick kept, a
   await page.reload();
   await expect(panel.locator("p", { hasText: "Pixal3D: follows the picture closely." }).first()).toContainText("Faithful");
   await expect(panel).not.toContainText("Recommended for this GPU"); // kept over the recommendation
-  // an RTX 3090: every preset greyed out with the reason, Generate disabled
+  // an RTX 20 card (7.5): every preset greyed out with the reason, Generate disabled
   await page.unroute("**/api/setup/machine");
-  const why = "not supported: the 3D models need an RTX 40 or 50 series card";
+  const why = "not supported: the 3D models need an RTX 30 series card or newer";
   await fakeCard(page, 22.6, ["faithful-hd", "faithful-hq", "faithful", "fast"].map((n) => [n, 0]) as [string, number][], why);
   await page.reload();
   await expect(panel.locator("p.note", { hasText: why })).toHaveText(why); // nothing else fits: no "Another generator"

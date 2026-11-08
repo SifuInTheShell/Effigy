@@ -31,12 +31,12 @@
 - {name: timm, kind: code, license: Apache-2.0, commercial: true}
 - {name: kornia, kind: code, license: Apache-2.0, commercial: true}
 - {name: einops, kind: code, license: MIT, commercial: true}
-- {name: cumesh, kind: code, license: MIT, commercial: true, flag: "our sm_120 build (wheels/, wheels.yml) of JeffreyXiang/CuMesh 12289e1; bundles xatlas (MIT)"}
-- {name: flex-gemm, kind: code, license: MIT, commercial: true, flag: "our sm_120 build of JeffreyXiang/FlexGEMM 6dd94a8 + flex-gemm-windows.patch; .venv-moge (M55): upstream b2fadb2 as it is, pure Triton"}
+- {name: cumesh, kind: code, license: MIT, commercial: true, flag: "our sm_86/89/120 build (wheels/, wheels.yml) of JeffreyXiang/CuMesh 12289e1; bundles xatlas (MIT)"}
+- {name: flex-gemm, kind: code, license: MIT, commercial: true, flag: "our sm_86/89/120 build of JeffreyXiang/FlexGEMM 6dd94a8 + flex-gemm-windows.patch; .venv-moge (M55): upstream b2fadb2 as it is, pure Triton"}
 - {name: moge, kind: code, license: MIT, commercial: true, flag: "microsoft/MoGe 74fbce0 (MoGe-3), .venv-moge only: the depth step (M55); transitive via utils3d-moge: moderngl, glcontext (MIT); utils3d-moge's rasterizer imports nvdiffrast lazily, never installed and never reached by the depth step (MoGe-3 inference)"}
 - {name: utils3d-moge, kind: code, license: MIT, commercial: true, flag: "EasternJournalist/utils3d-moge 62f09d5, MoGe's geometry helpers"}
 - {name: pipeline, kind: code, license: MIT, commercial: true, flag: "EasternJournalist/pipeline 1c51139, MoGe's helper"}
-- {name: o-voxel, kind: code, license: MIT, commercial: true, flag: "our sm_120 build of TRELLIS.2 o-voxel 75fbf01 + o-voxel-windows.patch (plyfile, GPL, removed)"}
+- {name: o-voxel, kind: code, license: MIT, commercial: true, flag: "our sm_86/89/120 build of TRELLIS.2 o-voxel 75fbf01 + o-voxel-windows.patch (plyfile, GPL, removed)"}
 - {name: triton-windows, kind: code, license: MIT, commercial: true, flag: "FlexGEMM's Triton kernels on Windows; transitive via the wheels: tqdm (MIT/MPL-2.0), zstandard (BSD-3-Clause), filelock (Unlicense)"}
 
 # --- vendored engine code ---

@@ -228,8 +228,8 @@ their own (step 5, part 2): delete that folder too.
 ## What's not ready yet
 
 - Tested on one machine so far (RTX 5080 Laptop, 16 GB); other 16 GB RTX cards should behave the same,
-  12 GB cards are best effort (the 3D model *Fast*). The bundled GPU kernels are built for the RTX 40 and
-  50 series. **Another card, above all a 24 or 32 GB one? Please measure it**:
+  12 GB cards are best effort (the 3D model *Fast*). The bundled GPU kernels are built for the RTX 30, 40
+  and 50 series (RTX 30 not yet measured). **Another card, above all a 24 or 32 GB one? Please measure it**:
   - Keep the app running.
   - In PowerShell in the app folder, run `.\.venv\Scripts\python.exe -m tools.gpu_report`. It takes 20–40 minutes and
     runs each generator once on a test picture, with the app's usual memory safeguards.
