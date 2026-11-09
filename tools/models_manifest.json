@@ -577,6 +577,12 @@
    "3b0f82928dc25c952e0a23af59dbc9c02854ccb4c4c1c988f70bbffd7c284636"
   ]
  },
+ "file:MediaPipe/hand_landmarker.task": {
+  "": [
+   7819105,
+   "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
+  ]
+ },
  "file:NAF/naf_release.pth": {
   "": [
    2664431,

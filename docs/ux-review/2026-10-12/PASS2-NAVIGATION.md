@@ -155,3 +155,11 @@ approved as listed. Build it as one branch off `main`.
   "Preparation is running." A `sprites` checkpoint (M52, pictures only, no `.glb`) needs its own line in `taskOf` when it
   arrives: today it would land in Reference, not Character.
 - Not built: a sticky action bar (none needed), the 2D panels (M50–M58 add them into `Actions`), tabs as the menu's fallback.
+
+## 9. Superseded (M71)
+
+The structure in §8 (a title row with the task row and a Tools menu, one long panel of folded sections, Blender and
+Advanced folded at its end) was replaced by M71: the app bar carries the asset's name and a Blender group; the task row
+became underlined tabs; a tool strip under it lists the tools of the tab; the panel shows only the chosen tool. The Tools
+menu, `details#tools`, `#character`, `#blender` and `#advanced` are gone; Advanced is "More settings"; Run any step is a
+developer option. See IMPLEMENTATION.md §4, M71.

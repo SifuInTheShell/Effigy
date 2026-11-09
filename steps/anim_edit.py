@@ -58,6 +58,8 @@ def validate(clip: str, layer, base: dict) -> dict:
         "feet",
         "ik",
         "from",
+        "mirror",
+        "filter",
     }:
         _bad(clip, f"unknown layer fields {sorted(unknown)}")
     F = base["frames"]
@@ -123,6 +125,14 @@ def validate(clip: str, layer, base: dict) -> dict:
     out["loop"] = n
     out["ground"] = _num(clip, "ground", layer.get("ground", 0), -100, 100)
     out["in_place"] = bool(layer.get("in_place", False))
+    if "mirror" in layer:  # M69
+        if not isinstance(layer["mirror"], bool):
+            _bad(clip, "mirror is true or false")
+        out["mirror"] = layer["mirror"]
+    if "filter" in layer:
+        if layer["filter"] not in ("gaussian", "butterworth"):
+            _bad(clip, "filter is gaussian or butterworth")
+        out["filter"] = layer["filter"]
     return out
 
 
@@ -131,8 +141,14 @@ def _feet(clip, v, bones, F):
         _bad(clip, "feet must be a list of at most 64 locks")
     res = []
     for lk in v:
-        if not isinstance(lk, dict) or set(lk) != {"bone", "from", "to", "blend"}:
-            _bad(clip, "a foot lock is {bone, from, to, blend}")
+        if not isinstance(lk, dict) or not {"bone", "from", "to", "blend"} <= set(lk) <= {
+            "bone",
+            "from",
+            "to",
+            "blend",
+            "reach",
+        }:
+            _bad(clip, "a foot lock is {bone, from, to, blend, reach?}")
         n = lk["bone"]
         for _ in range(3):  # the bone, its parent, its grandparent
             if not isinstance(n, str) or n not in bones or _anim.ROT not in bones[n]:
@@ -146,6 +162,8 @@ def _feet(clip, v, bones, F):
             w[k] = int(w[k])
         if w["from"] > w["to"]:
             _bad(clip, "feet: from must not exceed to")
+        if "reach" in lk:  # M69: a share of the leg's length
+            w["reach"] = _num(clip, "feet reach", lk["reach"], 0.5, 1)
         res.append({"bone": lk["bone"], **w})
     return res
 

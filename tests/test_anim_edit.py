@@ -695,6 +695,9 @@ def test_edit_and_reedit_from_anim_edit(tmp_path):
         {"A": {"keys": ["Arm"]}},
         {"A": {"keys": {"Arm": [{"f": 2.5, "q": [0, 0, 0, 1]}]}}},
         {"A": {"trim": [0, 1], "speed": 10}},
+        {"A": {"mirror": "yes"}},  # M69
+        {"A": {"filter": "median"}},
+        {"A": {"feet": [{"bone": "Arm", "from": 1, "to": 3, "blend": 1, "reach": 0.2}]}},
     ],
 )
 def test_bad_params(tmp_path, clips):
@@ -702,6 +705,19 @@ def test_bad_params(tmp_path, clips):
     with pytest.raises(StepError) as e:
         _run(v, tmp_path / "o", clips)
     assert e.value.code == "bad_params"
+
+
+def test_the_m69_fields_are_saved(tmp_path):
+    _, v = _library(tmp_path)
+    layer = {"filter": "butterworth", "smooth": {"Arm": 2}, "mirror": True}
+    layer["feet"] = [{"bone": "Arm", "from": 1, "to": 3, "blend": 1, "reach": 0.97}]
+    _run(v, tmp_path / "o", {"A": layer})
+    saved = json.loads((tmp_path / "o" / "edit.json").read_text())["clips"]["A"]
+    assert (
+        saved["filter"] == "butterworth"
+        and saved["mirror"] is True
+        and saved["feet"][0]["reach"] == 0.97
+    )
 
 
 def test_quaternion_is_normalised_and_w_positive(tmp_path):
@@ -820,3 +836,186 @@ def test_a_clip_that_never_moves_is_found(tmp_path):
     frozen = tmp_path / "frozen.glb"
     frozen.write_bytes(_anim.pack(doc, bytes(blob)))
     assert _anim.turns(frozen)["Walk"] == 0 and _anim.turns(frozen)["Idle"] > 5
+
+
+# --- M69: mirror, Butterworth, reach ----------------------------------------------------------------------
+
+FIXTURE2 = FIXTURE.with_name("case2.json")
+X = np.array([1.0, 0, 0])
+
+
+def _turned(axis, deg):
+    a = np.radians(deg) / 2
+    return np.r_[np.sin(a) * np.asarray(axis, float) / np.linalg.norm(axis), np.cos(a)]
+
+
+def _sym(F=30, seed=4, still_right=False):
+    """A symmetric rig: Hips (moving) > Spine > LeftArm > LeftForeArm, and > LeftUpLeg > LeftLeg > LeftFoot, the
+    right side the mirror image (its rest turns the left's reflected across x = 0, so their rolls differ); random
+    motion on every turning bone (the right arm still with `still_right`)."""
+    r = np.random.default_rng(seed)
+    spec = [("Hips", None, [0, 1.0, 0]), ("Spine", "Hips", [0, 0.3, 0])]
+    for s, x in (("Left", 1), ("Right", -1)):
+        spec += [
+            (f"{s}Arm", "Spine", [x * 0.2, 0.2, 0]),
+            (f"{s}ForeArm", f"{s}Arm", [x * 0.28, 0, 0]),
+            (f"{s}UpLeg", "Hips", [x * 0.1, -0.05, 0]),
+            (f"{s}Leg", f"{s}UpLeg", [0, -0.45, 0]),
+            (f"{s}Foot", f"{s}Leg", [0, -0.45, 0]),
+        ]
+    rest_l = {n: _anim._unit(r.normal(0, 0.3, 4) + [0, 0, 0, 1]) for n, *_ in spec if "Left" in n}
+    bones = []
+    for n, p, t in spec:
+        q = rest_l.get(n)
+        if q is None and "Right" in n:
+            q = _anim._reflect(rest_l[n.replace("Right", "Left")], X)
+        q = np.array([0, 0, 0, 1.0]) if q is None else q
+        ang = np.cumsum(r.normal(0, 0.04, (F, 3)), 0)
+        delta = np.concatenate(
+            [np.sin(ang / 2), np.cos(np.linalg.norm(ang, axis=1) / 2)[:, None]], 1
+        )
+        if still_right and "Right" in n:
+            delta = np.tile([0, 0, 0, 1.0], (F, 1))
+        b = {
+            "name": n,
+            "parent": p,
+            "rotation": _anim._unit(_anim.qmul(q, _anim._unit(delta))),
+            "rest": {"q": q, "t": t},
+        }
+        if n == "Hips":
+            b["translation"] = np.cumsum(r.normal(0, 0.01, (F, 3)), 0) + t
+        else:
+            b["offset"] = np.array(t, float)
+        bones.append(b)
+    return {"fps": FPS, "frames": F, "bones": bones}
+
+
+def _by(clip):
+    return {b["name"]: b for b in clip["bones"]}
+
+
+def test_a_mirror_twice_is_the_clip():
+    base = _sym()
+    once = _anim.evaluate(base, {"mirror": True})
+    for b in once["bones"]:
+        b["rest"] = _by(base)[b["name"]]["rest"]
+    twice = _by(_anim.evaluate(once, {"mirror": True}))
+    for b in base["bones"]:
+        for k in ("rotation", "translation"):
+            if k in b:
+                got, want = twice[b["name"]][k], b[k]
+                if k == "rotation":  # q and -q are one turn
+                    got = got * np.sign(np.sum(got * want, 1, keepdims=True))
+                np.testing.assert_allclose(got, want, atol=1e-9)
+
+
+def test_a_left_arm_wave_becomes_a_right_arm_wave():
+    base = _sym(still_right=True)
+    out = _anim.evaluate(base, {"mirror": True})
+    rest = {n: b["rest"]["q"] for n, b in _by(base).items()}
+    moving = lambda clip, n: float(np.ptp(_by(clip)[n]["rotation"], axis=0).max())
+    assert moving(base, "RightArm") == 0 and moving(base, "LeftArm") > 0.05
+    assert moving(out, "RightArm") > 0.05 and moving(out, "LeftArm") < 1e-9
+    np.testing.assert_allclose(  # the still arm now holds its own rest turn
+        np.abs(_by(out)["LeftArm"]["rotation"] @ rest["LeftArm"]), 1, atol=1e-9
+    )
+    # the hips' sideways travel reversed, its height kept
+    hb, ho = _by(base)["Hips"]["translation"], _by(out)["Hips"]["translation"]
+    np.testing.assert_allclose(ho[:, 0], -hb[:, 0], atol=1e-9)
+    np.testing.assert_allclose(ho[:, 1:], hb[:, 1:], atol=1e-9)
+
+
+def test_no_rest_no_mirror():
+    base = _sym()
+    for b in base["bones"]:
+        b.pop("rest")
+    out = _anim.evaluate(base, {"mirror": True})
+    np.testing.assert_allclose(_by(out)["LeftArm"]["rotation"], _by(base)["LeftArm"]["rotation"])
+
+
+def test_butterworth_keeps_a_quick_gesture_and_takes_the_jitter():
+    F, sigma = 240, 3
+    t = np.arange(F)
+    half = 0.1325 / sigma  # the Gaussian's half-power frequency, cycles a frame
+    gesture = np.sin(2 * np.pi * 0.5 * half * t)[:, None]  # a movement at half that
+    noise = np.sin(2 * np.pi * 0.45 * t)[:, None]  # jitter near the frame rate's limit
+    inner = slice(40, 200)
+    size = lambda y: float(np.ptp(y[inner]))
+    bw, ga = _anim._butter(gesture, sigma), _anim._gauss(gesture, sigma)
+    assert (
+        size(bw) > size(ga) + 0.05 and size(bw) > 1.9
+    )  # the gesture kept: 0.97 of it against 0.92
+    assert size(_anim._butter(noise, sigma)) < 0.01  # the jitter gone
+    # the same half-power point: a movement there kept by both alike
+    at = np.sin(2 * np.pi * half * t)[:, None]
+    assert abs(size(_anim._butter(at, sigma)) - size(_anim._gauss(at, sigma))) < 0.1
+    assert (
+        np.abs(_anim._butter(np.ones((F, 2)) * 3, sigma) - 3).max() < 1e-9
+    )  # a constant untouched
+    # a steady movement (a straight line) stays straight to its ends (odd reflection, from 24 frames up), where the
+    # Gaussian, holding its edges, bends both ends by most of a frame's travel
+    line = np.arange(24.0)[:, None]
+    assert np.abs(_anim._butter(line, 2.0) - line).max() < 1e-3
+    assert np.abs(_anim._gauss(line, 2.0) - line)[[0, -1]].min() > 0.5
+
+
+def test_reach_moves_the_hips_toward_a_foot_left_behind():
+    base = _sym(seed=7)
+    hips = _by(base)["Hips"]
+    hips["translation"] = hips["translation"] + np.linspace(0, 0.9, base["frames"])[:, None] * [
+        0,
+        0,
+        1.0,
+    ]
+    lock = {"bone": "LeftFoot", "from": 2, "to": 27, "blend": 2}
+    plain = _anim.evaluate(base, {"feet": [lock]})
+    held = _anim.evaluate(base, {"feet": [lock | {"reach": 0.97}]})
+    moved = np.linalg.norm(
+        _by(held)["Hips"]["translation"] - _by(plain)["Hips"]["translation"], axis=1
+    )
+    assert moved.max() > 0.01
+    # This lock starts two frames in: its anticipatory correction can already peak at frame 0.
+    # Check easing with enough lead-in to observe it before the needed correction instead.
+    need = np.zeros(30)
+    need[12:18] = 0.3
+    eased = _anim._hold_blur(need, 2)
+    assert eased[0] == 0 and 0 < eased[9] < eased[12]
+    assert np.all(eased >= need)
+    for f in range(4, 26):  # inside the lock the pinned foot is within the leg's reach
+        names = ("Hips", "LeftUpLeg", "LeftLeg", "LeftFoot")
+        path = list(names)
+        clip = _by(held)
+        rot = {n: clip[n]["rotation"] for n in path}
+        pos = {"Hips": clip["Hips"]["translation"]}
+        off = {n: clip[n]["offset"] for n in path[1:]}
+        ps = _anim._fk(path, rot, pos, off, f)[1]
+        leg = np.linalg.norm(ps[2] - ps[1]) + np.linalg.norm(ps[3] - ps[2])
+        assert np.linalg.norm(ps[3] - ps[1]) <= 0.97 * leg + 1e-6
+
+
+def _write_fixture2():
+    base = _sym(F=24, seed=11)
+    layer = {
+        "mirror": True,
+        "filter": "butterworth",
+        "smooth": {"Spine": 2.0, "Hips": 1.5},
+        "feet": [{"bone": "LeftFoot", "from": 6, "to": 14, "blend": 3, "reach": 0.9}],
+    }
+    case = {"base": base, "layer": layer, "expected": _anim.evaluate(base, layer)}
+    FIXTURE2.write_text(
+        json.dumps(case, default=lambda a: a.tolist() if hasattr(a, "tolist") else a),
+        encoding="utf-8",
+    )
+
+
+def test_fixture2_parity():
+    """M69's case for the TypeScript evaluator too (ui/tests/anim.spec.ts): mirror, Butterworth, reach."""
+    if os.environ.get("EFFIGY_REGEN_FIXTURE") or not FIXTURE2.is_file():
+        _write_fixture2()
+    case = json.loads(FIXTURE2.read_text(encoding="utf-8"))
+    res = _anim.evaluate(case["base"], case["layer"])
+    for g, e in zip(res["bones"], case["expected"]["bones"], strict=True):
+        for k in ("rotation", "translation"):
+            assert (k in g) == (k in e)
+            if k in g:
+                np.testing.assert_allclose(g[k], e[k], atol=1e-9, rtol=0)

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { api, fileUrl, type Meta } from "../api";
 import { useBusy } from "../hooks";
 import { ancestors } from "../workflow";
-import { pictureKeys } from "./View";
+import { is2D, pictureKeys } from "./View";
 
 type Chain = (asset: string, parent: string | null, steps: [string, object][]) => Promise<string | null>;
 const setupAt = (group: string) => `#/setup?cap=${group}`;
@@ -359,7 +359,7 @@ export function PixelizeForm(props: { asset: string; version: Meta; picked: stri
       </label>
       )}
       <details>
-        <summary>Advanced</summary>
+        <summary>More settings</summary>
         <div className="stack">
           <label>
             Each pixel's colour
@@ -694,7 +694,42 @@ const isLayerable = (v: Meta) =>
 /** The pictures Upscale or redraw (M61) is offered on: the panel's section and the Tools menu ask the same. */
 export const redrawable = (v: Meta) => isLayerable(v) || v.step === "redraw";
 
-/** The panel of a 2D asset's version: its main action first, as Actions does for a 3D one. */
+/** M71: which tools the 2D strip offers for a version (the same rules Actions2D had for its sections), and the one it asks for first. */
+export function tools2D(versions: Meta[], v: Meta, editor: boolean, kind?: string): { on: Record<string, boolean>; rec: string } {
+  const parent = versions.find((x) => x.version === v.parent);
+  const brief = v.step === "brief" || parent?.step === "brief";
+  const category = ancestors(versions, v).find((a) => a.step === "brief")?.params?.category;
+  const stage = category === "background" || category === "wallpaper";
+  const layerable = isLayerable(v);
+  const animate = animatable(versions, v, kind);
+  const hasPicture = !!(v.outputs.image || pictureKeys(v).length || v.outputs.frames || v.outputs.sheet) && !["layers", "depth"].includes(v.step);
+  const on = {
+    pictures: brief,
+    tile: brief,
+    redraw: redrawable(v),
+    pixelize: hasPicture && (v.step !== "pixelize" || !!parent),
+    recolour: v.step === "pixelize",
+    animate,
+    layers: layerable || v.step === "depth" || (v.step === "layers" && !!parent),
+    editor: editor && (v.step === "pixelize" || v.step === "sprites"),
+    finish2d: is2D(v) || v.step === "validate" || v.step === "export",
+  };
+  const rec =
+    v.step === "brief"
+      ? "pictures"
+      : ["validate", "export", "layers", "sprites"].includes(v.step) || v.outputs.tile
+        ? "finish2d"
+        : v.step === "depth" || (layerable && stage)
+          ? "layers"
+          : v.step === "pixelize"
+            ? animate
+              ? "animate"
+              : "finish2d"
+            : "pixelize";
+  return { on, rec };
+}
+
+/** The panel of a 2D asset's version: what the version is, then the chosen tool (M71; no tool: every section, a sheet in a 3D asset). */
 export function Actions2D(props: {
   asset: string;
   name?: string;
@@ -704,10 +739,13 @@ export function Actions2D(props: {
   missing: (group: string) => boolean;
   picked: string;
   kind?: string;
+  tool?: string;
   finish?: React.ReactNode; // M53: the check and the export (main.tsx's export panel)
   onEdit?: () => void; // M56: the pixel editor on this sheet
 }) {
   const v = props.version;
+  const t = props.tool;
+  const show = (id: string) => !t || t === id;
   const [busy, run] = useBusy();
   const parent = props.versions.find((x) => x.version === v.parent);
   const brief = v.step === "brief" ? v : parent?.step === "brief" ? parent : undefined;
@@ -729,25 +767,17 @@ export function Actions2D(props: {
   const stage = category === "background" || category === "wallpaper";
   const layerable = isLayerable(v);
   const layersFrom = <LayersForm asset={props.asset} version={v} picked={props.picked} chain={props.chain} missing={props.missing} primary={stage} />;
-  const more = brief && (
-    <>
-      <label>
-        Description
-        <textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      </label>
-      <PictureForm kind={kind} onKind={setKind} missing={props.missing} ready={!!prompt.trim()} busy={busy} onRun={pictures} />
-    </>
-  );
-  if (v.step === "brief")
-    return (
-      <section className="stack">
-        <h3>Pictures from this description</h3>
-        {more}
-      </section>
-    );
-  // sections as the 3D panel has them: the version's own first, the rest as disclosures, each a direct child of the panel
   return (
     <>
+      {brief && (t === "pictures" || t === "tile") && (
+        <div className="stack">
+          <label>
+            Description
+            <textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+          </label>
+          <PictureForm kind={kind} onKind={setKind} missing={props.missing} ready={!!prompt.trim()} busy={busy} onRun={pictures} />
+        </div>
+      )}
       {v.step === "sprites" && (
         <section className="stack">
           <h3>Sprites</h3>
@@ -761,23 +791,15 @@ export function Actions2D(props: {
         </section>
       )}
       {v.step === "depth" && (
-        <section className="stack" id="layers">
+        <section className="stack">
           <h3>Depth</h3>
           <p className="muted">How far each part of the picture is (Depth in the view: lighter is nearer). Next, the layers.</p>
-          {layersFrom}
         </section>
       )}
       {v.step === "layers" && (
         <section className="stack">
           <h3>Parallax layers</h3>
           <LayersInfo asset={props.asset} version={v} />
-        </section>
-      )}
-      {v.step === "layers" && props.finish}
-      {layerable && stage && (
-        <section className="stack" id="layers">
-          <h3>Parallax layers</h3>
-          {layersFrom}
         </section>
       )}
       {v.step === "redraw" && (
@@ -792,56 +814,42 @@ export function Actions2D(props: {
           <PixelInfo asset={props.asset} version={v} />
         </section>
       )}
-      {/* a still character's next step: right under its pixel art, the main action (owner 2026-10-12) */}
-      {v.step === "pixelize" && animate && <AnimateIt {...props} primary />}
-      {props.onEdit && (v.step === "pixelize" || v.step === "sprites") && (
-        <details id="edit" open={v.params?.op === "edit"}>
-          <summary>Edit the pixels</summary>
-          <div className="stack">
-            <p className="muted">Draw on the frames in whole pixels with the version's colours: touch up a frame, draw a hit spark. Save makes a new version.</p>
-            <button onClick={props.onEdit}>Edit the pixels</button>
-          </div>
-        </details>
+      {show("animate") && animate && <AnimateIt {...props} primary={v.step === "pixelize"} />}
+      {show("editor") && props.onEdit && (v.step === "pixelize" || v.step === "sprites") && (
+        <section className="stack" id="edit">
+          <p className="muted">Draw on the frames in whole pixels with the version's colours: touch up a frame, draw a hit spark. Save makes a new version.</p>
+          <button onClick={props.onEdit}>Edit the pixels</button>
+        </section>
       )}
-      {v.step === "pixelize" && props.finish}
-      {v.step === "pixelize" && <Recolour asset={props.asset} version={v} chain={props.chain} />}
-      {hasPicture && v.step !== "pixelize" && (
+      {show("finish2d") && props.finish}
+      {show("recolour") && v.step === "pixelize" && <Recolour asset={props.asset} version={v} chain={props.chain} />}
+      {show("pixelize") && hasPicture && v.step !== "pixelize" && (
         <section className="stack" id="pixelize">
           <h3>Make it pixel art</h3>
           <PixelizeForm asset={props.asset} version={v} picked={props.picked} chain={props.chain} />
         </section>
       )}
-      {v.step !== "pixelize" && animate && <AnimateIt {...props} />}
-      {redrawable(v) && (
-        <details id="redraw">
-          <summary>Upscale or redraw</summary>
-          <RedrawForm asset={props.asset} version={v} versions={props.versions} picked={props.picked} chain={props.chain} missing={props.missing} />
-        </details>
-      )}
-      {layerable && !stage && (
-        <details id="layers">
-          <summary>Parallax layers</summary>
-          {layersFrom}
-        </details>
-      )}
-      {v.step === "layers" && parent && (
-        <details>
-          <summary>Make the layers again</summary>
-          <LayersForm asset={props.asset} version={parent} picked="" chain={props.chain} missing={props.missing} start={v.params} />
-        </details>
-      )}
-      {(v.step === "sprites" || (v.step === "concepts" && v.outputs.tile)) && props.finish}
-      {v.step === "pixelize" && parent && (
-        <details id="pixelize">
-          <summary>Pixelize again with other settings</summary>
+      {show("pixelize") && v.step === "pixelize" && parent && (
+        <section className="stack" id="pixelize">
+          <h3>Pixelize again with other settings</h3>
           <PixelizeForm asset={props.asset} version={parent} picked={String(v.params.key ?? "")} chain={props.chain} start={v.params} />
-        </details>
+        </section>
       )}
-      {more && v.step === "concepts" && (
-        <details>
-          <summary>More pictures</summary>
-          <div className="stack">{more}</div>
-        </details>
+      {show("redraw") && redrawable(v) && (
+        <section className="stack" id="redraw">
+          <RedrawForm asset={props.asset} version={v} versions={props.versions} picked={props.picked} chain={props.chain} missing={props.missing} />
+        </section>
+      )}
+      {show("layers") && (layerable || v.step === "depth") && (
+        <section className="stack" id="layers">
+          {layersFrom}
+        </section>
+      )}
+      {show("layers") && v.step === "layers" && parent && (
+        <section className="stack" id="layers">
+          <h3>Make the layers again</h3>
+          <LayersForm asset={props.asset} version={parent} picked="" chain={props.chain} missing={props.missing} start={v.params} />
+        </section>
       )}
     </>
   );
@@ -1137,7 +1145,7 @@ export function SpritesForm(props: { asset: string; version: Meta; chain: Chain 
         Empty height: this asset's earlier sprites' scale, or 104 px the first time. Every later run keeps one scale, so all animations match.
       </p>
       <details>
-        <summary>Advanced</summary>
+        <summary>More settings</summary>
         <div className="stack">
           <label>
             Least cell (px)

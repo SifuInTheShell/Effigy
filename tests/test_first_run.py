@@ -385,3 +385,11 @@ def test_a_group_for_bigger_cards_is_offered_where_it_fits(home, monkeypatch):
     monkeypatch.setattr(machine, "_gpu", lambda: ("NVIDIA GeForce RTX 4090", 23.99, "617.42"))
     assert install.presets()[0]["groups"] == ["refine", "refine-full"]
     assert install.too_big("refine-full") is None and install.too_big("refine") is None
+
+
+def test_developer_options_are_saved_in_the_settings(home):
+    with TestClient(app) as c:
+        assert c.get("/api/setup/developer").json() == {"on": False}
+        assert c.post("/api/setup/developer", json={"on": True}).json() == {"on": True}
+        assert c.get("/api/setup/developer").json() == {"on": True}
+    assert json.loads((home / "settings.json").read_text())["developer"] is True

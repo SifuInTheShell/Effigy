@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from steps import _glb, _pose, _rig, _templates
+from steps import _glb, _hands, _pose, _rig, _templates
 from steps._blender import BlenderError, run_blender
 from steps._common import StepError, main, progress
 from steps._mesh import read_glb, textured, weld
@@ -119,6 +119,19 @@ def _detect(glb: Path, out: Path, v, f, size: int):
     ):  # the pose model's left is on the right: swap the names
         markers, conf, hands = _rig.swap_sides(markers, conf, hands)
         detected["sides_swapped"] = True
+    # M70: each hand rendered on its own and read by MediaPipe, ahead of DWPose's points from the whole body
+    try:
+        detect = _hands.finder()
+    except Exception as e:  # noqa: BLE001 - mediapipe missing or the model unreadable: DWPose's points stand
+        detect, detected["hand_finder"] = None, f"{type(e).__name__}: {e}"
+    progress(0.15, "the hands")
+    try:
+        hands, detected["hands_by"], seen = _hands.found(v, f, markers, hands, detect)
+    finally:
+        if detect is not None:
+            detect.close()
+    if seen:
+        detected["hand_views"] = seen
     return markers, conf, hands, detected
 
 
@@ -360,7 +373,10 @@ def run(op, in_dir, out_dir, params):
         }
     result = {"outputs": outputs, "metrics": metrics}
     if not (params.get("markers") or edited):
-        result |= {"models": [{"id": _pose.MODEL}], "licenses": [_pose.MODEL]}
+        ids = [_pose.MODEL] + (
+            [_hands.CREDIT] if "mediapipe" in detected.get("hands_by", {}).values() else []
+        )
+        result |= {"models": [{"id": i} for i in ids], "licenses": ids}
     return result
 
 

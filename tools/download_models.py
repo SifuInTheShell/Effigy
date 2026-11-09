@@ -226,6 +226,12 @@ PINNED = [
 ]
 # (group, url, sha256, path under models/)
 FILES = [
+    (  # M70: MediaPipe's hand landmark model (Apache-2.0), the fingers from close-up renders of each hand
+        "pose",
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+        "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1",
+        "MediaPipe/hand_landmarker.task",
+    ),
     (
         "faithful",
         "https://github.com/valeoai/NAF/releases/download/model/naf_release.pth",

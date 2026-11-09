@@ -6,8 +6,11 @@ import * as THREE from "three";
 export type Q = [number, number, number, number];
 export type V3 = [number, number, number];
 // a bone without a moving translation carries its constant one (`offset`): the skeleton's shape for the foot locks' FK
-export type Track = { name: string; parent: string | null; rotation?: Q[]; translation?: V3[]; offset?: V3 };
-export type Lock = { bone: string; from: number; to: number; blend: number }; // M38: a foot (M64: or a hand on the floor) held still over base frames
+// M69: `rest` is its node's rest turn and translation (the mirror's reference)
+export type Track = { name: string; parent: string | null; rotation?: Q[]; translation?: V3[]; offset?: V3; rest?: { q: Q; t: V3 } };
+// M38: a foot (M64: or a hand on the floor) held still over base frames; M69 `reach`: a share of the leg's length past
+// which the hips move toward the pinned foot, the least that brings it back
+export type Lock = { bone: string; from: number; to: number; blend: number; reach?: number };
 export type Clip = { fps: number; frames: number; bones: Track[] };
 export type Key = { f: number; q: Q; falloff: number };
 export type Offset = { f: number; v: V3; falloff: number };
@@ -28,6 +31,8 @@ export type Layer = {
   feet?: Lock[];
   ik?: Ik[];
   from?: string; // M44: a copy of this base clip (the layer names no base clip of its own)
+  mirror?: boolean; // M69: the clip as its mirror image (step 1b)
+  filter?: "gaussian" | "butterworth"; // M69: the smoothing's filter (default gaussian)
 };
 
 // M44: a copy's name, the rule of steps/anim_edit.py (no control characters, none of / \ : | , [ ] ;), unique ignoring case
@@ -83,11 +88,39 @@ function gauss<T extends number[]>(xs: T[], sigma: number): T[] {
     return out;
   });
 }
+/** M69: a zero-phase second-order Butterworth low-pass over frames (forward, then backward), its half-power point where a
+ * Gaussian of `sigma` frames has it (the cut at 0.1652 / sigma cycles a frame, at most 0.45); the ends padded by odd
+ * reflection (at most 30 frames), the filter started at rest on the first sample (steps/_anim.py _butter, the same
+ * arithmetic). */
+function butter<T extends number[]>(xs: T[], sigma: number): T[] {
+  const N = xs.length;
+  if (N < 3) return xs.map((x) => [...x] as T);
+  const K = Math.tan(Math.PI * Math.min(0.1652 / sigma, 0.45));
+  const n = 1 / (1 + Math.SQRT2 * K + K * K);
+  const [b0, a1, a2] = [K * K * n, 2 * (K * K - 1) * n, (1 - Math.SQRT2 * K + K * K) * n];
+  const P = Math.min(N - 1, 30);
+  const C = xs[0].length;
+  const pad: number[][] = [];
+  for (let i = P; i >= 1; i--) pad.push(xs[0].map((v, c) => 2 * v - xs[i][c]));
+  for (const x of xs) pad.push([...x]);
+  for (let i = N - 2; i > N - P - 2; i--) pad.push(xs[N - 1].map((v, c) => 2 * v - xs[i][c]));
+  const run = (s: number[][]) => {
+    const y: number[][] = [];
+    const x1 = [...s[0]], x2 = [...s[0]], y1 = [...s[0]], y2 = [...s[0]];
+    for (const row of s) {
+      const out = row.map((v, c) => b0 * v + 2 * b0 * x1[c] + b0 * x2[c] - a1 * y1[c] - a2 * y2[c]);
+      for (let c = 0; c < C; c++) [x2[c], x1[c], y2[c], y1[c]] = [x1[c], row[c], y1[c], out[c]];
+      y.push(out);
+    }
+    return y;
+  };
+  return run(run(pad).reverse()).reverse().slice(P, P + N) as T[];
+}
 /** Consecutive quaternions on one side (q and -q are the same turn), then filtered and normalised. */
-function smoothQ(qs: Q[], sigma: number): Q[] {
+function smoothQ(qs: Q[], sigma: number, filter = gauss): Q[] {
   const aligned: Q[] = [];
   for (const q of qs) aligned.push(aligned.length && dot(aligned[aligned.length - 1], q) < 0 ? [-q[0], -q[1], -q[2], -q[3]] : [...q]);
-  return gauss(aligned, sigma).map(norm);
+  return filter(aligned, sigma).map(norm);
 }
 
 /** The delta a bone's keys give at frame f: between two keys a smoothstep slerp, before the first and after the last a
@@ -297,15 +330,51 @@ export function contacts(clip: Clip, feet: string[], hands: string[] = []): Lock
   }
   return out;
 }
-/** Step 3b: one foot lock on dense bones (in place). */
+/** M69: a per-frame need held over ±k frames, blurred (Gaussian, sigma k / 2), never below the need. */
+function holdBlur(need: number[], k: number): number[] {
+  const held = need.map((_, f) => Math.max(...need.slice(Math.max(0, f - k), f + k + 1)));
+  return gauss(held.map((h) => [h]), Math.max(k / 2, 0.5)).map((b, f) => Math.max(b[0], need[f]));
+}
+/** Step 3b: one foot lock on dense bones (in place); M69 `reach` moves the top translated bone above it (the hips)
+ * toward the pinned foot where it is out of reach, eased, before the solve (steps/_anim.py _lock). */
 function lock(bones: Track[], l: Lock, F: number) {
   const by = new Map(bones.map((b) => [b.name, b]));
   const B = by.get(l.bone)!;
   const L = by.get(B.parent!)!;
   const U = by.get(L.parent!)!;
   const T = pose(bones, Math.floor((l.from + l.to) / 2)).get(B.name)!.p;
-  for (let f = Math.max(l.from - l.blend, 0); f <= Math.min(l.to + l.blend, F - 1); f++) {
-    const w = f < l.from ? smoothstep(1 - (l.from - f) / l.blend) : f > l.to ? smoothstep(1 - (f - l.to) / l.blend) : 1;
+  const weight = (f: number) => (f < l.from ? smoothstep(1 - (l.from - f) / l.blend) : f > l.to ? smoothstep(1 - (f - l.to) / l.blend) : 1);
+  const f0 = Math.max(l.from - l.blend, 0);
+  const f1 = Math.min(l.to + l.blend, F - 1);
+  const chain: string[] = [];
+  for (let n: string | null = B.name; n !== null && by.has(n); n = by.get(n)!.parent) chain.unshift(n);
+  const hips = chain.map((n) => by.get(n)!).find((b) => b.translation);
+  if (l.reach && hips) {
+    const need = new Array<number>(F).fill(0);
+    let toward: V3 = [0, 0, 0];
+    for (let f = f0; f <= f1; f++) {
+      const ps = pose(bones, f);
+      const [a, b, c] = [ps.get(U.name)!.p, ps.get(L.name)!.p, ps.get(B.name)!.p];
+      const P = lerp(c, T, weight(f));
+      const d = len3(sub3(P, a));
+      const excess = d - l.reach * (len3(sub3(b, a)) + len3(sub3(c, b)));
+      if (excess > 0) {
+        need[f] = excess;
+        toward = add3(toward, sub3(P, a).map((x) => (x / d) * excess) as V3);
+      }
+    }
+    if (need.some((x) => x > 0)) {
+      toward = unit3(toward);
+      const eased = holdBlur(need, Math.max(l.blend, 1));
+      for (let f = 0; f < F; f++) {
+        if (eased[f] <= 1e-12) continue;
+        const Wp = hips.parent && by.has(hips.parent) ? pose(bones, f).get(hips.parent)!.W : I;
+        hips.translation![f] = add3(hips.translation![f], turn(conj(Wp), toward.map((x) => x * eased[f]) as V3));
+      }
+    }
+  }
+  for (let f = f0; f <= f1; f++) {
+    const w = weight(f);
     const ps = pose(bones, f);
     const [pu, pl, pb] = [ps.get(U.name)!, ps.get(L.name)!, ps.get(B.name)!];
     const Wpar = U.parent && ps.has(U.parent) ? ps.get(U.parent)!.W : I;
@@ -314,13 +383,106 @@ function lock(bones: Track[], l: Lock, F: number) {
   }
 }
 
-/** Step 2 alone (the smoothed base): the rotation a key's delta is measured from. */
+const partner = (n: string, names: Set<string>) => {
+  for (const [a, b] of [
+    ["Left", "Right"],
+    ["Right", "Left"],
+  ]) {
+    if (n.includes(a)) {
+      const m = n.replaceAll(a, b);
+      return names.has(m) ? m : n;
+    }
+  }
+  return n;
+};
+/** A turn seen in a mirror whose plane has the unit normal n: its axis mirrored, its angle reversed. */
+const reflect = (q: Q, n: V3): Q => {
+  const v: V3 = [q[0], q[1], q[2]];
+  const k = 2 * dot3(v, n);
+  return [k * n[0] - v[0], k * n[1] - v[1], k * n[2] - v[2], q[3]];
+};
+/** M69 step 1b: the clip as its mirror image (steps/_anim.py _mirror, the same rules): each bone's world motion from its
+ * rest reflected across the body's middle plane and put on its partner's rest; a root's translation reflected. */
+function mirrored(bones: Track[]): Track[] {
+  if (bones.some((b) => !b.rest)) return bones;
+  const names = new Set(bones.map((b) => b.name));
+  const by = new Map(bones.map((b) => [b.name, b]));
+  const order: string[] = [];
+  const seen = new Set<string>();
+  const visit = (n: string) => {
+    if (seen.has(n)) return;
+    seen.add(n);
+    const p = by.get(n)!.parent;
+    if (p !== null && names.has(p)) visit(p);
+    order.push(n);
+  };
+  bones.forEach((b) => visit(b.name));
+  const Wr = new Map<string, Q>();
+  const pr = new Map<string, V3>();
+  for (const n of order) {
+    const b = by.get(n)!;
+    const Wp = b.parent !== null && Wr.has(b.parent) ? Wr.get(b.parent)! : I;
+    const pp = b.parent !== null && pr.has(b.parent) ? pr.get(b.parent)! : ([0, 0, 0] as V3);
+    Wr.set(n, b.rotation ? mul(Wp, b.rest!.q) : Wp);
+    pr.set(n, add3(pp, turn(Wp, b.rest!.t)));
+  }
+  const pairs = [...names].filter((n) => n.includes("Left") && partner(n, names) !== n).map((n) => [n, partner(n, names)]);
+  if (!pairs.length) return bones;
+  let side: V3 = [0, 0, 0];
+  let mid: V3 = [0, 0, 0];
+  for (const [a, b] of pairs) {
+    side = add3(side, sub3(pr.get(a)!, pr.get(b)!));
+    mid = add3(mid, add3(pr.get(a)!, pr.get(b)!));
+  }
+  if (len3(side) < 1e-9) return bones;
+  const nrm = unit3(side);
+  mid = mid.map((x) => x / (2 * pairs.length)) as V3;
+  const F = bones.find((b) => b.rotation)?.rotation?.length ?? bones.find((b) => b.translation)?.translation?.length ?? 0;
+  const W = new Map<string, Q[]>();
+  for (const n of order) {
+    const b = by.get(n)!;
+    const Wp = b.parent !== null && W.has(b.parent) ? W.get(b.parent)! : null;
+    W.set(n, Array.from({ length: F }, (_, f) => (b.rotation ? norm(mul(Wp ? Wp[f] : I, b.rotation[f])) : Wp ? Wp[f] : I)));
+  }
+  const want = new Map<string, Q[]>();
+  for (const n of order) {
+    const m = partner(n, names);
+    want.set(m, W.get(n)!.map((w) => mul(reflect(mul(w, conj(Wr.get(n)!)), nrm), Wr.get(m)!)));
+  }
+  const Wn = new Map<string, Q[]>();
+  const rot = new Map<string, Q[]>();
+  for (const n of order) {
+    const b = by.get(n)!;
+    const Wp = b.parent !== null && Wn.has(b.parent) ? Wn.get(b.parent)! : null;
+    if (b.rotation) {
+      rot.set(n, want.get(n)!.map((w, f) => norm(mul(conj(Wp ? Wp[f] : I), w))));
+      Wn.set(n, want.get(n)!);
+    } else Wn.set(n, Wp ?? Array.from({ length: F }, () => I));
+  }
+  return bones.map((b) => {
+    const out: Track = { ...b, rotation: rot.get(b.name) ?? b.rotation };
+    if (b.translation) {
+      const src = by.get(partner(b.name, names))?.translation ?? b.translation;
+      out.translation =
+        b.parent !== null && names.has(b.parent)
+          ? src.map((p) => [...p] as V3)
+          : src.map((p) => {
+              const k = 2 * dot3(sub3(p, mid), nrm);
+              return [p[0] - k * nrm[0], p[1] - k * nrm[1], p[2] - k * nrm[2]] as V3;
+            });
+    }
+    return out;
+  });
+}
+
+/** Steps 1b and 2 alone (the mirrored, smoothed base): the rotation a key's delta is measured from. */
 export function smoothed(base: Clip, layer: Layer): Clip {
+  const filter = layer.filter === "butterworth" ? butter : gauss;
   return {
     ...base,
-    bones: base.bones.map((b) => {
+    bones: (layer.mirror ? mirrored(base.bones) : base.bones).map((b) => {
       const s = layer.smooth?.[b.name] ?? 0;
-      return s > 0 ? { ...b, rotation: b.rotation && smoothQ(b.rotation, s), translation: b.translation && gauss(b.translation, s) } : b;
+      return s > 0 ? { ...b, rotation: b.rotation && smoothQ(b.rotation, s, filter), translation: b.translation && filter(b.translation, s) } : b;
     }),
   };
 }
@@ -394,7 +556,7 @@ export function evaluate(base: Clip, layer: Layer): Clip {
 
 /** A loaded clip sampled at every frame (§3.2 step 1): F = round(duration·fps) + 1 frames at f/fps; bones by their glTF
  * node names (`nodes`: three.js name → node name), their parents too. */
-export function fromThree(clip: THREE.AnimationClip, fps: number, bones: { name: string; node: string; parent: string | null; rest: V3 }[]): Clip {
+export function fromThree(clip: THREE.AnimationClip, fps: number, bones: { name: string; node: string; parent: string | null; rest: V3; restq?: Q }[]): Clip {
   const F = Math.round(clip.duration * fps) + 1;
   const node = new Map(bones.map((b) => [b.name, b.node]));
   const track = (bone: string, prop: string) => clip.tracks.find((t) => t.name === `${bone}.${prop}`);
@@ -421,6 +583,7 @@ export function fromThree(clip: THREE.AnimationClip, fps: number, bones: { name:
         ...(r && { rotation: sample(r, 4) as Q[] }),
         ...(p && moves && { translation: sample(p, 3) as V3[] }),
         ...(!(p && moves) && { offset: p ? ([p.values[0], p.values[1], p.values[2]] as V3) : b.rest }),
+        ...(b.restq && { rest: { q: b.restq, t: b.rest } }),
       };
     }),
   };

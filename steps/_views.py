@@ -30,6 +30,17 @@ def ortho(yaw: float, pitch: float, center, extent: float) -> dict:
         q = np.asarray(pts, float) @ r.T
         return np.c_[0.5 + (q[:, 0] - c[0]) / extent, 0.5 - (q[:, 1] - c[1]) / extent], -q[:, 2]
 
+    def unproject(
+        pix,
+    ):  # M70: [N, 2] pixels → a point on each one's ray (the plane through the centre)
+        pix = np.asarray(pix, float)
+        q = np.c_[
+            c[0] + (pix[:, 0] - 0.5) * extent,
+            c[1] - (pix[:, 1] - 0.5) * extent,
+            np.full(len(pix), c[2]),
+        ]
+        return q @ r
+
     d = r[2]  # the camera's +Z in the library frame
     return {
         "yaw": yaw,
@@ -37,6 +48,7 @@ def ortho(yaw: float, pitch: float, center, extent: float) -> dict:
         "center": [float(x) for x in center],
         "extent": float(extent),
         "project": project,
+        "unproject": unproject,
         "towards": lambda pts: np.broadcast_to(d, np.shape(pts)),
     }
 

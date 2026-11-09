@@ -10,6 +10,7 @@
 - {name: sse-starlette, kind: code, license: BSD-3-Clause, commercial: true}
 - {name: mcp, kind: code, license: MIT, commercial: true}
 - {name: onnxruntime, kind: code, license: MIT, commercial: true}
+- {name: mediapipe, kind: code, license: Apache-2.0, commercial: true, flag: "M70: the hand landmarker (CPU) for the finger joints; its opencv-contrib-python and sounddevice requirements dropped (pyproject dependency-metadata)"}
 - {name: blender-mcp, kind: code, license: MIT, commercial: true, flag: "optional free Blender add-on + MCP server (ahujasid); .mcp.json runs blender-mcp==2.0.0 via uv"}
 - {name: numpy, kind: code, license: BSD-3-Clause, commercial: true}
 - {name: opencv-python-headless, kind: code, license: Apache-2.0, commercial: true}
@@ -46,6 +47,7 @@
 # --- model weights (meta.licenses names these rows) ---
 - {name: microsoft/TRELLIS.2-4B, kind: weights, license: MIT, commercial: true}
 - {name: yzd-v/DWPose, kind: weights, license: Apache-2.0, commercial: true, flag: "dw-ll_ucoco_384.onnx: whole-body keypoints for the A-pose gate (M16); yolox_l.onnx (YOLOX-L, COCO): the person detector of motion from video (M34)"}
+- {name: google/mediapipe-hand-landmarker, kind: weights, license: Apache-2.0, commercial: true, flag: "M70 finger joints: hand_landmarker.task (float16, version 1, 7.8 MB) from Google's MediaPipe model storage, run by the mediapipe package (Apache-2.0) on the CPU on close-up renders of each hand"}
 - {name: black-forest-labs/FLUX.2-klein-4B, kind: weights, license: Apache-2.0, commercial: true, flag: "M16 re-pose (steps/canon.py); klein-9B is non-commercial and never used"}
 - {name: microsoft/TRELLIS-image-large, kind: weights, license: MIT, commercial: true}
 - {name: facebook/dinov3-vitl16-pretrain-lvd1689m, kind: weights, license: DINOv3 License, commercial: true, attribution: "Built with DINOv3"}
