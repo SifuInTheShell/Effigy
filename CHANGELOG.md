@@ -26,6 +26,12 @@ or in Blender yet: the checks for that are in [docs/LAPTOP.md](docs/LAPTOP.md).
   clip would swing the forearms or hands through the body (stout and stylised characters). On by default; untick
   **Keep the arms out of the body** in the Animate panel to keep the clips as they come. The animated model's page
   names the clips that were opened and by how much.
+- **Duplicate mirrored** (M69): a copy of a clip with left and right swapped, a left-handed swing from a right-handed
+  one.
+- **Butterworth smoothing** (M69): beside the Gaussian; at the same setting it keeps quick moves larger and a clip's
+  ends straight.
+- **Move the hips so a locked leg never goes straight** (M69): with foot locks, the hips follow a planted foot just
+  enough to keep the knee bent.
 
 ### Textures
 

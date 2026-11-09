@@ -469,8 +469,9 @@ plays between the two. Needs the Setup card **Text to motion**.
 **Edit animation** opens the editor: the timeline under the view, the tools in the panel. It changes a copy;
 **Save as a new version** keeps your edits, the original stays as it was.
 
-- **Clip**: pick the clip. **Duplicate** makes a copy to change (to make a variation); **Rename** and **Delete**
-  work on copies. **Compare**: **Edited** / **Original**.
+- **Clip**: pick the clip. **Duplicate** makes a copy to change (to make a variation); **Duplicate mirrored** a copy
+  with left and right swapped (a left-handed swing from a right-handed one; from the clip as it came, without its
+  edits); **Rename** and **Delete** work on copies. **Compare**: **Edited** / **Original**.
 - **Timeline**: **Keys** (a dope sheet) or **Curves** (for a selected bone). **Show**: **Motion path**, **Onion
   skin** (ghosts a few frames before and after), **X-ray** (the model see-through, the skeleton inside it clear).
 - The skeleton is drawn the way Blender draws an armature: a bone is a long diamond from its joint to the next, its
@@ -496,10 +497,12 @@ plays between the two. Needs the Setup card **Text to motion**.
   body moves, a weapon in both hands).
 - **Foot locks**: **Find foot contacts** finds where a foot should stand still; **Find hand contacts** where a palm
   rests on the floor (a push-up, a crawl); **Lock … here** keeps it planted from one frame to another, with a blend in
-  and out.
+  and out. **Move the hips so a locked leg or arm never goes straight**: where a planted foot or hand would pull its limb straight,
+  the hips move toward it just enough, eased in and out.
 - **Clip tools**: **Trim** (first and last frame), **Speed**, **Loop match** (the end blends into the start),
   **Ground** (with **Snap to ground**), **In place (no travel)** and **Smoothing** per body part (steadies jitter,
-  for example from a video).
+  for example from a video). Its **Filter**: **Gaussian** (softest) or **Butterworth**, which at the same setting
+  keeps quick moves larger and the clip's ends straight.
 - **Undo**, **Redo**, **Keys as a list** (every key, reachable by keyboard).
 
 Keys: **Space** play, **←** **→** a frame, **Home** **End** first and last frame, **I** key, **X** or **Delete**

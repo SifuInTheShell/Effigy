@@ -365,7 +365,10 @@ export class Viewer {
       if (sk && !this.stats.bones.length) {
         this.stats.bones = sk.bones.map((b) => b.name);
         this.bones = sk.bones;
-        for (const b of this.bones) b.userData.rest = b.position.toArray(); // the node's own translation, before any clip
+        for (const b of this.bones) {
+          b.userData.rest = b.position.toArray(); // the node's own translation, before any clip
+          b.userData.restq = b.quaternion.toArray(); // M69: and its turn (the mirror's reference)
+        }
       }
     });
     this.stats.materials = mats.size;
@@ -1076,6 +1079,7 @@ export class Viewer {
       node: (b.userData.name as string | undefined) ?? b.name,
       parent: (b.parent as THREE.Bone)?.isBone ? b.parent!.name : null,
       rest: b.userData.rest as Vec3, // its node's translation as loaded
+      restq: b.userData.restq as [number, number, number, number], // and its turn
     }));
   /** A bone's local rotation now (x, y, z, w). */
   boneQuat = (name: string) => this.bones.find((b) => b.name === name)?.quaternion.toArray() as [number, number, number, number] | undefined;

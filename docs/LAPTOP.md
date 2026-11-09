@@ -158,7 +158,15 @@ Needs the Setup card **Texture detail** (Z-Image comes with it). No new download
 - [ ] Skin and animate two of them: the fingers run along the fingers, no palm faces up.
 - [ ] Record in a new `docs/bench/m70.md`: per character `hands_by`, and the fit's time against M22's.
 
-## 7. When done
+## 7. M69 Animation editor: mirroring, Butterworth, hips for locked legs
+
+- [ ] Edit animation on the viking: **Duplicate mirrored** on `Walk` and on a video motion; play the copies: the same
+  move on the other side, feet on the floor. Save; export for Godot: the mirrored clips play there.
+- [ ] A video motion's Smoothing at the same setting with Filter **Gaussian**, then **Butterworth**: quick gestures
+  stay larger with Butterworth, the jitter gone in both.
+- [ ] Find foot contacts on a walk, tick **Move the hips so a locked leg never goes straight**: no knee snaps straight.
+
+## 8. When done
 
 - Commit the bench files and this file's ticks on a branch of your own, and open a pull request; the template fills
   itself in. Put the measured numbers in the PR's Measurements line.

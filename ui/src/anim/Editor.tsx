@@ -48,8 +48,9 @@ const FALLOFF = 10; // frames a new key fades in and out over
 const EMPTY: Layer = {}; // one object: a clip without edits must not look changed on every render
 const AXES = ["#e06464", "#6cc070", "#5a9cf0"]; // X, Y, Z in the curves
 const MAX_LOCKS = 64; // anim_edit's limit
+const REACH = 0.97; // M69: a locked leg kept below this share of its length (the hips move instead)
 type Layers = Record<string, Layer>;
-type Bone = { name: string; node: string; parent: string | null; rest: V3 }; // three.js name, glTF node name, parent's three.js name
+type Bone = { name: string; node: string; parent: string | null; rest: V3; restq?: Q }; // three.js name, glTF node name, parent's three.js name; M69 its rest turn
 type Base = { fps: number; base: string; clips: Record<string, { data: Clip; keep: THREE.KeyframeTrack[] }>; bones: Bone[]; groups: [string, string[]][]; sides?: [string, string] };
 type Gizmo = "rotate" | "move" | "ik" | "target";
 const MAX_CHAIN = 8; // anim_edit's longest IK chain
@@ -220,7 +221,7 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
   const ctl = bone ? layer.ik?.find((c) => c.bone === bone) : undefined;
   // M63: the clip in base frames with every correction up to the IK (trim, speed and the rest left out): where the layer
   // puts each bone, what an IK target and a space change are measured in
-  const solved = useMemo(() => (data && (layer.ik?.length || gizmo === "target") ? evaluate(data.data, { keys: layer.keys, offsets: layer.offsets, smooth: layer.smooth, feet: layer.feet, ik: layer.ik }) : null), [data, layer, gizmo === "target"]);
+  const solved = useMemo(() => (data && (layer.ik?.length || gizmo === "target") ? evaluate(data.data, { mirror: layer.mirror, filter: layer.filter, keys: layer.keys, offsets: layer.offsets, smooth: layer.smooth, feet: layer.feet, ik: layer.ik }) : null), [data, layer, gizmo === "target"]);
   const solvedPose = useMemo(() => solved && pose(solved.bones, Math.min(frame, F - 1)), [solved, frame]);
   const atIn = (n: string, space?: string, m = solvedPose): V3 | null => {
     const b = m?.get(n);
@@ -473,6 +474,8 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
   const movesOf = (n: string) => (layer.offsets?.[n] ?? []).map((o) => o.f);
   const ikOf = (n: string) => (layer.ik?.find((c) => c.bone === n)?.keys ?? []).map((k) => k.f);
   const locks = layer.feet ?? [];
+  // a new lock keeps the hips option when every lock has it
+  const reachOf = (feet: Lock[] = []) => (feet.length && feet.every((lk) => lk.reach) ? { reach: REACH } : {});
   const spans: Record<string, [number, number][]> = {};
   for (const [g, nodes] of ready.groups) {
     for (const lk of locks)
@@ -582,6 +585,17 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
     setClip(name);
     setSel([]);
   };
+  // M69: a copy that is the clip's mirror image (left and right swapped), from the base clip without its edits: a key on
+  // the left arm would not mean the same on the right
+  const duplicateMirrored = () => {
+    let n = `${clip} mirrored`;
+    for (let i = 2; !nameOk(n, names()); i++) n = `${clip} mirrored ${i}`;
+    const name = ask("Name of the mirrored copy", n);
+    if (!name) return;
+    hist.commit((all) => ({ ...all, [name]: { from: rootOf(clip), ...(all[clip]?.mirror ? {} : { mirror: true }) } }));
+    setClip(name);
+    setSel([]);
+  };
   const rename = () => {
     const name = ask("New name", clip, clip);
     if (!name) return;
@@ -612,7 +626,7 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
       kind === "hands"
         ? ready.bones.filter((b) => /hand$/i.test(b.node) && chain(b.node)).map((b) => b.node)
         : ready.bones.filter((b) => near.has(b.name) && !(b.parent && near.has(b.parent)) && !/tail/i.test(b.node) && chain(b.node)).map((b) => b.node);
-    const pre = evaluate(data.data, { keys: layer.keys, offsets: layer.offsets, smooth: layer.smooth });
+    const pre = evaluate(data.data, { mirror: layer.mirror, filter: layer.filter, keys: layer.keys, offsets: layer.offsets, smooth: layer.smooth });
     const others = (layer.feet ?? []).filter((lk) => !bones.includes(lk.bone));
     const all = kind === "hands" ? contacts(pre, [], bones) : contacts(pre, bones);
     const room = Math.max(MAX_LOCKS - others.length, 0); // anim_edit takes 64: the longest stretches first
@@ -620,7 +634,8 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
       .sort((a, b) => b.to - b.from - (a.to - a.from))
       .slice(0, room)
       .sort((a, b) => a.bone.localeCompare(b.bone) || a.from - b.from);
-    commit(() => ({ ...layer, feet: [...others, ...hits] }));
+    const keep = reachOf(layer.feet);
+    commit(() => ({ ...layer, feet: [...others, ...hits.map((h) => ({ ...h, ...keep }))] }));
     setFound(
       !bones.length
         ? kind === "hands"
@@ -664,6 +679,11 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
         <button className="small" onClick={duplicate}>
           Duplicate
         </button>
+        {data.data.bones.some((b) => b.name.includes("Left")) && (
+          <button className="small" title="A copy with left and right swapped (the base clip, without this clip's edits)" onClick={duplicateMirrored}>
+            Duplicate mirrored
+          </button>
+        )}
         {isCopy && (
           <>
             <button className="small" onClick={rename}>
@@ -1016,13 +1036,24 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
             {bone && chain(bone) && (
               <button
                 disabled={original || locks.length >= MAX_LOCKS}
-                onClick={() => commit((l) => ({ ...l, feet: [...(l.feet ?? []), { bone, from: Math.max(frame - 2, 0), to: Math.min(frame + 2, F - 1), blend: Math.min(3, F) }] }))}
+                onClick={() => commit((l) => ({ ...l, feet: [...(l.feet ?? []), { bone, from: Math.max(frame - 2, 0), to: Math.min(frame + 2, F - 1), blend: Math.min(3, F), ...reachOf(l.feet) }] }))}
               >
                 Lock {bone} here
               </button>
             )}
           </div>
           {found && <p className="muted">{found}</p>}
+          {locks.length > 0 && (
+            <label className="check" title="Where a locked foot or hand would pull its leg or arm straight, the hips move toward it just enough, eased in and out">
+              <input
+                type="checkbox"
+                checked={locks.every((lk) => lk.reach)}
+                disabled={original}
+                onChange={(e) => commit((l) => ({ ...l, feet: (l.feet ?? []).map(({ reach: _, ...lk }) => (e.target.checked ? { ...lk, reach: REACH } : lk)) }))}
+              />{" "}
+              Move the hips so a locked leg or arm never goes straight
+            </label>
+          )}
           {locks.map((lk, i) => (
             <div key={`${i}${lk.bone}${lk.from}${lk.to}${lk.blend}`} className="row" role="group" aria-label={`Lock ${i + 1}`}>
               <button className="small" onClick={() => (setBone(lk.bone), seekBase(lk.from))}>
@@ -1165,6 +1196,13 @@ export function AnimEditor(props: { asset: string; version: Meta; viewer: Viewer
           </label>
           <fieldset>
             <legend>Smoothing (steadies jitter, e.g. from video)</legend>
+            <label>
+              Filter{" "}
+              <select aria-label="Smoothing filter" value={layer.filter ?? "gaussian"} onChange={(e) => commit((l) => ({ ...l, filter: e.target.value === "butterworth" ? "butterworth" : undefined }))}>
+                <option value="gaussian">Gaussian (softest)</option>
+                <option value="butterworth">Butterworth (keeps quick moves, straight ends)</option>
+              </select>
+            </label>
             {ready.groups.map(([g]) => (
               <label key={g} className="smooth-row">
                 <span>{g}</span>

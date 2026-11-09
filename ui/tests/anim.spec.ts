@@ -5,8 +5,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { contacts, evaluate, I, mul, nameOk, turn, twoBone, type Clip, type Layer, type Q, type V3 } from "../src/anim/clip";
 
-test("Animation editor: the preview's evaluation matches the bake's on the shared fixture", () => {
-  const c = JSON.parse(readFileSync(resolve(process.cwd(), "../tests/fixtures/anim_edit/case.json"), "utf-8")) as { base: Clip; layer: Layer; expected: Clip };
+// case.json: M37–M63's steps; case2.json: M69's mirror, Butterworth and reach
+for (const file of ["case.json", "case2.json"])
+  test(`Animation editor: the preview's evaluation matches the bake's on the shared fixture (${file})`, () => {
+  const c = JSON.parse(readFileSync(resolve(process.cwd(), `../tests/fixtures/anim_edit/${file}`), "utf-8")) as { base: Clip; layer: Layer; expected: Clip };
   const out = evaluate(c.base, c.layer);
   expect(out.frames).toBe(c.expected.frames);
   let worst = 0;
