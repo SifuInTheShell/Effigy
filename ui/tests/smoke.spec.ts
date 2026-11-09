@@ -19,6 +19,18 @@ const upload = async (request: any, name: string) => {
 // Library cards are links named "<asset name> <created>"
 const openCard = (page: Page, name: string) => page.getByRole("link", { name: new RegExp(`^${name} `) }).click();
 const toLibrary = (page: Page) => page.getByRole("navigation").getByRole("link", { name: "Library" }).click();
+// M71: a tool of the strip (the buttons are tabs, so a panel button of the same name is not a second match)
+const TAB_OF: Record<string, string> = {
+  Export: "Finish", Check: "Finish", "Edit the pixels": "Edit", "Upscale or redraw": "Picture", "Fit skeleton": "Character", "Edit skeleton": "Character",
+  "Ready-made clips": "Character", "From a sentence": "Character", "From a video": "Character", "From a file": "Character", "Connect clips": "Character",
+  "Edit animation": "Character", Sprites: "Character", "Prepare model": "Prepare", Clean: "Prepare", Simplify: "Prepare", Bake: "Prepare", "Face from image": "Prepare",
+  "Texture detail": "Prepare", "Another variation": "Generate", Pixelize: "Pixelize", Recolour: "Pixelize", "Check and export": "Finish", Layers: "Layers", Parts: "Prepare",
+};
+const tool = async (page: Page, name: string) => {
+  const t = page.getByRole("tab", { name, exact: true });
+  if (!(await t.count())) await page.locator("ol.stages").getByRole("button", { name: TAB_OF[name] }).click(); // the tool is in another tab
+  await t.click();
+};
 const history = (page: Page) => page.getByRole("button", { name: /^History/ }).click();
 
 test("UI loads, WebGL works, a library GLB shows in every view mode", async ({ page, request }) => {
@@ -32,7 +44,7 @@ test("UI loads, WebGL works, a library GLB shows in every view mode", async ({ p
   await page.locator("canvas").waitFor();
   expect(await page.evaluate(() => !!document.querySelector("canvas")!.getContext("webgl2"))).toBe(true);
   await history(page);
-  await page.locator("#versions li").first().click();
+  await page.locator("#versions li").first().locator("button").first().click();
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
   await expect(page.locator("#stats")).toContainText("2 triangles");
 
@@ -46,12 +58,15 @@ test("UI loads, WebGL works, a library GLB shows in every view mode", async ({ p
   // an imported GLB keeps its materials: Check/Export first, geometry-only processing only behind a disclosure
   await expect(page.getByRole("button", { name: "Check model" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Prepare model" })).toHaveCount(0);
+  await tool(page, "Export");
   await expect(page.getByRole("button", { name: "Export for Godot" })).toBeVisible();
 
   // a step through the UI: job panel + SSE + version list refresh; the job holds the GPU lock, so the
   // backend's gpu_load events reach the header
-  await page.locator("#advanced > summary").click();
-  await page.getByText("Run a step on 001_upload").click();
+  await page.route("**/api/setup/developer", (r) => r.fulfill({ json: { on: true } })); // Run any step is a developer option (this page only)
+  await page.reload();
+  await page.getByRole("tab", { name: "⋯ Run any step" }).click();
+
   await page.getByLabel("step", { exact: true }).selectOption({ label: "Other step (by name)…" });
   await page.getByPlaceholder("step name").fill("_echo");
   await page.getByLabel("params").fill('{"sleep": 2}');
@@ -63,7 +78,7 @@ test("UI loads, WebGL works, a library GLB shows in every view mode", async ({ p
   // Back restores the version that was selected before
   await history(page);
   await expect(page.locator("#versions li")).toHaveCount(2);
-  await page.locator("#versions li").nth(1).click();
+  await page.locator("#versions li").nth(1).locator("button").first().click();
   await expect(page).toHaveURL(/version=002__echo/);
   await page.goBack();
   await expect(page).toHaveURL(/version=001_upload/);
@@ -93,7 +108,7 @@ test("A late answer for asset A never mixes into B; Ask Claude is gone", async (
   await openCard(page, "race-b");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
   await page.waitForTimeout(2000); // A's answer arrives now and must be dropped
-  await expect(page.locator(".ws-title h1")).toHaveText("race-b"); // the title is an h1 since the UX passes
+  await expect(page.locator(".ws-name h1")).toHaveText("race-b"); // the title is an h1 since the UX passes
   expect(glbs.length).toBeGreaterThan(0);
   expect(glbs.every((u) => u.includes(`/files/${b.id}/`))).toBe(true);
 
@@ -101,9 +116,10 @@ test("A late answer for asset A never mixes into B; Ask Claude is gone", async (
   await page.unroute(`**/api/assets/${a.id}`);
   await page.route("**/api/blender/status", (r) => r.fulfill({ json: { link: "pro" } }));
   await toLibrary(page);
-  await openCard(page, "race-b"); // the Blender panel asks for the link when it mounts
-  await page.locator("#blender > summary").click();
-  await expect(page.getByRole("button", { name: "Open 001 in Blender" })).toBeEnabled();
+  await openCard(page, "race-b"); // the Blender group asks for the link when it mounts
+  await page.locator(".ws-name h1").waitFor(); // under a full parallel run the page can take a moment
+
+  await expect(page.getByRole("button", { name: "Open 001" })).toBeEnabled();
   await expect(page.getByText("Ask Claude")).toHaveCount(0);
 });
 
@@ -140,8 +156,10 @@ test("A checklist renders its warnings next to the mesh it checked; one click bu
   );
   await page.goto("/");
   await openCard(page, "checked");
+  await page.locator(".ws-name h1").waitFor(); // under a full parallel run the page can take a moment
   await expect(page.locator("#checklist")).toContainText("2 checks passed · 1 warning · 1 failed");
   await expect(page.locator("#checklist")).toContainText("Warning open (boundary) edges: 6");
+  await tool(page, "Export");
   await expect(page.getByRole("button", { name: "Export anyway for Godot" })).toBeVisible();
   await history(page);
   await expect(page.locator("#versions li").nth(1)).toHaveText(/Checks: 1 failed/);
@@ -150,7 +168,8 @@ test("A checklist renders its warnings next to the mesh it checked; one click bu
 
   let posts = 0;
   page.on("request", (r) => r.method() === "POST" && r.url().includes("/steps/validate") && posts++);
-  await page.locator("#versions li").first().click();
+  await page.locator("#versions li").first().locator("button").first().click();
+  await tool(page, "Check");
   await page.getByRole("button", { name: "Check model" }).dblclick();
   await expect(page.locator("footer")).toContainText("validate ·");
   await page.waitForTimeout(500);
@@ -264,6 +283,7 @@ test("Animation: the time bar steps a clip; the editor keys a bone, retimes the 
   await page.getByRole("button", { name: "Next frame" }).click();
   await expect.poll(frame).toBe(7);
   // the editor on that clip and frame: the spine turned 30° about its own X keys it there
+  await tool(page, "Edit animation");
   await page.getByRole("button", { name: "Edit animation" }).click();
   await expect(page.getByRole("combobox", { name: "Clip to edit" })).toHaveValue("Walk");
   await page.evaluate(() => (window as any).__viewer.testPickBone("Spine"));
@@ -321,7 +341,7 @@ test("Connect clips (M65): the animated model asks Kimodo for a transition; its 
   let parent = "";
   await page.route("**/api/assets/mock_connect/steps/*", (r) => ((parent = r.request().postDataJSON().parent), r.fallback()));
   await page.goto("/#/asset/mock_connect?version=030_anim");
-  await page.getByText("Connect two clips").click();
+  await tool(page, "Connect clips");
   await expect(page.getByLabel("Connect from")).toHaveValue("Idle_A");
   await expect(page.getByLabel("Connect to")).toHaveValue("Walk");
   await page.getByLabel("Turn degrees").fill("90");
@@ -340,7 +360,7 @@ test("Connect clips (M65): the animated model asks Kimodo for a transition; its 
   expect(parent).toBe("020_rig_skin");
   // leaving one side empty continues a clip: no turn or travel then
   await page.goto("/#/asset/mock_connect?version=030_anim");
-  await page.getByText("Connect two clips").click();
+  await tool(page, "Connect clips");
   await page.getByLabel("Connect to").selectOption("");
   await expect(page.getByLabel("Turn degrees")).toHaveCount(0);
   await page.getByRole("button", { name: "Make transition" }).click();
@@ -366,6 +386,7 @@ test("Animation editor: duplicate, rename, edit and save a copy (from), delete i
   await page.goto("/#/asset/mock_anim3?version=030_anim");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
   await page.getByRole("combobox", { name: "Animation" }).selectOption({ label: "Play: Walk" });
+  await tool(page, "Edit animation");
   await page.getByRole("button", { name: "Edit animation" }).click();
   const sel = page.getByRole("combobox", { name: "Clip to edit" });
   await expect(page.locator(".anim-editor").getByRole("button", { name: "Rename", exact: true })).toHaveCount(0);
@@ -400,6 +421,7 @@ test("Animation editor: Delete removes a copy and Undo brings it back", async ({
   await page.goto("/#/asset/mock_anim4?version=030_anim");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
   await page.getByRole("combobox", { name: "Animation" }).selectOption({ label: "Play: Walk" });
+  await tool(page, "Edit animation");
   await page.getByRole("button", { name: "Edit animation" }).click();
   const sel = page.getByRole("combobox", { name: "Clip to edit" });
   await page.locator(".anim-editor").getByRole("button", { name: "Duplicate", exact: true }).click();
@@ -444,6 +466,7 @@ test("Animation tools: IK drag, a foot lock, a hips move, curves, motion path, o
   await page.getByRole("combobox", { name: "Animation" }).selectOption({ label: "Play: Walk" });
   await page.getByRole("button", { name: "Pause" }).click();
   await page.getByRole("spinbutton", { name: "Frame number" }).fill("8");
+  await tool(page, "Edit animation");
   await page.getByRole("button", { name: "Edit animation" }).click();
   await expect(page.getByRole("combobox", { name: "Clip to edit" })).toHaveValue("Walk");
   // IK drag: the head pulled aside, the spine and hips bend so it gets there, and stays there (three keys at frame 8)
@@ -513,6 +536,7 @@ test("IK controls (M63): the armature drawn, a target keyed twice, the pole swun
   await page.getByRole("combobox", { name: "Animation" }).selectOption({ label: "Play: Walk" });
   await page.getByRole("button", { name: "Pause" }).click();
   await page.getByRole("spinbutton", { name: "Frame number" }).fill("8");
+  await tool(page, "Edit animation");
   await page.getByRole("button", { name: "Edit animation" }).click();
   await expect(page.getByRole("combobox", { name: "Clip to edit" })).toHaveValue("Walk");
   // the armature: an octahedron per bone from its head to its child's (the leaf half its parent's length on)
@@ -701,7 +725,7 @@ test("Image flow: cut-out → Faithful → prepare → check → export, without
   await page.goto("/#/asset/mock_lantern?version=020_prep");
   // M46b: the best this card runs is the default, before any setting (quality over speed, the owner)
   await expect(page.locator(".panel")).toContainText("Faithful, high quality — Recommended for this GPU");
-  await page.getByText("Advanced", { exact: true }).click();
+  await page.getByText("More settings", { exact: true }).click();
   await expect(page.getByRole("radio", { name: /Faithful, high quality/ })).toBeChecked();
   await expect(page.getByRole("radio", { name: /Faithful HD/ })).toBeDisabled();
   await page.getByRole("button", { name: "Original" }).click(); // compare with the uploaded picture
@@ -709,12 +733,14 @@ test("Image flow: cut-out → Faithful → prepare → check → export, without
   await page.getByRole("button", { name: "Generate 3D" }).click();
   await expect.poll(() => posted.find(([s]) => s === "trellis2")?.[1]).toMatchObject({ background: "grey" });
   await expect(page).toHaveURL(/version=030_trellis2/); // the result opens by itself
-  await page.getByText("Help", { exact: true }).click();
+  await tool(page, "Another variation");
   await expect(page.getByText("Prepare model closes them")).toBeVisible();
   await expect(page.getByRole("button", { name: "Try another variation" })).toBeVisible();
+  await tool(page, "Prepare model");
   await page.getByRole("button", { name: "Prepare model" }).click();
   await expect(page.locator("#checklist")).toContainText("1 check passed");
   await page.screenshot({ path: "test-results/workspace-checks.png", animations: "disabled" });
+  await tool(page, "Export");
   await page.getByRole("radio", { name: "Unreal" }).check();
   await page.getByLabel("Collision hull").uncheck();
   await page.getByRole("button", { name: "Export for Unreal" }).click();
@@ -745,7 +771,7 @@ test("Concepts: ranked display, selecting doesn't run, prep gets the original ke
   await page.goto("/#/asset/mock_concepts?version=020_concepts");
   const cards = page.locator(".grid .cand");
   await expect(cards.first()).toContainText("#1");
-  await expect(page.locator("summary", { hasText: "Edit in Blender" })).toHaveCount(0); // pictures: nothing for Blender
+  await expect(page.getByRole("button", { name: /^Open 0/ })).toHaveAttribute("title", "this version has no 3D model"); // pictures: nothing for Blender
   await expect(cards.nth(2)).toContainText("needs: subject stays inside the image");
   await page.screenshot({ path: "test-results/workspace-concepts.png", animations: "disabled" });
   await cards.first().click();
@@ -858,7 +884,7 @@ async function openRig(page: Page, parts?: Record<string, number>) {
 
 test("Attach to skeleton with rigid parts: one on the nearest bone, one on a chosen bone, the rest bends", async ({ page }) => {
   const posted = await openRig(page, { Helmet: 1000, Shield: 500, Belt: 300, Body: 9000 });
-  await expect(page.locator("summary", { hasText: "Edit in Blender" })).toBeVisible(); // a model: Blender can work on it
+  await expect(page.getByRole("button", { name: "Open 020" })).toBeVisible(); // a model: Blender can work on it
   await expect(page.getByLabel("How Body moves")).toHaveCount(0); // the rest of the model always bends
   await page.getByLabel("How Helmet moves").selectOption("nearest");
   await page.getByLabel("How Shield moves").selectOption("LeftForeArm");
@@ -873,6 +899,7 @@ test("Skeleton editor: pick a joint, move it, undo, save only what changed", asy
   const posted = await openRig(page);
   await expect(page.getByText("Outside the model: Head.")).toContainText("red in the view");
   await expect(page.getByText("Edited by hand: 2 joints moved, 0 twists set.")).toBeVisible();
+  await tool(page, "Edit skeleton");
   await page.getByRole("button", { name: "Edit skeleton" }).click();
   await expect(page.getByRole("button", { name: "Save skeleton" })).toBeDisabled();
   await page.getByLabel("Symmetry", { exact: false }).uncheck();
@@ -910,6 +937,7 @@ test("Skeleton editor: pick a joint, move it, undo, save only what changed", asy
 test("Skeleton editor: a failed save keeps the edits (UI-001)", async ({ page }) => {
   const posted = await openRig(page);
   await page.route("**/api/jobs/job-*", (r) => r.fulfill({ json: { status: "failed", error: { code: "step_failed", message: "no fit" } } }));
+  await tool(page, "Edit skeleton");
   await page.getByRole("button", { name: "Edit skeleton" }).click();
   await page.getByLabel("Symmetry", { exact: false }).uncheck();
   await page.getByRole("button", { name: "LeftArm", exact: true }).click();
@@ -923,6 +951,7 @@ test("Skeleton editor: a failed save keeps the edits (UI-001)", async ({ page })
 
 test("Marker editor: gizmo path, undo, reset all, save", async ({ page }) => {
   const posted = await openRig(page);
+  await tool(page, "Edit skeleton");
   await page.getByRole("button", { name: "Edit markers" }).click();
   await page.getByLabel("Symmetry", { exact: false }).uncheck();
   await page.getByRole("button", { name: "Chin", exact: true }).click();
@@ -960,7 +989,7 @@ test("Creatures: an animal fits its template; its skeleton mirrors by suffix, tu
   ]);
   // the mesh version: What is it? → an animal → its template
   await page.goto("/#/asset/mock_dog?version=010_upload");
-  await page.locator("#character > summary").click(); // the rig form waits under Character on a prepared model
+  await tool(page, "Fit skeleton"); // the rig form waits under Character on a prepared model
   await page.getByRole("radio", { name: /four-legged animal/ }).check();
   await page.getByRole("button", { name: "Fit a skeleton" }).click();
   await expect.poll(() => posted.length).toBe(1);
@@ -986,6 +1015,7 @@ test("Creatures: an animal fits its template; its skeleton mirrors by suffix, tu
   await page.route("**/files/mock_dog/020_rig_fit/report.json", (r) => r.fulfill({ json: { joints: 5, inside: 5, outside: [], low_confidence: [] } }));
   await page.goto("/#/asset/mock_dog?version=020_rig_fit");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
+  await tool(page, "Edit skeleton");
   await expect(page.getByRole("button", { name: "Edit markers" })).toHaveCount(0); // a person's tool
   await page.getByRole("button", { name: "Turn around" }).click();
   await expect.poll(() => posted.length).toBe(2);
@@ -1035,6 +1065,7 @@ test("Check fit: a skeleton against the one before it, the joints to look at, an
   });
   await page.goto("/#/asset/mock_cat?version=030_rig_fit");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
+  await tool(page, "Edit skeleton");
   await page.getByRole("button", { name: "Check fit" }).click();
   await expect(page.getByText("Fit 69 · before (020_rig_fit) 58 · better")).toBeVisible();
   await expect(page.getByText("4 of 4 joints inside the model.", { exact: false })).toBeVisible();
@@ -1055,6 +1086,7 @@ test("Check fit: a skeleton against the one before it, the joints to look at, an
 
 test("Skeleton editor: shift-select moves several joints; the XYZ field commits one undoable step", async ({ page }) => {
   await openRig(page);
+  await tool(page, "Edit skeleton");
   await page.getByRole("button", { name: "Edit skeleton" }).click();
   await page.getByLabel("Symmetry", { exact: false }).uncheck();
   const at = (n: string) => page.evaluate((n) => (window as any).__viewer.testJoint(n).map((x: number) => Math.round(x * 1000) / 1000), n);
@@ -1102,14 +1134,16 @@ test("Face from image: runs project with the defaults; a project version says wh
     },
   ]);
   await page.goto("/#/asset/mock_face?version=020_bake");
-  await page.locator("#tools > summary").click(); // the tools wait under the main action
+  await tool(page, "Face from image"); // the tools wait under the main action
   await page.locator("#face").getByRole("button", { name: "Face from image" }).click();
   await expect.poll(() => posted.length).toBe(1);
   expect(posted[0]).toEqual(["project", { region: "head", strength: 1 }]);
   await page.goto("/#/asset/mock_face?version=030_project");
+  await tool(page, "Face from image");
   await expect(page.getByText("Face from the image: silhouette match 0.93, 12% of the atlas, head from the pose model.")).toBeVisible();
   await expect(page.getByAltText(/silhouette/)).toBeVisible();
   await page.goto("/#/asset/mock_face?version=040_project");
+  await tool(page, "Face from image");
   await expect(page.getByText("Not applied: the image does not line up with the mesh (silhouette match 0.41).")).toBeVisible();
 });
 
@@ -1136,13 +1170,13 @@ test("Texture detail: Refine texture runs refine; a refine version shows its vie
   const row = (id: number, name: string, groups: string[]) => ({ id, name, groups, revision: "r", where: "hub", installed: true, partial: false, bytes: 1, missing_bytes: 0 });
   await page.route("**/api/models", (r) => r.fulfill({ json: [row(1, "Tongyi-MAI/Z-Image-Turbo", ["concepts", "refine"]), row(2, "alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1", ["refine"])] }));
   await page.goto("/#/asset/mock_detail?version=020_bake");
-  await page.locator("#tools > summary").click();
+  await tool(page, "Texture detail");
   await page.getByRole("button", { name: "Refine texture" }).click();
   await expect.poll(() => posted.length).toBe(1);
   expect(posted[0]).toEqual(["refine", { strength: 1 }]);
   // M43c: the baked shadows out, without the model
   await page.reload();
-  await page.locator("#tools > summary").click();
+  await tool(page, "Texture detail");
   await expect(page.getByRole("button", { name: "Remove baked shadows" })).toBeDisabled();
   await page.getByLabel("Baked shadows to remove").fill("0.5");
   await page.getByRole("button", { name: "Remove baked shadows" }).click();
@@ -1150,6 +1184,7 @@ test("Texture detail: Refine texture runs refine; a refine version shows its vie
   expect(posted[1]).toEqual(["refine", { views: [], delight: 0.5 }]);
   await expect(page).toHaveURL(/version=060_refine/); // the save landed on its version: the panel starts afresh there
   // the masked edit: what the 3D view frames now, with the description, at 4K (the window from the viewer's camera)
+  await tool(page, "Texture detail");
   await page.locator("#detail").getByLabel("Description").fill("red lacquered steel");
   await page.getByLabel("4K texture", { exact: false }).check();
   await page.getByRole("button", { name: "Redraw this view" }).click();
@@ -1196,7 +1231,7 @@ test("Texture detail: a part painted on the model is redrawn by refine's edit (M
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/#/asset/mock_paint?version=020_bake");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
-  await page.locator("#tools > summary").click();
+  await tool(page, "Texture detail");
   // the asset's description is not what a painted part becomes: the edit waits for its own words
   await expect(page.getByRole("button", { name: "Redraw the painted part" })).toBeDisabled();
   await page.getByLabel("What the painted part becomes").fill("a brass plate");
@@ -1228,6 +1263,7 @@ test("Texture detail: a part painted on the model is redrawn by refine's edit (M
   expect(uploads[0].width).toBe(1024); // the texture's size (no texture here: 1024)
   expect(posted[0]).toEqual(["refine", { op: "edit", region: "030_upload", prompt: "a brass plate", strength: 1 }]);
   await page.goto("/#/asset/mock_paint?version=040_refine");
+  await tool(page, "Texture detail");
   await expect(page.getByText("The painted part (030_upload) redrawn from 2 views: 97% of it seen, nothing outside it changed.")).toBeVisible();
 });
 
@@ -1256,7 +1292,7 @@ test("Animate: a video becomes a motion (uploaded, then mocap on the upload), an
   );
   await page.goto("/#/asset/mock_video?version=030_rig_skin");
   await expect(page.locator('optgroup[label="Your motions"]')).toContainText("dance (video) · 14.2 s");
-  await page.getByRole("radio", { name: "From a video" }).check();
+  await tool(page, "From a video");
   const make = page.getByRole("button", { name: "Make motion from video" });
   await expect(make).toBeDisabled(); // no file yet
   await page.getByLabel("Video file").setInputFiles({ name: "dance.mp4", mimeType: "video/mp4", buffer: Buffer.from("not a real video") });
@@ -1304,15 +1340,17 @@ test("Animate: pack clips and your motions; Generate motion and Add post the rig
   ]);
   await page.route("**/files/mock_motion/030_rig_skin/qa.json", (r) => r.fulfill({ json: { items: {} } }));
   await page.goto("/#/asset/mock_motion?version=030_rig_skin");
+  await tool(page, "Export");
   await expect(page.getByLabel("Collision hull")).not.toBeChecked(); // a rigged character: off by default (M32)
+  await tool(page, "Ready-made clips");
   await expect(page.locator('optgroup[label="Your motions"]')).toContainText("A person waves. · 5 s");
-  await page.getByRole("radio", { name: "From a sentence" }).check();
+  await tool(page, "From a sentence");
   await page.getByLabel("Motion prompt").fill("A person bows.");
   await page.getByRole("button", { name: "Generate motion" }).click();
   await expect.poll(() => posted.length).toBe(1);
   expect(posted[0]).toEqual(["motion", { prompt: "A person bows.", seconds: 5, seed: 0 }]);
   await page.goto("/#/asset/mock_motion?version=030_rig_skin");
-  await page.getByRole("radio", { name: "Ready-made" }).check(); // the same address: the picker kept "From a sentence"
+  await tool(page, "Ready-made clips"); // the same address, the clip picker again
   for (const n of ["Idle_A", "Walk", "Jog"]) await page.getByRole("option", { name: new RegExp(n) }).click(); // untick the defaults
   await page.getByRole("option", { name: /A person waves/ }).click();
   await page.getByRole("button", { name: "Add 1 animation" }).click();
@@ -1348,34 +1386,18 @@ test("Tasks: five per 3D asset on one line, a task opens its newest checkpoint o
   await expect(reference).toHaveAttribute("title", "Needs a picture or a description");
   await page.getByRole("button", { name: /Generate$/ }).click(); // the raw model
   await expect(page).toHaveURL(/version=010_trellis2/);
-  // Tools on the raw model: what is not open here says at which stage it is
-  await page.locator(".tools > summary").click();
-  await expect(page.locator(".tools li", { hasText: "Texture detail" })).toContainText("at Prepare, once textured");
-  await expect(page.locator(".tools li", { hasText: "Parts" })).toContainText("at Prepare");
-  await expect(page.locator(".tools li", { hasText: "Sprites for 2D" })).toContainText("at Prepare (one still frame) or after Character (animated)");
-  await expect(page.locator(".tools li", { hasText: "Edit in Blender" })).toContainText("available");
-  await expect(page.locator(".tools")).not.toContainText("not for this checkpoint");
-  await page.screenshot({ path: "test-results/tasks-tools-where.png", clip: { x: 640, y: 0, width: 640, height: 360 } });
-  await page.locator(".tools > summary").click();
-  await expect(page.getByRole("button", { name: "Finish" })).toBeDisabled(); // needs a prepared model
-  await page.getByRole("button", { name: /Prepare$/ }).click(); // the newest prepared checkpoint on the branch
-  await expect(page).toHaveURL(/version=050_bake/);
-  await expect(page.getByRole("button", { name: "Finish" })).toBeEnabled(); // the Check form of this checkpoint, no run
-  await expect(page.getByRole("button", { name: /Character/ })).toBeEnabled();
-  // Tools: Face is available on a bake; its section waits collapsed until the entry opens it; the menu closes
-  await expect(page.locator("#face").getByRole("button", { name: "Face from image" })).toBeHidden();
-  await page.locator(".tools > summary").click();
-  await page.screenshot({ path: "test-results/tasks-tools-menu.png", clip: { x: 640, y: 0, width: 640, height: 360 } });
-  await expect(page.locator(".tools li", { hasText: "Face from image" })).toContainText("available");
-  await expect(page.locator(".tools li", { hasText: "Upscale or redraw" })).toContainText("2D pictures only");
-  await expect(page.locator(".tools li", { hasText: "Parts" })).toContainText("available");
-  await page.locator(".tools").getByRole("button", { name: "Face from image" }).click();
-  await expect(page.locator("#tools")).toHaveAttribute("open", "");
-  await expect(page.locator("#face").getByRole("button", { name: "Face from image" })).toBeVisible();
-  await expect(page.locator(".tools")).not.toHaveAttribute("open", "");
-  // Run this step again on the Simplify checkpoint: just that step with the chosen budget, under its disclosure
+  // the strip: the raw model's Generate tab, its tools greyed with why
+  await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Generate 3D" })).toBeDisabled();
+  await expect(page.getByRole("tab", { name: "Generate 3D" })).toHaveAttribute("title", "needs a cut-out reference");
+  await page.getByRole("button", { name: /Prepare$/ }).click();
+  await expect(page.getByRole("tab", { name: "Texture detail" })).toHaveAttribute("title", "needs a textured model");
+  await expect(page.getByRole("tab", { name: "Prepare model" })).toBeEnabled();
+  await expect(page).toHaveURL(/version=010_trellis2/); // Prepare's tools fit the raw model: the tab keeps it
+  await expect(page.getByRole("tab", { name: "Parts" })).toHaveAttribute("title", "needs a prepared model");
+  // Simplify on the Simplify checkpoint: just that step with the chosen budget
   await page.goto("/#/asset/mock_tabs?version=030_remesh");
-  await page.getByText("Run this step again").click();
+  await tool(page, "Simplify");
   await page.getByLabel("Triangle budget").fill("5000");
   await page.locator(".panel").getByRole("button", { name: "Simplify", exact: true }).click();
   await expect.poll(() => posted.length).toBe(1);
@@ -1401,10 +1423,10 @@ test("Preparation states: a checked chain never says it stopped; an earlier step
   await expect(panel).toContainText("Model prepared; checked.");
   await expect(panel).not.toContainText("stopped");
   await expect(panel.getByRole("button", { name: "Continue preparation" })).toHaveCount(0);
+  await tool(page, "Export");
   await expect(panel.getByRole("button", { name: "Export for Godot" })).toBeVisible();
   await page.goto("/#/asset/mock_prep?version=020_clean"); // an ancestor of the check: not the mesh that was checked
   await expect(panel).toContainText("An earlier step; the chain was checked later (Checks 050).");
-  await expect(panel.getByRole("button", { name: "Export for Godot" })).toHaveCount(0);
   await page.goto("/#/asset/mock_prep?version=040_uv");
   await panel.getByRole("button", { name: "View checked result" }).click();
   await expect(page).toHaveURL(/version=050_validate/);
@@ -1415,7 +1437,6 @@ test("Preparation states: a checked chain never says it stopped; an earlier step
   await expect(panel.getByRole("button", { name: "Continue preparation" })).toBeVisible();
   await page.goto("/#/asset/mock_prep?version=070_clean");
   await expect(panel).toContainText("An earlier step; the newest is Simplified 080.");
-  await expect(panel.getByRole("button", { name: "Continue preparation" })).toHaveCount(0);
   await panel.getByRole("button", { name: "Open Simplified" }).click();
   await expect(page).toHaveURL(/version=080_remesh/);
 });
@@ -1429,31 +1450,29 @@ test("Acceptance walk at 1280×720: a checked prop reaches Export before the cre
     { version: "030_validate", step: "validate", parent: "020_bake", outputs: { checklist: "checklist.json" } },
   ]);
   await page.goto("/#/asset/mock_walk?version=030_validate");
+  await tool(page, "Export");
   const exportButton = page.getByRole("button", { name: "Export for Godot" });
   await expect(exportButton).toBeVisible();
   const panel = (await page.locator("aside.panel").boundingBox())!;
   const button = (await exportButton.boundingBox())!;
   expect(button.y + button.height).toBeLessThanOrEqual(panel.y + panel.height); // reachable without scrolling
   await expect(page.getByRole("radio", { name: "A person or humanoid character" })).toBeHidden(); // the templates wait under Character
-  expect(await top("#checklist")).toBeLessThan(await top("#character"));
   // an imported model: Check model, then Export, the tools below them
   await mockAsset(page, "mock_walk2", [{ version: "010_upload", step: "upload", parent: null, outputs: { mesh: "mesh.glb" } }]);
   await page.goto("/#/asset/mock_walk2?version=010_upload");
   await expect(page.getByRole("button", { name: "Check model" })).toBeVisible();
-  expect(await top("#finish")).toBeLessThan(await top("#tools"));
   await expect(page.locator("#parts").getByRole("button", { name: "Render the views" })).toBeHidden();
-  await expect(page.locator(".tools li", { hasText: "Parts" })).toBeAttached(); // still there, in the menu
   // a skinned character: the ready-made clips by default, the sentence and video forms only on request
   await page.route(/\/api\/clips\?/, (r) => r.fulfill({ json: [{ name: "Idle_A" }, { name: "Walk" }] }));
   await animMock(page, "mock_walk3");
   await page.goto("/#/asset/mock_walk3?version=020_rig_skin");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
-  await expect(page.getByRole("radio", { name: "Ready-made" })).toBeChecked();
+  await expect(page.getByRole("tab", { name: "Ready-made clips" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByLabel("Clips")).toBeVisible();
   await expect(page.getByRole("button", { name: /^Add \d+ animations?$/ })).toBeVisible();
   await expect(page.getByLabel("Motion prompt")).toHaveCount(0);
   await expect(page.getByLabel("Video file")).toHaveCount(0);
-  await page.getByRole("radio", { name: "From a video" }).check();
+  await tool(page, "From a video");
   await expect(page.getByLabel("Video file")).toBeVisible();
   await expect(page.getByLabel("Clips")).toHaveCount(0);
   await page.screenshot({ path: "test-results/walk-skinned-1280.png", animations: "disabled" });
@@ -1467,6 +1486,7 @@ test("Readiness: missing concept files make Set up the main action and keep the 
   const restricted = { version: "010_upload", step: "upload", parent: null, params: {}, outputs: { mesh: "mesh.glb" }, created: "", metrics: {}, provenance: "step", restricted: true };
   await page.route("**/api/assets/mock_restricted", (r) => r.fulfill({ json: { asset: { id: "mock_restricted", name: "r", created: "" }, versions: [restricted] } }));
   await page.goto("/#/asset/mock_restricted?version=010_upload");
+  await tool(page, "Export");
   await expect(page.getByRole("button", { name: "Export for Godot" })).toBeDisabled();
   await expect(page.locator(".panel")).toContainText("This model is restricted, so it cannot be exported.");
   const posted = await mockAsset(page, "mock_ready", [
@@ -1502,6 +1522,7 @@ test("Parts: its section, the views, the parts list, and a click plus a name run
   await page.route("**/files/mock_parts/**/*.webp", (r) => r.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==", "base64") }));
   await page.setViewportSize({ width: 1500, height: 900 });
   await page.goto("/#/asset/mock_parts?version=030_parts");
+  await tool(page, "Parts");
   await expect(page.locator(".stages button[aria-current=step]")).toContainText("Prepare"); // a parts version is a prepared checkpoint
   await expect(page.locator(".view-thumb")).toHaveCount(12);
   await expect(page.locator(".parts-list li")).toHaveText([/1,200 faces/, /Body\s*9,000 faces/]);
@@ -1963,6 +1984,7 @@ test("Animation editor: deleting the only copy can be saved as a return to the b
   await page.goto("/#/asset/mock_anim5?version=030_anim");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
   await page.getByRole("combobox", { name: "Animation" }).selectOption({ label: "Play: Walk" });
+  await tool(page, "Edit animation");
   await page.getByRole("button", { name: "Edit animation" }).click();
   await page.locator(".anim-editor").getByRole("button", { name: "Duplicate", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "Clip to edit" })).toHaveValue("Walk copy");
@@ -2004,7 +2026,7 @@ test("Reconnect: a version deleted while the stream was down falls back; a job t
   ]);
   await page.route("**/api/jobs/job-*", (r) => r.fulfill({ json: { status: "running" } })); // registered last: wins
   await page.goto("/#/asset/mock_rc?version=030_remesh");
-  await page.getByText("Run this step again").click();
+  await tool(page, "Simplify");
   await page.getByLabel("Triangle budget").fill("5000");
   await page.locator(".panel").getByRole("button", { name: "Simplify", exact: true }).click();
   await expect.poll(() => posted.length).toBe(1);
@@ -2090,7 +2112,7 @@ test("Prepare: level and square, close slits and square the taper reach their st
   const panel = page.locator(".panel");
   // Simplify: millimetres in, metres to the step; a bad value blocks the run
   await page.goto("/#/asset/mock_fence?version=030_remesh");
-  await page.getByText("Run this step again").click();
+  await tool(page, "Simplify");
   await page.getByLabel("Triangle budget").fill("6000");
   await page.getByLabel("Close slits up to (mm)").fill("-1");
   await expect(panel.getByText("Close slits: a positive number of millimetres")).toBeVisible();
@@ -2101,16 +2123,16 @@ test("Prepare: level and square, close slits and square the taper reach their st
   expect(posted[0]).toEqual(["remesh", { faces: 6000, close: 0.012 }]);
   // Bake: the taper checkbox
   await page.goto("/#/asset/mock_fence?version=050_bake");
-  await page.getByText("Run this step again").click();
+  await tool(page, "Bake");
   await page.getByLabel("Square a flat prop's perspective taper").check();
   await panel.getByRole("button", { name: "Bake", exact: true }).click();
   await expect.poll(() => posted.length).toBe(2);
   expect(posted[1]).toEqual(["bake", { texture_size: 2048, detaper: true }]);
   // Clean: level and square; left unticked, nothing extra is sent
   await page.goto("/#/asset/mock_fence?version=020_clean");
-  await page.getByText("Run this step again").click();
+  await tool(page, "Clean");
   await page.getByLabel("Also turn it square to the axes").check();
-  await panel.locator("details", { hasText: "Run this step again" }).screenshot({ path: "test-results/prepare-fence-options.png" });
+  await panel.screenshot({ path: "test-results/prepare-fence-options.png" });
   await panel.getByRole("button", { name: "Clean", exact: true }).click();
   await expect.poll(() => posted.length).toBe(3);
   expect(posted[2]).toEqual(["clean", { level: true, straighten: true }]); // a generated model stands upright by default
@@ -2175,9 +2197,8 @@ test("Setup: Blender starts when it is needed; Open in Blender then works with n
   await page.route(`**/api/assets/${a.id}/blender/open`, (r) => (opened++, r.fulfill({ json: { ok: true, version: "001_upload", objects: ["m"] } })));
   await toLibrary(page);
   await openCard(page, "start-blender");
-  await page.locator("#blender > summary").click();
-  await expect(page.getByText("Open starts your Blender and its add-on's server")).toBeVisible();
-  await page.getByRole("button", { name: "Open 001 in Blender" }).click();
+  await expect(page.getByRole("group", { name: "Blender" }).getByRole("button", { name: "○ Blender" })).toHaveAttribute("title", /Open starts your Blender and its add-on's server/);
+  await page.getByRole("button", { name: "Open 001" }).click();
   await expect(page.getByText("Opened 001_upload in Blender")).toBeVisible();
   expect(opened).toBe(1);
 });
@@ -2214,6 +2235,7 @@ test("Unsaved edits are guarded: Close, a link and a version switch ask first; a
   await page.goto("/#/asset/mock_dirty?version=030_anim");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
   await page.getByRole("combobox", { name: "Animation" }).selectOption({ label: "Play: Walk" });
+  await tool(page, "Edit animation");
   await page.getByRole("button", { name: "Edit animation" }).click();
   await page.getByText("Clip tools", { exact: true }).click();
   await page.getByRole("spinbutton", { name: "Speed" }).fill("0.5");
@@ -2231,7 +2253,7 @@ test("Unsaved edits are guarded: Close, a link and a version switch ask first; a
   await expect(page.getByRole("spinbutton", { name: "Speed" })).toHaveValue("0.5");
   // a version switch from History asks too
   await history(page);
-  await page.locator("#versions li").first().click();
+  await page.locator("#versions li").first().locator("button").first().click();
   await expect.poll(() => dialogs.length).toBe(3);
   await expect(page).toHaveURL(/version=030_anim/);
   await expect(page.locator(".anim-editor")).toHaveCount(1);
@@ -2239,6 +2261,7 @@ test("Unsaved edits are guarded: Close, a link and a version switch ask first; a
   answer = true;
   await close.click();
   await expect(page.locator(".anim-editor")).toHaveCount(0);
+  await tool(page, "Edit animation");
   await page.getByRole("button", { name: "Edit animation" }).click();
   await page.locator(".anim-editor").getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.locator(".anim-editor")).toHaveCount(0);
@@ -2289,6 +2312,7 @@ test("The motion panel never scrolls sideways; the editor fits a laptop and a co
   await page.goto("/#/asset/mock_fit?version=030_anim");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
   await page.getByRole("combobox", { name: "Animation" }).selectOption({ label: "Play: Walk" });
+  await tool(page, "Edit animation");
   await page.getByRole("button", { name: "Edit animation" }).click();
   const transport = page.locator(".timeline-slot .transport");
   await expect(transport).toBeVisible();
@@ -2314,6 +2338,7 @@ test("The timeline's canvases draw at the size they are shown; the 3D view keeps
   await page.goto("/#/asset/mock_ruler?version=030_anim");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
   await page.getByRole("combobox", { name: "Animation" }).selectOption({ label: "Play: Walk" });
+  await tool(page, "Edit animation");
   await page.getByRole("button", { name: "Edit animation" }).click();
   await expect(page.locator(".timeline-slot canvas").first()).toBeVisible();
   const sizes = () =>
@@ -2337,8 +2362,10 @@ test("A result that arrives during an unsaved edit is offered, not opened over t
   page.on("dialog", (d) => (dialogs.push(d.message()), d.dismiss()));
   await page.goto("/#/asset/mock_late?version=030_anim");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
+  await tool(page, "Check");
   await page.locator("aside.panel").getByRole("button", { name: "Check model" }).click(); // a job on this version
   await page.getByRole("combobox", { name: "Animation" }).selectOption({ label: "Play: Walk" });
+  await tool(page, "Edit animation");
   await page.getByRole("button", { name: "Edit animation" }).click();
   await page.getByText("Clip tools", { exact: true }).click();
   await page.getByRole("spinbutton", { name: "Speed" }).fill("0.5");
@@ -2408,7 +2435,7 @@ test("Animate: an animation file comes in as one of your motions; its page bring
   await page.goto("/#/asset/mock_file?version=030_rig_skin");
   await expect(page.locator('optgroup[label="Your motions"]')).toContainText("Samba (file) · 3.2 s");
   const panel = page.locator("aside.panel"); // the Import page's own form stays mounted, hidden
-  await panel.getByRole("radio", { name: "From a file" }).check(); // the animation source (Pass 2: one form shown)
+  await tool(page, "From a file");
   const go = panel.getByRole("button", { name: "Import animation", exact: true });
   await expect(go).toBeDisabled(); // no file yet
   await panel.getByLabel("Animation file").setInputFiles({ name: "run.fbx", mimeType: "application/octet-stream", buffer: Buffer.from("fbx") });
@@ -2628,6 +2655,7 @@ test("Animation editor: the keys as a list, selected and moved a frame without a
   await page.getByRole("combobox", { name: "Animation" }).selectOption({ label: "Play: Walk" });
   await page.getByRole("button", { name: "Pause" }).click();
   await page.getByRole("spinbutton", { name: "Frame number" }).fill("7");
+  await tool(page, "Edit animation");
   await page.getByRole("button", { name: "Edit animation" }).click();
   await expect(page.getByRole("combobox", { name: "Clip to edit" })).toHaveValue("Walk"); // the editor has the clip
   await page.evaluate(() => (window as any).__viewer.testPickBone("Spine"));
@@ -2799,7 +2827,7 @@ test("2D workspace: pick a picture, pixelize it, play the sheet, recolour from i
   );
   await page.route("**/files/mock_2d/*/palette.gpl", (r) => r.fulfill({ body: "GIMP Palette\nName: mock\n#\n255   0   0 red\n  0   0 255 blue\n", contentType: "text/plain" }));
   await page.goto("/#/asset/mock_2d?version=020_concepts");
-  await expect(page.locator(".stages [aria-current=step]")).toHaveText("Picture"); // the 2D row
+  await expect(page.locator(".stages [aria-current=step]")).toHaveText("Pixelize"); // the 2D row
   const strip = page.getByRole("group", { name: "Pictures" });
   await expect(strip.getByRole("button")).toHaveCount(3);
   await strip.getByRole("button", { name: "picture 2" }).click();
@@ -2824,7 +2852,8 @@ test("2D workspace: pick a picture, pixelize it, play the sheet, recolour from i
   await page.getByRole("group", { name: "View" }).getByRole("button", { name: "4×" }).click();
   await expect(page.locator(".sheet-canvas")).toHaveAttribute("width", "64");
   // a recolour from the version's own palette
-  await page.getByText("Palette and recolour").click();
+  await tool(page, "Recolour");
+  await page.locator("#recolour > summary").click();
   await page.getByLabel("Colour #ff0000").fill("#00ff00");
   await page.getByRole("button", { name: "Make the recoloured version (1 colour)" }).click();
   await expect.poll(() => posted.length).toBe(2);
@@ -2863,8 +2892,7 @@ test("Sprites: an animated character's clips rendered for 2D, then pixel art fro
   );
   await page.goto("/#/asset/mock_sprites?version=030_anim");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
-  await page.getByText("Tools ▾").click();
-  await page.getByRole("button", { name: "Sprites for 2D" }).click();
+  await tool(page, "Sprites");
   const form = page.locator("#sprites");
   await expect(form.getByLabel("Walk")).toBeChecked();
   await form.getByLabel("Idle").uncheck();
@@ -2915,10 +2943,7 @@ test("2D: Animate this character makes a 3D asset from the full-size picture beh
   const animate = page.locator("#animate");
   await expect(animate.getByRole("heading", { name: "Animate this character" })).toBeVisible();
   await expect(animate).toContainText("the full-size one the pixel art was made from");
-  const sections = await page.locator("aside.panel > section, aside.panel > details").evaluateAll((els) => els.map((e) => e.id || e.querySelector("h3")?.textContent || ""));
-  expect(sections.slice(0, 2)).toEqual(["Pixel art", "animate"]);
   await expect(animate.getByRole("button", { name: "Make a 3D character from this picture" })).toHaveClass(/primary/);
-  await expect(page.locator("aside.panel").getByRole("button", { name: /^Export for/ })).not.toHaveClass(/primary/);
   await animate.getByRole("button", { name: "Make a 3D character from this picture" }).click();
   await expect.poll(() => posted.length).toBe(3);
   expect(created).toEqual([{ name: "lantern (3D)" }]); // a 3D asset: no kind
@@ -2949,6 +2974,7 @@ test("2D Finish: check the sprites, export them for Godot 2D or Paper2D, the che
   );
   await page.goto("/#/asset/mock_fin2d?version=020_pixelize");
   const panel = page.locator("aside.panel");
+  await tool(page, "Check and export");
   await expect(panel.getByRole("button", { name: "Check sprites" })).toBeVisible();
   await expect(panel.getByRole("radio", { name: "Godot 2D" })).toBeChecked();
   await expect(panel.getByRole("radio", { name: "Unreal (Paper2D)" })).toBeVisible();
@@ -2976,7 +3002,7 @@ test("Move sets: a fighter's ready-made set picks the pack's names it has; the f
   await expect(set.locator("option", { hasText: "Brawler (Double Dragon)" })).toContainText("6 animations"); // of its 20, the 6 this pack has
   await set.selectOption("brawler");
   await expect(page.getByRole("button", { name: "Add 6 animations" })).toBeVisible();
-  await page.getByLabel("From a sentence").check();
+  await tool(page, "From a sentence");
   await page.getByRole("group", { name: "Fighting moves" }).getByRole("button", { name: "Roundhouse kick" }).click();
   await expect(page.getByLabel("Motion prompt")).toHaveValue(/roundhouse kick/);
   await expect(page.getByRole("spinbutton", { name: "Seconds" })).toHaveValue("2.5");
@@ -3014,15 +3040,13 @@ test("Animate this character is offered for a character picture, not for a wallp
     { kind: "2d" },
   );
   await page.goto("/#/asset/mock_wall2d?version=020_concepts");
+  await tool(page, "Pixelize");
   await expect(page.locator("aside.panel").getByRole("heading", { name: "Make it pixel art" })).toBeVisible();
   await expect(page.locator("#animate")).toHaveCount(0);
-  // Tools in a 2D asset: the 3D tools say so, not that they need setting up
-  await page.locator(".tools > summary").click();
-  await expect(page.locator(".tools li", { hasText: "Texture detail" })).toHaveText(/3D models only$/);
-  await expect(page.locator(".tools li", { hasText: "Sprites for 2D" })).toContainText("in a 3D character: Animate this character");
-  // M61: the 2D tool opens its section of the panel
-  await expect(page.locator(".tools li", { hasText: "Upscale or redraw" })).toContainText("available");  await page.locator(".tools").getByRole("button", { name: "Upscale or redraw" }).click();
-  await expect(page.locator("#redraw")).toHaveAttribute("open", "");
+  // the 2D strip: the picture tools, each enabled by what the picture is
+  await tool(page, "Upscale or redraw");
+  await expect(page.locator("#redraw")).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Texture detail" })).toHaveCount(0);
 });
 
 test("A redrawn character's cut-out offers Redraw again: the same picture, the same look, another seed", async ({ page }) => {
@@ -3097,7 +3121,7 @@ test("2D workspace: a tile shows repeated with its seams, makes pixel art in who
     { kind: "2d" },
   );
   await page.goto("/#/asset/mock_tile?version=020_concepts");
-  await expect(page.locator(".stages [aria-current=step]")).toHaveText("Tiles");
+  await expect(page.locator(".stages [aria-current=step]")).toHaveText("Finish");
   await expect(page.getByRole("img", { name: "the tile, repeated 3 × 3" })).toBeVisible();
   await page.getByRole("button", { name: "One tile" }).click();
   await expect(page.getByRole("img", { name: "the tile", exact: true })).toBeVisible();
@@ -3106,11 +3130,14 @@ test("2D workspace: a tile shows repeated with its seams, makes pixel art in who
   await expect(panel).toContainText("Its edges meet");
   await expect(panel).toContainText("4.20 before the mending");
   // pixel art in whole tiles: a size that divides 512, no outline (a tile has no edge to draw round)
+  await tool(page, "Pixelize");
   await expect(page.getByLabel("Pixels a side", { exact: true }).first()).toBeChecked();
   await expect(page.getByRole("combobox", { name: "Pixels a side" })).toHaveValue("64"); // an eighth of the tile
   await expect(page.getByRole("combobox", { name: "Pixels a side" }).locator("option")).toHaveText(["8 × 8", "16 × 16", "32 × 32", "64 × 64", "128 × 128", "256 × 256"]);
   await expect(page.getByLabel("Outline")).toHaveCount(0);
+  await tool(page, "Check and export");
   await expect(panel.getByRole("button", { name: "Check the tile" })).toBeVisible();
+  await tool(page, "Pixelize");
   await page.getByRole("combobox", { name: "Pixels a side" }).selectOption("16");
   await page.getByRole("button", { name: "Make pixel art" }).click();
   await expect.poll(() => posted.length).toBe(1);
@@ -3143,7 +3170,7 @@ test("2D workspace: a background becomes parallax layers (depth, then layers); t
   );
   await page.goto("/#/asset/mock_stage?version=020_concepts");
   const panel = page.locator("aside.panel");
-  await expect(panel.getByRole("heading", { name: "Parallax layers" })).toBeVisible(); // a stage: its own section
+  await expect(page.getByRole("tab", { name: "Layers" })).toHaveAttribute("aria-selected", "true"); // a stage: layers first
   await panel.getByLabel("Layers").selectOption("3");
   await panel.getByRole("button", { name: "Make parallax layers" }).click();
   await expect.poll(() => posted.length).toBe(2);
@@ -3153,7 +3180,7 @@ test("2D workspace: a background becomes parallax layers (depth, then layers); t
   ]);
   // the layers version: a scrolling stack, its speeds, the bands, its check and export
   await expect(page).toHaveURL(/version=040_layers/);
-  await expect(page.locator(".stages [aria-current=step]")).toHaveText("Layers");
+  await expect(page.locator(".stages [aria-current=step]")).toHaveText("Finish");
   await expect(page.getByRole("img", { name: "2 parallax layers, scrolling" })).toBeVisible();
   await page.getByRole("button", { name: "Pause" }).click();
   await page.getByLabel("Camera").fill("1");
@@ -3164,6 +3191,7 @@ test("2D workspace: a background becomes parallax layers (depth, then layers); t
   await expect(page.getByRole("img", { name: "the picture" })).toHaveAttribute("src", /layer_0\.png/);
   await page.getByLabel("Show").selectOption("bands");
   await expect(page.getByRole("img", { name: "the picture" })).toHaveAttribute("src", /bands\.png/);
+  await tool(page, "Layers");
   await expect(panel.getByText("Make the layers again")).toBeVisible();
 });
 
@@ -3183,7 +3211,7 @@ test("Pixel editor: draw a line in a palette colour, undo and redo, fill, move a
   );
   await page.route("**/files/mock_edit/*/palette.gpl", (r) => r.fulfill({ body: "GIMP Palette\nName: m\n#\n255   0   0 red\n  0   0 255 blue\n", contentType: "text/plain" }));
   await page.goto("/#/asset/mock_edit?version=020_pixelize");
-  await page.locator("#edit > summary").click();
+  await tool(page, "Edit the pixels");
   await page.getByRole("button", { name: "Edit the pixels" }).click();
   await expect(page.locator("canvas.pixel-edit")).toHaveAttribute("aria-label", "frame 1 of 2, 16 × 16 px");
   const box = (await page.locator("canvas.pixel-edit").boundingBox())!;
@@ -3241,7 +3269,7 @@ test("Pixel editor: the saved frame differs from the original exactly where the 
   );
   await page.route("**/files/mock_line/*/sheet.json", (r) => r.fulfill({ json: { frames: [{ filename: "f", frame: { x: 0, y: 0, w: 16, h: 16 }, duration: 100 }], meta: { frameTags: [] } } }));
   await page.goto("/#/asset/mock_line?version=020_pixelize");
-  await page.locator("#edit > summary").click();
+  await tool(page, "Edit the pixels");
   await page.getByRole("button", { name: "Edit the pixels" }).click();
   const c = page.locator("canvas.pixel-edit");
   await expect(c).toHaveAttribute("aria-label", "frame 1 of 1, 16 × 16 px");
@@ -3295,7 +3323,7 @@ test("Pixel editor: add, duplicate and move frames, time one, tag them as a play
   );
   await page.route("**/files/mock_frames/*/palette.gpl", (r) => r.fulfill({ body: "GIMP Palette\nName: m\n#\n255   0   0 red\n  0   0 255 blue\n", contentType: "text/plain" }));
   await page.goto("/#/asset/mock_frames?version=020_pixelize");
-  await page.locator("#edit > summary").click();
+  await tool(page, "Edit the pixels");
   await page.getByRole("button", { name: "Edit the pixels" }).click();
   const canvas = page.locator("canvas.pixel-edit");
   const panel = page.locator("aside.panel");
@@ -3377,7 +3405,7 @@ test("Generate: the best preset for the card by default, the user's pick kept, a
   await page.goto("/#/asset/mock_card?version=020_prep");
   const panel = page.locator(".panel");
   await expect(panel).toContainText("Faithful HD — Recommended for this GPU");
-  await page.getByText("Advanced", { exact: true }).click();
+  await page.getByText("More settings", { exact: true }).click();
   await page.getByRole("radio", { name: /^Faithful Pixal3D: follows/ }).check(); // the user's own pick
   await page.reload();
   await expect(panel.locator("p", { hasText: "Pixal3D: follows the picture closely." }).first()).toContainText("Faithful");
@@ -3441,11 +3469,10 @@ test("M62: an import with materials offers the bake in its Prepare panel, like a
     { version: "020_import_model", step: "import_model", parent: "010_upload", params: {}, outputs: { mesh: "mesh.glb" }, metrics: { materials: 2, textures: 2, triangles: 1200, skeleton: null, clips: [] } },
   ]);
   await page.goto("/#/asset/mock_m62?version=020_import_model");
-  await page.getByText("Simplify geometry (copy)").click();
+  await tool(page, "Prepare model");
   await expect(page.getByLabel("Texture size")).toBeVisible();
-  await expect(page.locator(".panel")).toContainText("materials baked into one texture set");
   if (shots) await page.screenshot({ path: `${shots}/prepare-imported.png`, animations: "disabled" });
-  await page.getByRole("button", { name: "Simplify geometry" }).click();
+  await page.getByRole("button", { name: "Prepare model" }).click();
   await expect.poll(() => imp.map(([s]) => s)).toContain("bake");
   if (shots) {
     await mockAsset(page, "mock_m62g", [
@@ -3472,7 +3499,7 @@ const redrawAsset = async (page: Page, id: string) => {
     { kind: "2d" },
   );
   await page.goto(`/#/asset/${id}?version=030_concepts`);
-  await page.locator("#redraw > summary").click();
+  await tool(page, "Upscale or redraw");
   return { posted, form: page.locator("#redraw") };
 };
 

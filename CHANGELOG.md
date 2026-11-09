@@ -9,6 +9,19 @@ milestone, is in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) §4.
 Built in a cloud session without a GPU or Blender. The unit and interface tests pass. None of it has run on a GPU
 or in Blender yet: the checks for that are in [docs/LAPTOP.md](docs/LAPTOP.md).
 
+### Interface
+
+- **A new workspace layout** (M71). Three thin rows above the view, no taller than the old two: the app bar (with the
+  Blender group), the step tabs (with the asset's name) and a **tool strip** with the tools of the chosen
+  tab. The panel on the right shows the one tool you chose, with a line on what it does. A tool that does not fit
+  the shown version is greyed out and says why; the next one is marked with a dot. The **Tools** menu and the
+  folded panel sections are gone. Clean, Simplify, Unwrap and Bake are tools of their own.
+- **Blender on every asset page**, 3D or 2D: a status dot, **Open 004** and **Save back** in
+  the top bar, and a **Blender** button on each History row.
+- **More settings** replaces **Advanced** in the panels that had it.
+- **Run any step** is a developer option: turn on **Developer options** in Setup to show it.
+- The activity bar is one slim line.
+
 ### Animation
 
 - **Everyone in a video** (M64). A motion made from a video with more than one person says how many it found

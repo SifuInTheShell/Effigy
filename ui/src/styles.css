@@ -293,10 +293,10 @@ ul.muted {
 
 /* global header */
 header.top {
-  min-height: 56px;
+  height: 40px;
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 16px;
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
@@ -310,16 +310,17 @@ header.top .brand {
   letter-spacing: 0.02em;
 }
 header.top .brand img {
-  height: 28px; /* the head is taller than wide: its own width */
+  height: 24px; /* the head is taller than wide: its own width */
 }
 header.top nav {
   display: flex;
   gap: 4px;
 }
 header.top nav a {
+  white-space: nowrap;
   color: var(--text-2);
   text-decoration: none;
-  padding: 8px 12px;
+  padding: 4px 10px;
   border-radius: 8px;
 }
 header.top nav a[aria-current="page"] {
@@ -555,20 +556,105 @@ dl.facts dd {
 /* workspace */
 .workspace {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
 }
+/* M71: row 2, the step tabs (and the version's label, Licences and History at the right) */
 .ws-title {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
-  padding: 8px 16px;
+  align-items: stretch;
+  gap: 16px;
+  padding: 0 16px;
+  height: 34px;
   border-bottom: 1px solid var(--border);
 }
-.ws-title h1 {
-  font-size: 20px; /* the page's heading, the size the asset name always had */
-  overflow-wrap: anywhere;
+.ws-version {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  min-width: 0;
+}
+.ws-version .muted {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* the asset's name, leading the tab row */
+.ws-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-shrink: 1;
+}
+.ws-name button.small {
+  min-height: 24px;
+  font-size: 12px;
+  padding: 0 8px;
+}
+.ws-name h1 {
+  margin: 0;
+  font-size: 16px;
+  max-width: 24ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+header.top .blender,
+header.top .blender-slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+header.top button.small {
+  min-height: 26px;
+  font-size: 12px;
+  padding: 0 8px;
+}
+/* row 3, the tool strip */
+.toolstrip {
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  height: 34px;
+  padding: 0 16px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.toolstrip [role="tablist"] {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  width: max-content;
+}
+.toolstrip button {
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.toolstrip button[aria-selected="true"] {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--raised);
+}
+.toolstrip .sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--border-strong);
+}
+.toolstrip .dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
 }
 /* for screen readers and the keyboard: out of sight until needed (UX-13) */
 .sr-only {
@@ -748,35 +834,31 @@ ol.steps {
 .stages {
   display: flex;
   gap: 2px;
-  margin: 0 0 0 auto;
-  max-width: 100%;
-  justify-content: flex-end;
+  margin: 0;
   padding: 0;
   list-style: none;
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: stretch;
+}
+.stages li {
+  display: flex;
 }
 .stages button {
-  min-height: 32px;
-  padding: 0 10px;
+  min-height: 0;
+  padding: 0 12px;
   font-size: 13px;
   color: var(--text-2);
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
 }
 .stages .done {
   color: var(--ok);
 }
 .stages [aria-current="step"] {
   color: var(--text);
-  border-color: var(--accent);
-}
-.stages li + li::before {
-  content: "›";
-  color: var(--border);
-  margin-right: 2px;
-}
-.stages button {
-  white-space: nowrap;
-  padding: 0 8px;
+  border-bottom-color: var(--accent);
 }
 .stages .optional {
   border-style: dashed;
@@ -790,66 +872,14 @@ ol.steps {
 .stages .chip {
   display: inline-flex;
   align-items: center;
-  min-height: 32px;
+  min-height: 26px;
+  align-self: center;
   padding: 0 10px;
   font-size: 13px;
   color: var(--text-2);
   border: 1px dashed var(--border);
   border-radius: 8px;
   white-space: nowrap;
-}
-.tools {
-  position: relative;
-}
-.tools > summary {
-  list-style: none;
-  display: inline-flex;
-  align-items: center;
-  min-height: 32px;
-  padding: 0 10px;
-  font-size: 13px;
-  color: var(--text-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  margin: 0;
-}
-.tools[open] > summary {
-  margin: 0;
-  border-color: var(--accent);
-}
-.tools > summary::-webkit-details-marker {
-  display: none;
-}
-.tools > ul {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 5;
-  margin: 0;
-  padding: 8px;
-  list-style: none;
-  display: grid;
-  gap: 6px;
-  min-width: 300px;
-  width: max-content;
-  max-width: min(460px, calc(100vw - 32px));
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-}
-.tools li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px;
-}
-.tools li > button {
-  flex: none;
-}
-.tools li > span {
-  text-align: right;
 }
 .ws-body {
   display: grid;
@@ -1341,27 +1371,39 @@ canvas {
   font-size: 13px;
 }
 
-/* activity strip */
+/* activity strip: one slim line (M71) */
 footer {
   border-top: 1px solid var(--border);
   background: var(--panel);
   max-height: 40vh;
   overflow: auto;
-  padding: 8px 16px;
-  font-size: 13px;
+  padding: 2px 16px;
+  min-height: 27px;
+  font-size: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
 }
-footer details {
-  padding: 2px 0;
+footer > details:first-child {
+  min-width: 0;
+  flex: 1;
+}
+footer details.earlier {
+  margin-left: auto;
+  flex: none;
 }
 footer summary {
   display: list-item;
-  min-height: 32px;
-  line-height: 32px;
+  min-height: 22px;
+  line-height: 22px;
+}
+footer > span {
+  line-height: 22px;
 }
 footer button {
-  min-height: 28px;
-  font-size: 13px;
-  padding: 0 10px;
+  min-height: 20px;
+  font-size: 12px;
+  padding: 0 8px;
   margin-left: 6px;
 }
 footer progress {
@@ -1403,6 +1445,7 @@ ul.cards {
     min-height: 100%;
   }
   header.top {
+    height: auto;
     flex-wrap: wrap;
     gap: 8px 16px;
     padding: 8px 16px;
@@ -1442,6 +1485,14 @@ ul.cards {
     grid-template-columns: 1fr;
   }
   .stages {
+    margin-left: 0;
+  }
+  .ws-title {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 0 16px;
+  }
+  .ws-version {
     margin-left: 0;
   }
 }

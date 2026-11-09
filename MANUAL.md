@@ -160,25 +160,36 @@ it needs.
 
 A model you imported starts at **Prepare**.
 
-### The panel
+### The tool strip and the panel
 
-The panel shows the **next step** for the shown version as one main button, with the settings you may want to
-change under it. Other things you can do are in folded sections below it. The **Tools ▾** menu opens the extra
-tools, and its grey text says when each one is available:
+Under the tabs, the **tool strip** lists the tools of the tab you are on. Click one and the panel on the right
+shows it: its name, one line on what it does, then its settings and button. The tool the shown version asks for
+next carries a small dot and is chosen for you whenever you open another version; opening a model that is rigged
+or animated lands on **Character** with the next tool chosen. A tool that does not fit the shown version is greyed
+out, and hovering it says why (for example "needs an animated model"). A tab whose tools fit the shown version
+only switches the strip (on a model with a skeleton, **Character** keeps the model, to fit the skeleton again);
+otherwise a tab opens its newest version. When a Parts, Face from image or Texture detail run finishes, its result
+opens on that tool.
 
-| Tool | When |
+| Tab | Tools |
 |---|---|
-| **Face from image** | at Prepare, once textured; generated models only |
-| **Texture detail** | at Prepare, once textured |
-| **Parts** | at Prepare |
-| **Sprites for 2D** | at Prepare (one still frame) or after Character (animated) |
-| **Edit in Blender** | from Generate on, once there is a 3D model |
-| **Advanced: run any step** | always |
+| **Reference** | Describe, Concepts, Remove background |
+| **Generate** | Generate 3D, Another variation |
+| **Prepare** | Prepare model (the whole recipe), Clean, Simplify, Unwrap, Bake, Face from image, Texture detail, Parts |
+| **Character** | Fit skeleton, Edit skeleton, Attach to skeleton; Ready-made clips, From a sentence, From a video, From a file, Connect clips, Edit animation; Sprites |
+| **Finish** | Check, Export |
 
-A tool whose model is not installed says **needs a setup item** and links to its card in Setup.
+A 2D asset has Picture (Pictures, Upscale or redraw), Pixelize (Pixelize, Recolour, Animate it), Layers, Tiles,
+Edit (Edit the pixels) and Finish (Check and export). Clean, Simplify, Unwrap and Bake run one step again on this
+model with all its settings. A tool whose model is not installed links to its card in Setup. Extra settings sit
+under **More settings** in the panel that has them.
 
-While a step runs on the asset, the panel shows what it is doing (**Generating the 3D model…**, **Baking
-textures…**) with a **Cancel** button.
+Above the tool the panel says what the version is where that helps: an imported file, a motion, how far the
+preparation got. While a step runs on the asset, the panel shows what it is doing (**Generating the 3D model…**,
+**Baking textures…**) with a **Cancel** button.
+
+The tab row starts with the asset's name and **Rename** and ends with the version's name, **Licences** and
+**History**. The top bar has the **Blender** group at the right (see [editing in Blender](#12-editing-in-blender)). The activity line at the bottom shows the latest step; **Earlier activity** unfolds the rest.
 
 ### The 3D view
 
@@ -213,9 +224,9 @@ the History.
 **Your file** means Effigy does not know an imported file's licence: it is yours to check. **Restricted** means a
 component is not cleared for commercial use, so the version cannot be exported.
 
-### Advanced: run any step
+### Run any step (developer option)
 
-For when the usual buttons are not enough: choose a step (each says what it does), optionally a preset, write its
+Off by default. Turn on **Developer options** in Setup and **⋯ Run any step** appears at the end of the tool strip. For when the usual buttons are not enough: choose a step (each says what it does), optionally a preset, write its
 settings as JSON (`{}` for the defaults) and **Run**. The result is a new version like any other. The steps' help
 texts list their settings. Agents use the same steps (see [section 15](#15-working-with-an-ai-agent)).
 
@@ -286,8 +297,8 @@ On the cut-out, the panel shows **Generate the 3D model** with the generator the
 | **Fast** | TRELLIS.2: another model, needs less memory |
 
 The best one your card runs is chosen and marked **Recommended for this GPU** (on a 16 GB card: **Faithful, high
-quality**). Pick another under **Advanced**; the app remembers your pick. A generator your card cannot run is shown
-greyed out with the memory it needs. More under **Advanced**:
+quality**). Pick another under **More settings**; the app remembers your pick. A generator your card cannot run is shown
+greyed out with the memory it needs. More under **More settings**:
 
 - **Background behind your picture**: **Automatic**, **Grey** (for dark subjects such as black fur or dark
   armour), **Black** or **White**. The generator sees your cut-out on a plain background; on black, very dark parts
@@ -314,7 +325,7 @@ A freshly generated model shows small holes and loose bits, and has far more tri
   materials and textures onto the simplified mesh instead.
 - **Check** runs the game-readiness checks (see [section 7](#7-checking-and-exporting-a-3d-model)).
 
-**Height in metres** scales it to its real size (empty keeps it). Under **Advanced**:
+**Height in metres** scales it to its real size (empty keeps it). Under **More settings**:
 
 - **Topology**: **Triangles** (game-ready, smallest) or **Quads** (clean loops for rigging and sculpting; the budget
   then counts quads).
@@ -337,7 +348,7 @@ other settings. A model with a whole area missing (a black cat's back) is better
 ### Face from image
 
 Copies the face from your picture onto the texture, so the face is as sharp as the picture. On a prepared,
-textured model: **Tools → Face from image**, choose the **Region** (**Head** or **Whole front**) and the
+textured model: the **Face from image** tool, choose the **Region** (**Head** or **Whole front**) and the
 **Strength**, then **Face from image** (a few seconds). If the picture does not line up with the model, it says so
 and changes nothing. The Setup card **Face detail** sharpens the picture first (4× upscale); without it the face is
 copied as it is.
@@ -345,7 +356,7 @@ copied as it is.
 ### Texture detail
 
 Redraws a texture's fine detail (buttons, stitching, wood grain) from close-up views; the shape and the colours
-stay. **Tools → Texture detail**, then **Refine texture** (about 4–6 minutes). **Description** guides it (the
+stay. the **Texture detail** tool, then **Refine texture** (about 4–6 minutes). **Description** guides it (the
 asset's own by default), **Detail strength** sets how far it may redraw. Besides the views all round, it adds up to
 three where those see the surface poorly (the top of the shoulders, a ledge, a hollow); a prop wider than tall
 gets none from above, which invented tiles on flat tops. Compare the result with the version before it in History:
@@ -369,8 +380,7 @@ which gives cleaner detail and is used by itself once installed.
 
 ### Parts
 
-Finds the pieces of a model and names them, so your game files keep each piece as its own object. **Tools →
-Parts**:
+Finds the pieces of a model and names them, so your game files keep each piece as its own object. the **Parts** tool:
 
 1. **Render the views** (twelve pictures, about 15 seconds).
 2. Click the piece in the big picture: two or three points spread over it. Hold **Shift** (or tick **Next click is
@@ -627,7 +637,7 @@ palette, a clean edge.
   (16)**.
 - **Dither**: **None**, **Ordered 2 × 2** or **Ordered 4 × 4**.
 - **Outline**: **None**, **Darkest colour** or **Black**: a one-pixel outline round the figure.
-- **Advanced**: **Each pixel's colour** (**The most frequent** for pixel-style pictures, **The middle value** for
+- **More settings**: **Each pixel's colour** (**The most frequent** for pixel-style pictures, **The middle value** for
   renders and photos) and when a pixel counts as transparent.
 
 **Make pixel art** (seconds). The result gives the **Sprite sheet (PNG)**, the **Sheet data (Aseprite JSON)**, the
@@ -640,13 +650,13 @@ recoloured version**. That is how you make an enemy variant or a second player.
 ### Sprites from a 3D character
 
 A 3D model drawn from the side in whole pixels, every animation in place, makes a sprite sheet for a 2D game. On a
-prepared model (one still frame per view) or an animated character, **Tools → Sprites for 2D**:
+prepared model (one still frame per view) or an animated character, the **Sprites** tool:
 
 - tick the animations,
 - **Views**: **Facing right**, **Facing left**, **Front**, **Back**,
 - **Height in pixels** (104 the first time; the first run's scale is kept for later runs, so every move matches),
 - **Frames per second** (12 by default) and **Look**: **Lit (studio light)** or **Flat (the texture unlit)**,
-- under **Advanced**, **Least cell (px)** (128 by default) and **Camera tilt (°)** (12 by default, 0 to 45),
+- under **More settings**, **Least cell (px)** (128 by default) and **Camera tilt (°)** (12 by default, 0 to 45),
 
 then **Render sprites** (seconds) and **Make pixel art** on the result.
 
@@ -768,15 +778,19 @@ server. SETUP.md, step 7, has the details. Or let Effigy do it: turn on **Start 
 Setup ([Start Blender](#start-blender)), and **Open … in Blender** starts your Blender and its add-on's server when
 none answers.
 
-On a model, **Tools → Edit in Blender**:
+The **Blender** group is in the top bar on every asset page:
 
-- the status, **Connected** or **Not connected** (with **Check again**),
-- **Open … in Blender**: the version appears in Blender as its own collection,
-- **Save Blender changes as version**: the edited mesh comes back as a new version; the old one stays.
+- the status, **● Blender** (connected) or **○ Blender** (not connected; click it to check again, hover for what
+  to do),
+- **Open 004** (the shown version's number): the version appears in Blender as its own collection. It works for any
+  version that has a 3D model in its history; each row of **History** has a small **Blender** button that opens that row,
+- **Save back**: the edited mesh comes back from Blender as a new version; the old one stays.
+
+A greyed button says why: "Blender is not connected: see Setup", or "this version has no 3D model".
 
 The exports and rig checks use the app's own copy of Blender in the background; you never need to open it for
 those. Nor for a move: to stand a model up, turn it, scale it or put it on the ground, use the **Transform** step
-under [Advanced: run any step](#advanced-run-any-step).
+under [Run any step](#run-any-step-developer-option).
 
 ---
 

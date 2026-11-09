@@ -3788,6 +3788,35 @@ above are the contract; each milestone's "As built" note lands here.
     other side, its feet on the floor, saved and exported; (2) a video motion smoothed with Butterworth beside
     Gaussian at the same setting: quick gestures kept, jitter gone; (3) a walk with foot locks and the hips option:
     no knee snapping straight.
+- **M71 Workspace layout: tabs, a tool strip, one tool in the panel** (owner 2026-11-09). Built in the cloud
+  session; **not run on the laptop** (no GPU or Blender needed for it).
+  - **Chrome**: the app bar (40 px; on an asset page the Blender group at the right: `● Blender` / `○ Blender`,
+    `Open NNN`, `Save back`), the step tabs (34 px; the asset's name and Rename first; `ol.stages li button` kept,
+    `aria-current="step"`, ✓, "Needs …" as before; the version label, Licences and History at the row's right) and `nav.toolstrip` (34 px). The jobs footer is one
+    line. Measured at 1280×720: window top to the view 113 px before, 108 after (asserted ≤ 112 in `smoke.spec.ts`).
+  - **Tools**: `TOOLS` in `workflow.ts` (`{id, label, task, what, needs, ok}`), `recommended()` for the dot and the
+    default, `tools2D()` in `pixel/Panels.tsx` for the 2D rules. The strip's buttons are `role="tab"`
+    (`aria-selected`, a native `disabled` with the title "needs …"): a button role would collide with the panels'
+    own buttons of the same name (Generate 3D, Edit animation). The default tab is the recommended tool's tab until a
+    tab is clicked. A tab with a tool that fits the shown version keeps it (switches the strip); otherwise it opens
+    its newest checkpoint. A `parts`, `project` or `refine` result recommends its own tool (Parts, Face, Texture
+    detail), so a finished run opens on it.
+  - **Re-hosted, not rewritten**: `Actions` became `ToolBody` (one case per tool); `RigPanel` takes the chosen
+    tool and shows its part (Fit; Edit skeleton / Attach on a skeleton; the four clip sources through
+    `ClipPicker source`; `AnimInfo` for Connect clips and Edit animation); `SkinQA`, `AnimInfo`'s info and `FitCheck`
+    stay as the version's info. An open skeleton, marker or animation editor stays in the panel on any tab.
+    `Actions2D` takes the tool. `MotionInfo`, `ImportInfo`, `OriginalFile` and the preparation state sit above the
+    tool.
+  - **Blender**: `useBlender` (status on mount, click the dot to re-check) feeds the header group and a Blender button
+    on each History row; `BlenderPanel` is gone, Setup's card stays.
+  - **Developer options**: `GET/POST /api/setup/developer` (`developer` in settings.json); off hides ⋯ Run any step,
+    which opens `RunStep` flat in the panel.
+  - **Not done**: the A-pose redraw stays inside Generate 3D (it has no panel of its own); the Edit tab does not open
+    the pixel editor by itself any more (its tool has the button); the tool strip scrolls sideways if a screen is too
+    narrow for it.
+  - **Acceptance**: run here, pass: `tsc`, `npm run build`, the Playwright specs (chrome height, a disabled tool's
+    title, the strip following the version, the developer switch, the Blender group and History button),
+    `tests/test_first_run.py`. **Needs the laptop**: look at the layout on the 1920×1080 and 1366×768 screens.
 
 ## 5. Bench procedure (reference laptop)
 
