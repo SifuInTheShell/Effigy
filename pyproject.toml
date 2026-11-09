@@ -41,6 +41,7 @@ ml = [
     "einops>=0.8",
     "easydict>=1.10",  # TRELLIS.2/Pixal3D samplers; LGPL-3.0, see licenses.yaml
     "onnxruntime>=1.20",  # CPU: DWPose for the A-pose gate (M16); never next to onnxruntime-gpu
+    "mediapipe==1.2.2",  # M70: the hand landmarker for the finger joints (CPU); its own list below
 ]
 # .venv-skin: UV_PROJECT_ENVIRONMENT=.venv-skin uv sync --frozen --group skin
 # rig_skin's learned engine (M20): the MIT no-Blender port of SkinTokens, pinned to a commit. Its own
@@ -154,6 +155,20 @@ requires-dist = [
     "utils3d-moge",
     "pipeline",
     "flex-gemm",
+]
+
+# mediapipe's list without opencv-contrib-python (a second cv2 beside our headless one: the hand landmarker runs on
+# opencv-python-headless) and sounddevice (its audio tasks; nothing here imports them)
+[[tool.uv.dependency-metadata]]
+name = "mediapipe"
+version = "1.2.2"
+requires-dist = [
+    "absl-py~=2.3",
+    "certifi",
+    "numpy",
+    "flatbuffers~=25.9",
+    "opencv-python-headless",
+    "matplotlib",
 ]
 
 [tool.uv.sources]

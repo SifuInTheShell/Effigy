@@ -37,6 +37,12 @@ or in Blender yet: the checks for that are in [docs/LAPTOP.md](docs/LAPTOP.md).
   erases), say what it should become under **It becomes**, and click **Redraw the painted part**. It is redrawn
   from every side that sees it, and nothing outside the paint changes.
 
+### Rigging
+
+- **Better fingers** (M70). Fitting a skeleton now renders each hand close up from eight sides and reads its
+  finger joints with Google's MediaPipe hand model, where before they came from one full-body picture and were
+  often off. Needs the model download in Setup (the pose models).
+
 ### For agents
 
 - New step parameters, all described in [mcp/SKILL.md](mcp/SKILL.md):
