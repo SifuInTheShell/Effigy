@@ -1595,6 +1595,11 @@ button.danger:hover {
 #versions li > button:first-child {
   flex: 1;
 }
+#versions li > button:not(:first-child) {
+  width: auto;
+  flex: 0 0 auto;
+  min-height: 28px;
+}
 #versions button.icon {
   width: 32px;
   min-width: 32px;
