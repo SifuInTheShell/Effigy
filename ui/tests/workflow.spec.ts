@@ -92,3 +92,20 @@ test("prepState: completed by a later check, active by the running job's input, 
   const textured = { ...bare[1], metrics: { materials: 2 } };
   expect(prepState([bare[0], textured, clean], clean).remaining).toEqual(["simplify", "unwrap", "bake", "check"]);
 });
+
+test("TOOLS: a tool fits by the shown version's lineage, and the next tool is the recommended one", async () => {
+  const { TOOLS, recommended } = await import("../src/workflow");
+  const vs = [
+    m("010_upload", "upload", null, GLB),
+    m("020_rig_skin", "rig_skin", "010_upload", { ...GLB, rigged: "rigged.glb", skeleton: "skeleton.json" }),
+    m("030_anim", "anim", "020_rig_skin", { rigged_anim: "ra.glb", clips: "clips.json", skeleton: "skeleton.json" }),
+  ];
+  const fits = (v: Meta) => TOOLS.filter((t) => t.ok({ versions: vs, v })).map((t) => t.id);
+  expect(fits(vs[0])).toContain("fit");
+  expect(fits(vs[1])).toEqual(expect.arrayContaining(["clips", "text", "video", "file"]));
+  expect(fits(vs[1])).not.toContain("editanim");
+  expect(fits(vs[2])).toEqual(expect.arrayContaining(["connect", "editanim"]));
+  expect(fits(vs[2])).not.toContain("clips");
+  expect(recommended({ versions: vs, v: vs[1] })).toBe("clips");
+  expect(recommended({ versions: vs, v: vs[2] })).toBe("editanim");
+});

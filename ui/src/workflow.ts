@@ -64,6 +64,7 @@ export const TASKS_2D: Task[] = [
   { id: "finish", label: "Finish", needs: "pixel art, layers or a tile" },
 ];
 const RIG = new Set(["rig_fit", "rig_skin"]);
+export const TEXTURED = new Set(["bake", "project", "refine"]);
 
 /** The task (an index in TASKS_3D, or in TASKS_2D for kind "2d") a version belongs to. */
 export function taskOf(versions: Meta[], m: Meta, kind?: string): number {
@@ -303,3 +304,144 @@ export const CHECKS: Record<string, string> = {
   layers: "layers", // M55
   far_layer_whole: "the farthest layer's see-through share",
 };
+
+/** M71: the tools of a tab (the strip under the tabs), each with the rule that enables it. `ok` takes the shown version
+ * and its lineage; a 2D tool's rule needs the 2D panels' helpers, so it reads `f2d` (pixel/Panels.tsx `tools2D`).
+ * `needs` completes "Needs …" and is the title of a tool that does not fit the shown version. */
+export type ToolCtx = { versions: Meta[]; v: Meta; f2d?: { on: Record<string, boolean>; rec: string } };
+export type Tool = { id: string; label: string; task: string; what: string; needs: string; ok: (c: ToolCtx) => boolean; kind?: "2d"; sep?: boolean };
+const stage = (c: ToolCtx) => phaseOf(c.versions, c.v);
+const mesh = (c: ToolCtx) => hasGlb(c.v) && stage(c) <= 2 && c.v.step !== "validate" && c.v.step !== "export"; // a model the recipe works on
+// the mesh the character tools act on: a check or an export of one shows the version it was made from
+const base = (c: ToolCtx) => {
+  const s = source(c.versions, c.v);
+  return s && hasGlb(s) ? s : null;
+};
+const rigAs = (c: ToolCtx) => {
+  const s = base(c);
+  return s && stage(c) >= 2 && stage(c) <= 4 ? actsAs(s) : "";
+};
+const animated = (c: ToolCtx) => ["anim", "anim_edit"].includes(rigAs(c));
+const d2 = (id: string) => (c: ToolCtx) => !!c.f2d?.on[id];
+const brief = (c: ToolCtx) => c.v.step === "brief" || c.v.step === "concepts";
+export const TOOLS: Tool[] = [
+  { id: "describe", label: "Describe", task: "reference", what: "Change the description, then make four new concept images from it.", needs: "a description", ok: brief },
+  { id: "concepts", label: "Concepts", task: "reference", what: "Four pictures from your description, the best-looking first.", needs: "a description", ok: brief },
+  {
+    id: "prep",
+    label: "Remove background",
+    task: "reference",
+    what: "Cut out your subject, so the 3D model matches your picture.",
+    needs: "a picture",
+    ok: (c) => hasImage(c.v) && !hasGlb(c.v) && !["export", "concepts", "prep"].includes(c.v.step),
+  },
+  { id: "generate", label: "Generate 3D", task: "generate", what: "Make a 3D model from this cut-out reference.", needs: "a cut-out reference", ok: (c) => c.v.step === "prep" },
+  {
+    id: "variation",
+    label: "Another variation",
+    task: "generate",
+    what: "The same settings with a new seed: another model from the same picture.",
+    needs: "a generated model",
+    ok: (c) => c.v.step === "trellis2" && ancestors(c.versions, c.v).some((a) => a.step === "prep"),
+  },
+  { id: "prepare", label: "Prepare model", task: "prepare", what: "Simplify and texture the model for your project, all the steps in a row.", needs: "a model", ok: mesh },
+  { id: "clean", label: "Clean", task: "prepare", what: "Close holes, drop loose bits, stand it upright and set its size.", needs: "a model", ok: mesh },
+  { id: "remesh", label: "Simplify", task: "prepare", what: "Fewer triangles, or quads, for your game.", needs: "a model", ok: mesh },
+  { id: "uv", label: "Unwrap", task: "prepare", what: "Lay the surface out flat so it can carry a texture.", needs: "a model", ok: mesh },
+  {
+    id: "bake",
+    label: "Bake",
+    task: "prepare",
+    what: "Bake the colours into one texture set.",
+    needs: "a generated or textured model",
+    ok: (c) => mesh(c) && bakeable(c.versions, c.v),
+  },
+  {
+    id: "face",
+    label: "Face from image",
+    task: "prepare",
+    what: "Copy the face from your picture onto the texture, as sharp as the picture.",
+    needs: "a textured, generated model",
+    ok: (c) => (c.v.step === "bake" || c.v.step === "project") && generated(c.versions, c.v),
+  },
+  {
+    id: "detail",
+    label: "Texture detail",
+    task: "prepare",
+    what: "Redraw the texture's detail from zoomed views, or a part you paint on the model.",
+    needs: "a textured model",
+    ok: (c) => TEXTURED.has(c.v.step) && hasGlb(c.v),
+  },
+  { id: "parts", label: "Parts", task: "prepare", what: "Name the pieces of a model, such as a helmet or a shield.", needs: "a prepared model", ok: (c) => stage(c) === 2 && hasGlb(c.v) && c.v.step !== "export" },
+  {
+    id: "fit",
+    label: "Fit skeleton",
+    task: "character",
+    what: "Add a skeleton to a character or an animal.",
+    needs: "a prepared model without a skeleton",
+    ok: (c) => !!base(c) && stage(c) === 2 && !base(c)!.outputs.skeleton,
+  },
+  { id: "skeleton", label: "Edit skeleton", task: "character", what: "Move the joints, or the markers the skeleton is fitted from.", needs: "a fitted skeleton", ok: (c) => rigAs(c) === "rig_fit" },
+  { id: "attach", label: "Attach to skeleton", task: "character", what: "Attach the model to the skeleton, so it moves with it.", needs: "a fitted skeleton", ok: (c) => rigAs(c) === "rig_fit" },
+  { id: "clips", label: "Ready-made clips", task: "character", sep: true, what: "Choose animations from the ready-made pack and add them to the model.", needs: "a skinned model", ok: (c) => rigAs(c) === "rig_skin" },
+  { id: "text", label: "From a sentence", task: "character", what: "Describe a movement and generate it.", needs: "a skinned model", ok: (c) => rigAs(c) === "rig_skin" },
+  { id: "video", label: "From a video", task: "character", what: "Turn a video of a person into a motion.", needs: "a skinned model", ok: (c) => rigAs(c) === "rig_skin" },
+  { id: "file", label: "From a file", task: "character", what: "Use an animation made elsewhere.", needs: "a skinned model", ok: (c) => rigAs(c) === "rig_skin" },
+  { id: "connect", label: "Connect clips", task: "character", what: "Make the transition that leads from one clip into another.", needs: "an animated model", ok: animated },
+  { id: "editanim", label: "Edit animation", task: "character", what: "Correct poses, trim, loop or smooth a clip on a timeline under the view.", needs: "an animated model", ok: animated },
+  {
+    id: "sprites",
+    label: "Sprites",
+    task: "character",
+    sep: true,
+    what: "Render the model, or its animations, as sprites for a 2D game.",
+    needs: "an animated model or a prepared still model",
+    ok: (c) => spritesFrom(c.versions, c.v) || is2DVersion(c.v),
+  },
+  { id: "check", label: "Check", task: "finish", what: "Check the model before you export it.", needs: "a prepared model", ok: (c) => c.v.step === "validate" || (hasGlb(c.v) && stage(c) >= 2 && c.v.step !== "export") },
+  {
+    id: "export",
+    label: "Export",
+    task: "finish",
+    what: "Save the files for your game engine, with lower detail levels, collision, credits and licences.",
+    needs: "a prepared model",
+    ok: (c) => c.v.step === "export" || c.v.step === "validate" || (!!base(c) && stage(c) >= 2),
+  },
+  // the 2D track (Actions2D's sections)
+  { id: "pictures", label: "Pictures", task: "picture", kind: "2d", what: "Pictures from your description.", needs: "a description", ok: d2("pictures") },
+  { id: "redraw", label: "Upscale or redraw", task: "picture", kind: "2d", what: "A bigger copy of the picture, or part of it drawn again.", needs: "a picture (not pixel art, sprites, a tile or layers)", ok: d2("redraw") },
+  { id: "pixelize", label: "Pixelize", task: "pixelize", kind: "2d", what: "Turn the picture into pixel art on a grid, with a palette of your choice.", needs: "a picture", ok: d2("pixelize") },
+  { id: "recolour", label: "Recolour", task: "pixelize", kind: "2d", what: "Swap the palette of this pixel art.", needs: "pixel art", ok: d2("recolour") },
+  { id: "animate", label: "Animate it", task: "pixelize", kind: "2d", what: "Make a 3D character from this picture, to animate and draw back as sprites.", needs: "a still picture of a character", ok: d2("animate") },
+  { id: "layers", label: "Layers", task: "layers", kind: "2d", what: "Split the picture into parallax layers, far to near.", needs: "a picture", ok: d2("layers") },
+  { id: "tile", label: "Tiles", task: "tiles", kind: "2d", what: "A seamless tile from a description.", needs: "a description", ok: d2("tile") },
+  { id: "editor", label: "Edit the pixels", task: "edit", kind: "2d", what: "Draw on the frames in whole pixels with the version's colours.", needs: "pixel art or sprites", ok: d2("editor") },
+  { id: "finish2d", label: "Check and export", task: "finish", kind: "2d", what: "Check the sprites, a tile or the layers, then save them for your game engine.", needs: "pixel art, layers or a tile", ok: d2("finish2d") },
+];
+const is2DVersion = (v: Meta) => !!(v.outputs.sheet && v.outputs.data) || !!v.outputs.tile || !!v.outputs.layers;
+
+/** The tool the shown version asks for next (what the panel offered first before M71): its dot, and the strip's default. */
+export function recommended(c: ToolCtx): string {
+  const { versions, v } = c;
+  if (c.f2d) return c.f2d.rec;
+  const st = actsAs(v);
+  if (st === "brief" || st === "concepts") return "concepts";
+  if (is2DVersion(v)) return "sprites"; // a sheet in a 3D asset: its own panel
+  if (v.step === "validate") return "check";
+  if (v.step === "export") return "export";
+  if (hasImage(v) && !hasGlb(v)) return v.step === "prep" ? "generate" : "prep";
+  if (["motion", "mocap", "import_motion"].includes(v.step) || !hasGlb(v)) return "";
+  // a tool's own result opens on that tool (a parts, face or texture-detail run, to look at it or go on)
+  const own: Record<string, string> = { parts: "parts", project: "face", refine: "detail" };
+  if (own[v.step]) return own[v.step];
+  if (RECIPE.some(([s]) => s === v.step)) return prepState(versions, v).state === "completed" ? "export" : "prepare";
+  const s = stage(c);
+  if (s < 2) return "prepare";
+  if (st === "rig_fit") return "attach";
+  if (st === "rig_skin") return "clips";
+  if (st === "anim" || st === "anim_edit") return "editanim";
+  return "check";
+}
+
+/** The tab (index into `tasks`) a tool lives in. */
+export const tabOfTool = (tasks: Task[], id: string) => tasks.findIndex((t) => t.id === TOOLS.find((x) => x.id === id)?.task);

@@ -1,4 +1,4 @@
-# Laptop checks: M64 to M68 (built in the cloud, 2026-10-29 and 2026-10-30)
+# Laptop checks: M64 to M70 (built in the cloud, 2026-10-29 to 2026-11-08)
 
 For the agent or the maintainer on the reference laptop. All five milestones were built in a cloud session
 without a GPU, Blender, Kimodo's weights, GEM-X or the Tile model. Everything that could run there passed (the unit tests, the Playwright
@@ -149,7 +149,24 @@ Needs the Setup card **Texture detail** (Z-Image comes with it). No new download
 - [ ] **Check 4: the cost.** From check 1 and 2 record `seconds`, `seconds_per_view`, `peak_vram_gb`.
 - [ ] **Record** in a new `docs/bench/m68.md`: the assets, the prompts, the numbers, and a before | after picture.
 
-## 6. When done
+## 6. M70 Fingers from close-up renders of each hand
+
+- [ ] `python -m tools.download_models pose` (the hand model, 7.8 MB) and `uv sync` in `.venv-ml` (mediapipe).
+- [ ] Fit a skeleton (Character → Fit a skeleton) on the M22 bench characters, or at least the viking, the runner,
+  the hiker and the farmer. Each version's `markers.json` says per hand `hands_by`: `mediapipe`, `dwpose` or
+  `proportions`, and `hand_views` how many of the 8 views saw it.
+- [ ] Skin and animate two of them: the fingers run along the fingers, no palm faces up.
+- [ ] Record in a new `docs/bench/m70.md`: per character `hands_by`, and the fit's time against M22's.
+
+## 7. M69 Animation editor: mirroring, Butterworth, hips for locked legs
+
+- [ ] Edit animation on the viking: **Duplicate mirrored** on `Walk` and on a video motion; play the copies: the same
+  move on the other side, feet on the floor. Save; export for Godot: the mirrored clips play there.
+- [ ] A video motion's Smoothing at the same setting with Filter **Gaussian**, then **Butterworth**: quick gestures
+  stay larger with Butterworth, the jitter gone in both.
+- [ ] Find foot contacts on a walk, tick **Move the hips so a locked leg never goes straight**: no knee snaps straight.
+
+## 8. When done
 
 - Commit the bench files and this file's ticks on a branch of your own, and open a pull request; the template fills
   itself in. Put the measured numbers in the PR's Measurements line.

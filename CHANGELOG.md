@@ -61,6 +61,19 @@ reference laptop (RTX 5080, 2026-10-30) so far: connecting clips (M65), the extr
 clearance (M67) ran on one character. The video checks (M64), painting a part (M68) and the checks in a game
 engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
 
+### Interface
+
+- **A new workspace layout** (M71). Three thin rows above the view, no taller than the old two: the app bar (with the
+  Blender group), the step tabs (with the asset's name) and a **tool strip** with the tools of the chosen
+  tab. The panel on the right shows the one tool you chose, with a line on what it does. A tool that does not fit
+  the shown version is greyed out and says why; the next one is marked with a dot. The **Tools** menu and the
+  folded panel sections are gone. Clean, Simplify, Unwrap and Bake are tools of their own.
+- **Blender on every asset page**, 3D or 2D: a status dot, **Open 004** and **Save back** in
+  the top bar, and a **Blender** button on each History row.
+- **More settings** replaces **Advanced** in the panels that had it.
+- **Run any step** is a developer option: turn on **Developer options** in Setup to show it.
+- The activity bar is one slim line.
+
 ### Animation
 
 - **Everyone in a video** (M64). A motion made from a video with more than one person says how many it found
@@ -78,6 +91,12 @@ engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
   clip would swing the forearms or hands through the body (stout and stylised characters). On by default; untick
   **Keep the arms out of the body** in the Animate panel to keep the clips as they come. The animated model's page
   names the clips that were opened and by how much.
+- **Duplicate mirrored** (M69): a copy of a clip with left and right swapped, a left-handed swing from a right-handed
+  one.
+- **Butterworth smoothing** (M69): beside the Gaussian; at the same setting it keeps quick moves larger and a clip's
+  ends straight.
+- **Move the hips so a locked leg never goes straight** (M69): with foot locks, the hips follow a planted foot just
+  enough to keep the knee bent.
 
 ### Textures
 
@@ -119,6 +138,12 @@ engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
 ### Install
 
 - **The zip's first run no longer needs Git.** On a computer without it, `run.bat` stopped at the skinning environment. It and most optional features now download pinned archives instead. Still needed: Git for Parallax layers, CMake and a C++ compiler for text to motion ([SETUP.md](SETUP.md), Troubleshooting).
+
+### Rigging
+
+- **Better fingers** (M70). Fitting a skeleton now renders each hand close up from eight sides and reads its
+  finger joints with Google's MediaPipe hand model, where before they came from one full-body picture and were
+  often off. Needs the model download in Setup (the pose models).
 
 ### For agents
 

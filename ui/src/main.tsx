@@ -1,11 +1,12 @@
 /// <reference types="vite/client" />
 import "./styles.css";
 import { NewTexture, TextureWorkspace } from "./textures/Workspace";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { api, fileUrl, waitJob, type Asset, type BlenderSetup, type PortInfo, type TrashEntry, type CopyResult, type Check, type Drive, type Env, type FitQuality, type Folder, type HfStatus, type JobStatus, type Licence, type Meta, type Model, type AgentSetup, type Preset, type Presets, type Storage, type StorageItem } from "./api";
 import { AnimEditor } from "./anim/Editor";
-import { Actions2D, PictureForm, SpritesForm, animatable, redrawable } from "./pixel/Panels";
+import { Actions2D, PictureForm, SpritesForm, animatable, tools2D } from "./pixel/Panels";
 import { EditorCanvas, EditorPanel, usePixelEditor } from "./pixel/Editor";
 import { PixelView, is2D, isSheet } from "./pixel/View";
 import { DrawForm } from "./pixel/Panels";
@@ -27,6 +28,8 @@ import {
   RECIPE,
   TASKS_2D,
   TASKS_3D,
+  TEXTURED,
+  TOOLS,
   ancestors,
   bakeable,
   generated,
@@ -39,8 +42,11 @@ import {
   spritesFrom,
   phaseOf,
   prepState,
+  recommended,
+  tabOfTool,
   taskOf,
   type Task,
+  type Tool,
 } from "./workflow";
 
 type Job = {
@@ -148,6 +154,8 @@ function App() {
     version: string;
   } | null>(null);
   const [error, setError] = useState("");
+  const [dev, setDev] = useState(false); // M71: Setup's Developer options
+  const [blenderSlot, setBlenderSlot] = useState<HTMLElement | null>(null);
   const [route, setRoute] = useState<Route>(parse(location.hash));
   const selRef = useRef(sel);
   selRef.current = sel;
@@ -324,6 +332,7 @@ function App() {
   useEffect(() => {
     refresh();
     loadModels();
+    api.developer().then((r) => setDev(r.on), () => undefined);
     api
       .steps()
       .then(setSteps)
@@ -474,6 +483,7 @@ function App() {
           </a>
         </nav>
         <div className="right">
+          <span className="blender-slot" ref={setBlenderSlot} />
           <LowSpace />
           {result && (
             <span role="status">
@@ -561,7 +571,7 @@ function App() {
             onMove={(ids, folder) => guard(Promise.all(ids.map((id) => api.setFolder(id, folder))).finally(refresh))}
           />
         )}
-        {route.page === "setup" && <Setup models={models} reload={loadModels} jobs={jobs} track={track} guard={guard} cap={route.cap} />}
+        {route.page === "setup" && <Setup models={models} reload={loadModels} jobs={jobs} track={track} guard={guard} cap={route.cap} dev={dev} onDev={setDev} />}
         {route.page === "welcome" && <Welcome models={models} reload={loadModels} jobs={jobs} track={track} guard={guard} />}
         {route.page === "asset" && (
           <Workspace
@@ -588,6 +598,8 @@ function App() {
             track={track}
             onPull={(id) => act(id, api.blenderPull(id))}
             onCancel={cancel}
+            dev={dev}
+            slots={{ blender: blenderSlot }}
           />
         )}
       </main>
@@ -1573,6 +1585,8 @@ function Workspace(props: {
   track: (job_id: string, step: string, asset?: string, input?: string | null) => void;
   onPull: (asset: string) => Promise<void>;
   onCancel: (id: string) => void;
+  dev: boolean; // M71: Setup's Developer options: Run any step in the strip
+  slots: { blender: HTMLElement | null }; // M71: where the header shows the Blender group
 }) {
   // one docked panel beside the view, History or Licences: its own column, so nothing is covered and the focus stays
   // visible (UX review 2026-10-12, UX-03 + UX-08)
@@ -1596,7 +1610,8 @@ function Workspace(props: {
   const [compare, setCompare] = useState<string | null>(null); // M42: the version compared with the shown one
   const [licences, setLicences] = useState<Licence[] | null>(null); // M42: the Licences panel (open once loaded)
   const [unfolded, setUnfolded] = useState<Set<string>>(new Set()); // History: the folded runs the user opened (first version of the run)
-  const menu = useRef<HTMLDetailsElement>(null); // the Tools menu (UX Pass 2)
+  const [ui, setUi] = useState<{ v: string; tab?: number; tool?: string }>({ v: "" }); // M71: the tab and tool picked on one version
+  const bl = useBlender(props.sel.asset ?? "");
   const historyButton = useRef<HTMLButtonElement>(null);
   const licencesButton = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLElement>(null);
@@ -1670,20 +1685,49 @@ function Workspace(props: {
       </> : undefined}
     />
   );
+  const is2 = kind === "2d";
   // M53: a check or an export of a sprite sheet: shown with its sheet, its panel the 3D one (the checklist, the files)
   const sheetOf = ["validate", "export"].includes(v.step) ? versions.find((x) => x.version === v.parent && is2D(x)) : undefined;
-  const tasks = kind === "2d" ? TASKS_2D : TASKS_3D;
-  const task = taskOf(versions, v, kind);
+  const tasks = is2 ? TASKS_2D : TASKS_3D;
   const imported = isImported(versions, v);
   const onBranch = (x: Meta) => ancestors(versions, x).includes(v) || ancestors(versions, v).includes(x);
   const newest = (ok: (x: Meta) => boolean) => versions.filter((x) => ok(x) && onBranch(x)).at(-1);
   const target = (i: number) => newest((x) => taskOf(versions, x, kind) === i);
   const src = source(versions, v);
   const glb = src && hasGlb(src) ? fileUrl(id, src.version, mainFile(src)!) : null;
-  // the optional tools the shown checkpoint offers (the same rules as Actions' sections)
-  const face = (v.step === "bake" || v.step === "project") && generated(versions, v);
-  const detail = TEXTURED.has(v.step) && hasGlb(v);
-  const parts = stage === 2 && hasGlb(v) && v.step !== "export";
+  // M71: the strip. The tab is the one of the tool the version asks for next (or of its own task), until one is clicked;
+  // the tool is that one, or the first that fits
+  const ctx = { versions, v, f2d: is2 ? tools2D(versions, v, isSheet(v), kind) : undefined };
+  const rec = recommended(ctx);
+  const cur: typeof ui = ui.v === v.version ? ui : { v: v.version };
+  const recTab = rec ? tabOfTool(tasks, rec) : -1;
+  const tab = cur.tab ?? (recTab >= 0 ? recTab : taskOf(versions, v, kind));
+  const fits = (t: Tool) => t.ok(ctx);
+  const inTab = (i: number) => TOOLS.filter((t) => t.task === tasks[i].id && (t.kind === "2d") === is2);
+  const strip = inTab(tab);
+  const chosen = cur.tool;
+  const toolId =
+    chosen === "runstep" && props.dev ? chosen : strip.find((t) => t.id === chosen && fits(t))?.id ?? strip.find((t) => t.id === rec && fits(t))?.id ?? strip.find(fits)?.id ?? "";
+  const tool = strip.find((t) => t.id === toolId);
+  const choose = (tool: string) => {
+    setUi({ v: v.version, tab, tool });
+    if (panel.current) panel.current.scrollTop = 0;
+  };
+  // a tab with a checkpoint opens its newest, as before; one without only switches the strip (Generate and Prepare also
+  // open the version their form works on)
+  const goTab = (i: number, version?: string) => {
+    setUi({ v: version ?? v.version, tab: i });
+    if (version && version !== v.version) props.pick(version);
+  };
+  const opens = (t: Task, i: number): (() => void) | null => {
+    const at = (step: string) => {
+      const x = newest((y) => y.step === step && y.params?.op !== "texture");
+      return x ? () => goTab(i, x.version) : null;
+    };
+    if (t.id === "generate") return at("prep");
+    if (t.id === "prepare") return at("trellis2");
+    return inTab(i).some(fits) ? () => goTab(i) : null;
+  };
   // a cut-out can be compared with the picture it came from
   const parent = versions.find((x) => x.version === v.parent);
   const originalFile =
@@ -1703,12 +1747,13 @@ function Workspace(props: {
         : null;
   const ref = glb ? ancestors(versions, src).find((a) => a.step === "prep") : undefined;
   const closeDrawer = closeSide;
-  // the Character task's panel (optional): the rig form of a prepared model, or the skeleton, skinned or animated
-  // version itself; a check or export of one shows the version it was made from
+  // the Character tools' panel: the rig form of a prepared model, or the skeleton, skinned or animated version itself;
+  // a check or export of one shows the version it was made from
   const rig = glb && stage >= 2 && stage <= 4 && (
     <RigPanel
       key={`${id}/${src!.version}`}
       asset={id}
+      tool={toolId}
       version={src!}
       motions={versions.filter((x) => x.step === "motion" || x.step === "mocap" || x.step === "import_motion")}
       onView={setRigView}
@@ -1725,29 +1770,52 @@ function Workspace(props: {
       }
     />
   );
-  // opens the panel section with that id (and every <details> around it) and scrolls to it: the Tools menu and the task row use it
-  const reveal = (id: string) => {
-    const el = document.getElementById(id);
-    for (let d: HTMLElement | null = el; d; d = d.parentElement) if (d instanceof HTMLDetailsElement) d.open = true;
-    el?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-  // a task with no checkpoint of its own yet opens where it is configured: Generate on the cut-out, Prepare on the raw
-  // model, Character and Finish in the shown panel; otherwise its button is disabled and says what it needs
-  const opens = (t: Task): (() => void) | null => {
-    const at = (step: string, id: string) => {
-      const x = newest((y) => y.step === step && y.params?.op !== "texture");
-      return !x ? null : x.version === v.version ? () => reveal(id) : () => props.pick(x.version);
-    };
-    if (t.id === "generate") return at("prep", "generate");
-    if (t.id === "prepare") return at("trellis2", "prepare");
-    if (t.id === "character") return rig && stage === 2 ? () => reveal("character") : null;
-    if (t.id === "textures") return glb ? () => setTextureOpen(true) : null;
-    if (t.id === "finish" && is2D(v)) return () => reveal("finish"); // M53: a sheet's check and export
-    if (t.id === "finish") return glb && stage >= 2 && v.step !== "export" ? () => reveal("finish") : null;
-    if (t.id === "pixelize") return document.getElementById("pixelize") ? () => reveal("pixelize") : null; // 2D: the shown picture's form
-    if (t.id === "edit") return isSheet(v) && !pixelEd.editing ? () => pixelEd.start(id, v) : null; // M56: the shown sheet
-    return null;
-  };
+  const running = active && RECIPE.some(([s]) => s === active.step) ? active.input : undefined;
+  const mesh = (x: Meta) => ancestors(versions, x).some(hasGlb); // what Blender can open: a version with a 3D model in its chain
+  const why = (x: Meta) => (!mesh(x) ? "this version has no 3D model" : !bl.can ? "Blender is not connected: see Setup" : undefined);
+  const body = !toolId ? null : toolId === "runstep" ? (
+    <RunStep
+      steps={props.steps}
+      parent={v.version}
+      onRun={(step, params) =>
+        props.guard(
+          (async () => {
+            const { job_id } = await api.run(id, step, v.version, JSON.parse(params));
+            props.track(job_id, step, id, v.version);
+          })(),
+        )
+      }
+    />
+  ) : (is2 && !sheetOf) || (toolId === "sprites" && is2D(v)) ? (
+    <Actions2D
+      onEdit={isSheet(v) ? () => pixelEd.start(id, v) : undefined}
+      finish={is2D(v) && <Finish2D asset={id} version={v} versions={versions} chain={props.chain} primary={!animatable(versions, v, kind)} />}
+      key={`${id}/${v.version}/${toolId}`}
+      asset={id}
+      name={props.asset?.name}
+      kind={kind}
+      tool={is2 ? toolId : undefined}
+      version={v}
+      versions={versions}
+      chain={props.chain}
+      missing={props.missing}
+      picked={picked}
+    />
+  ) : CHARACTER.has(toolId) ? null : (
+    // a 2D check shows its checklist and, beside it, the 2D export (as before M71)
+    (is2 && toolId === "finish2d" ? (v.step === "validate" ? ["check", "export"] : ["export"]) : [toolId]).map((t) => (
+      <ToolBody
+        key={`${id}/${v.version}/${t}`}
+        tool={t}
+        asset={id}
+        version={v}
+        versions={versions}
+        presets={props.presets}
+        chain={props.chain}
+        missing={props.missing}
+      />
+    ))
+  );
   // History: milestones stay as rows; clean, simplify and unwrap runs fold into one "N steps" row (opened by hand, or when one is the current version)
   const shown = starredOnly ? versions.filter((x) => x.starred) : versions;
   const rows: { x?: Meta; fold?: Meta[]; open?: boolean }[] = [];
@@ -1812,6 +1880,15 @@ function Workspace(props: {
           </button>
         )}
         <button
+          className="small"
+          aria-label={`Open ${label(x)} ${x.version.slice(0, 3)} in Blender`}
+          title={why(x) ?? "Open this version in Blender"}
+          disabled={!!why(x) || bl.busy}
+          onClick={() => bl.open(x.version)}
+        >
+          Blender
+        </button>
+        <button
           className="icon"
           aria-label={`Label ${label(x)} ${x.version.slice(0, 3)}`}
           title="Give this version a label"
@@ -1839,53 +1916,68 @@ function Workspace(props: {
       </li>
     );
   };
+  const short = v.version.slice(0, 3);
   return (
     <div className="workspace">
+      {/* M71: the asset's Blender group at the header's right (the slot is in the header); its name leads the tab row */}
+      {props.slots.blender &&
+        createPortal(
+          <div className="blender" role="group" aria-label="Blender">
+            <button className="small" onClick={bl.check} title={bl.help}>
+              {bl.link ? "● Blender" : "○ Blender"}
+            </button>
+            <button className="small" disabled={!!why(v) || !bl.can || bl.busy} title={why(v) ?? "Open this version in Blender"} onClick={() => bl.open(v.version)}>
+              {bl.busy && !bl.link ? "Starting Blender…" : `Open ${short}`}
+            </button>
+            <button
+              className="small"
+              disabled={!!why(v) || !bl.link || bl.busy}
+              title={why(v) ?? "Bring the model from Blender back. It becomes a new version; the old one stays."}
+              onClick={() => bl.run(() => props.onPull(id))}
+            >
+              Save back
+            </button>
+          </div>,
+          props.slots.blender,
+        )}
       <div className="ws-title">
-        <h1>{name}</h1>
-        <button
-          className="small"
-          onClick={() => {
-            const n = window.prompt("New name", name);
-            if (n && n.trim() && n !== name) props.guard(api.renameAsset(id, n).then(props.onRenamed));
-          }}
-        >
-          Rename
-        </button>
-        <span className="muted">
-          {label(v)} · {v.version.slice(0, 3)}
-          {v.restricted && <span className="tag">restricted</span>}
-        </span>
-        <button ref={licencesButton} className="small" aria-expanded={side === "licences"} onClick={() => (side === "licences" ? closeSide() : setSide("licences"))}>
-          Licences
-        </button>
-        <button ref={historyButton} aria-expanded={side === "history"} onClick={() => (side === "history" ? closeSide() : setSide("history"))}>
-          History ({versions.length})
-        </button>
+        <div className="ws-name">
+            <h1 title={name}>{name}</h1>
+            <button
+              className="small"
+              onClick={() => {
+                const n = window.prompt("New name", name);
+                if (n && n.trim() && n !== name) props.guard(api.renameAsset(id, n).then(props.onRenamed));
+              }}
+            >
+              Rename
+            </button>
+        </div>
         <ol className="stages" aria-label="Tasks">
-          {imported && kind !== "2d" && (
+          {imported && !is2 && (
             <li>
               <span className="chip">Imported model</span>
             </li>
           )}
           {tasks.map((t, i) => {
-            if (imported && kind !== "2d" && i < 2) return null; // no reference and no generation behind an imported model
+            if (imported && !is2 && i < 2) return null; // no reference and no generation behind an imported model
             const to = target(i);
-            const open = t.id === "textures" ? opens(t) : to ? () => props.pick(to.version) : opens(t);
+            // a tab whose tools fit the shown version keeps it (fit a skeleton again on the mesh); else its newest checkpoint
+            const open = t.id === "textures" ? (glb ? () => setTextureOpen(true) : null) : inTab(i).some(fits) ? () => goTab(i) : to ? () => goTab(i, to.version) : opens(t, i);
             return (
               <li key={t.id}>
-                {/* opens the newest checkpoint of that task on this branch, or where the task is configured; never runs a step */}
+                {/* switches the strip to its tools, or opens the newest checkpoint of that task on this branch; never runs a step */}
                 {/* not reachable yet: still focusable, so the keyboard and a screen reader get the reason a pointer gets
                     from the title (UX-15: guidance without relying on hover) */}
                 <button
                   aria-disabled={open ? undefined : true}
                   aria-describedby={open ? undefined : `needs-${t.id}`}
-                  aria-current={i === task ? "step" : undefined}
-                  className={i < task && to ? "done" : ""}
+                  aria-current={i === tab ? "step" : undefined}
+                  className={i < tab && to ? "done" : ""}
                   title={open ? undefined : `Needs ${t.needs}`}
                   onClick={open ?? undefined}
                 >
-                  {i < task && to && "✓ "}
+                  {i < tab && to && "✓ "}
                   {t.label}
                   {t.optional && <small> optional</small>}
                 </button>
@@ -1898,48 +1990,44 @@ function Workspace(props: {
             );
           })}
         </ol>
-        {/* the optional tools: a native menu; an entry opens its section of the panel (UX-06) */}
-        <details className="tools" ref={menu} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && (e.currentTarget.open = false)}>
-          <summary>Tools ▾</summary>
-          <ul>
-            {/* a tool not open here says where it is, in the stages' own words (owner 2026-10-12: not "not for this checkpoint") */}
-            {(
-              [
-                ["face", "Face from image", face, "project", null, "at Prepare, once textured; generated models only"],
-                ["detail", "Texture detail", detail, "refine", "refine", "at Prepare, once textured"],
-                ["parts", "Parts", parts, "parts", "parts", "at Prepare"],
-                ["sprites", "Sprites for 2D", spritesFrom(versions, v), "sprites", null, "at Prepare (one still frame) or after Character (animated)"],
-                ["redraw", "Upscale or redraw", kind === "2d" && redrawable(v), "redraw", null, "on a picture (not pixel art, sprites, a tile or layers)"],
-                ["blender", "Edit in Blender", hasGlb(v), null, null, "from Generate on, once there is a 3D model"],
-                ["advanced", "Advanced: run any step", true, null, null, ""],
-              ] as [string, string, boolean, string | null, string | null, string][]
-            ).map(([id, name, on, step, group, where]) => (
-              <li key={id}>
-                <button className="small" disabled={!on} onClick={() => ((menu.current!.open = false), reveal(id))}>
-                  {name}
-                </button>
-                <span className="muted">
-                  {kind === "2d" && id !== "advanced" && id !== "redraw" ? (
-                    id === "sprites" ? "in a 3D character: Animate this character" : "3D models only"
-                  ) : kind !== "2d" && id === "redraw" ? (
-                    "2D pictures only"
-                  ) : (
-                    <>
-                      {!on ? where : step && newest((x) => x.step === step) ? "has a checkpoint" : "available"}
-                      {group && props.missing(group) && (
-                        <>
-                          {" · "}
-                          <a href={setupAt(group)}>needs a setup item</a>
-                        </>
-                      )}
-                    </>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </details>
+        <div className="ws-version">
+          <span className="muted">
+            {label(v)} · {short}
+            {v.restricted && <span className="tag">restricted</span>}
+          </span>
+          <button ref={licencesButton} className="small" aria-expanded={side === "licences"} onClick={() => (side === "licences" ? closeSide() : setSide("licences"))}>
+            Licences
+          </button>
+          <button ref={historyButton} className="small" aria-expanded={side === "history"} onClick={() => (side === "history" ? closeSide() : setSide("history"))}>
+            History ({versions.length})
+          </button>
+        </div>
       </div>
+      {/* the tools of the tab; a tool that does not fit the shown version says why; the dot marks the one asked for next */}
+      <nav className="toolstrip" aria-label="Tools">
+        <div role="tablist" aria-label="Tools of this step">
+          {strip.map((t) => (
+            <Fragment key={t.id}>
+              {t.sep && <span className="sep" aria-hidden />}
+              <button
+                role="tab"
+                aria-selected={t.id === toolId}
+                disabled={!fits(t)}
+                title={fits(t) ? `${t.what}${t.id === rec ? " (the next step)" : ""}` : `needs ${t.needs}`}
+                onClick={() => choose(t.id)}
+              >
+                {t.label}
+                {t.id === rec && fits(t) && <i className="dot" aria-hidden />}
+              </button>
+            </Fragment>
+          ))}
+          {props.dev && (
+            <button role="tab" aria-selected={toolId === "runstep"} title="Run one step by name, with your own settings" onClick={() => choose("runstep")}>
+              ⋯ Run any step
+            </button>
+          )}
+        </div>
+      </nav>
       <div className={`ws-body${side ? " with-side" : ""}`}>
         {side === "licences" && (
           <aside className="side" role="region" aria-label="Licences">
@@ -2043,63 +2131,66 @@ function Workspace(props: {
         <aside className="panel" aria-label="Next step" ref={panel}>
           <h2 className="sr-only">Next step</h2>
           {active && <ActiveJob job={active} onCancel={props.onCancel} />}
-          {(kind === "2d" || is2D(v)) && !sheetOf ? (
-            pixelEd.editing ? (
-              <EditorPanel ed={pixelEd} onSave={(params) => props.chain(id, pixelEd.target!.version.version, [["pixelize", params]])} />
-            ) : (
-            <Actions2D
-              onEdit={isSheet(v) ? () => pixelEd.start(id, v) : undefined}
-              finish={is2D(v) && <Finish2D asset={id} version={v} versions={versions} chain={props.chain} primary={!animatable(versions, v, kind)} />}
-              key={`${id}/${v.version}`}
-              asset={id}
-              name={props.asset?.name}
-              kind={kind}
-              version={v}
-              versions={versions}
-              chain={props.chain}
-              missing={props.missing}
-              picked={picked}
-            />
-            )
+          {bl.note && (
+            <p className={bl.note.ok ? "muted" : "error"} role="status">
+              {bl.note.text}
+            </p>
+          )}
+          {pixelEd.editing ? (
+            <EditorPanel ed={pixelEd} onSave={(params) => props.chain(id, pixelEd.target!.version.version, [["pixelize", params]])} />
           ) : (
-            <Actions
-              key={`${id}/${v.version}`}
-              asset={id}
-              version={v}
-              versions={versions}
-              presets={props.presets}
-              chain={props.chain}
-              missing={props.missing}
-              pick={props.pick}
-              running={active && RECIPE.some(([s]) => s === active.step) ? active.input : undefined}
-              rig={rig}
-            />
+            <>
+              {/* what the version is, above the tool: an original file, a motion, an import, the preparation so far */}
+              {v.step === "upload" && v.outputs.model && !hasGlb(v) && <OriginalFile asset={id} version={v} chain={props.chain} />}
+              {(v.step === "motion" || v.step === "mocap" || v.step === "import_motion") && <MotionInfo asset={id} version={v} versions={versions} chain={props.chain} />}
+              {v.step === "import_model" && <ImportInfo asset={id} version={v} chain={props.chain} />}
+              {v.step !== "validate" && RECIPE.some(([s]) => s === v.step) && <Preparation version={v} versions={versions} running={running} pick={props.pick} />}
+              {(tool || toolId === "runstep") && (
+                <section className="tool">
+                  <h3>{tool?.label ?? "Run any step"}</h3>
+                  <p className="muted">{tool?.what ?? "Use this when the normal buttons are not enough. Run one step on the model you are viewing, with your own settings. The result is a new version in History. Nothing is overwritten."}</p>
+                  {body}
+                </section>
+              )}
+              {rig}
+            </>
           )}
-          {/* Blender works on a 3D model: a picture, a brief or a motion clip has none */}
-          {hasGlb(v) && (
-            <details id="blender">
-              <summary>Edit in Blender</summary>
-              <BlenderPanel asset={id} version={v} onPull={() => props.onPull(id)} />
-            </details>
-          )}
-          <details id="advanced">
-            <summary>Advanced: run any step</summary>
-            <RunStep
-              steps={props.steps}
-              parent={v.version}
-              onRun={(step, params) =>
-                props.guard(
-                  (async () => {
-                    const { job_id } = await api.run(id, step, v.version, JSON.parse(params));
-                    props.track(job_id, step, id, v.version);
-                  })(),
-                )
-              }
-            />
-          </details>
         </aside>
       </div>
     </div>
+  );
+}
+
+/** UX-07: what a clean, simplify, unwrap or bake checkpoint is, from what came after it and what runs. */
+function Preparation(props: { version: Meta; versions: Meta[]; running?: string | null; pick: (version: string) => void }) {
+  const { version: v, versions } = props;
+  const p = prepState(versions, v, props.running);
+  const cap = (s: string) => s.replace(/^./, (c) => c.toUpperCase());
+  const again = cap(RECIPE.find(([s]) => s === v.step)![1]);
+  const left = p.remaining.map(cap);
+  const own = p.next?.parent === v.version; // the check is of this mesh, not of a later step's
+  const fails = Number(p.next?.metrics?.fail ?? 0);
+  const state =
+    p.state === "completed"
+      ? own
+        ? `${v.step === "bake" ? "Textures baked" : "Model prepared"}; ${fails ? `${fails} check${fails > 1 ? "s" : ""} failed` : "checked"}.`
+        : `An earlier step; the chain was checked later (${label(p.next!)} ${p.next!.version.slice(0, 3)}).`
+      : p.state === "active"
+        ? "Preparation is running."
+        : p.state === "historical"
+          ? `An earlier step; the newest is ${label(p.next!)} ${p.next!.version.slice(0, 3)}.`
+          : `Prepared up to ${again}; ${left.length > 1 ? `${left.slice(0, -1).join(", ")} and ${left.at(-1)} remain` : `${left[0]} remains`}.`;
+  return (
+    <section id="preparation">
+      <h3>Preparation</h3>
+      <p>{state}</p>
+      {p.state === "completed" && (
+        <button className="primary" onClick={() => props.pick(p.next!.version)}>
+          View checked result
+        </button>
+      )}
+      {p.state === "historical" && <button onClick={() => props.pick(p.next!.version)}>Open {label(p.next!)}</button>}
+    </section>
   );
 }
 
@@ -2206,7 +2297,6 @@ function Slider(p: { name: string; label: string; min: number; max: number; step
 }
 
 // M43b: the texture's detail redrawn by the Tile model from zoomed views; a refine version shows each view before | after
-const TEXTURED = new Set(["bake", "project", "refine"]);
 function DetailPanel(props: { asset: string; version: Meta; versions: Meta[]; chain: Chain; missing: boolean }) {
   const [busy, run] = useBusy();
   const brief = ancestors(props.versions, props.version).find((a) => a.step === "brief");
@@ -2498,87 +2588,37 @@ function PartsPanel(props: { asset: string; version: Meta; chain: Chain; missing
   );
 }
 
-function Actions(props: {
+/** M71: the panel of the chosen tool (the strip's); the character tools' is RigPanel, the 2D ones' Actions2D. */
+function ToolBody(props: {
+  tool: string;
   asset: string;
   version: Meta;
   versions: Meta[];
   presets: Record<string, Record<string, unknown>>;
   chain: Chain;
   missing: (group: string) => boolean;
-  pick: (version: string) => void;
-  running?: string | null; // the version the asset's running job started from (UX-07)
-  rig?: React.ReactNode;
 }) {
   const [busy, run] = useBusy();
   const v = props.version;
-  const { versions } = props;
-  const stage = phaseOf(versions, v);
+  const { versions, tool } = props;
   const go = (parent: string | null, steps: [string, object][]) => run(() => props.chain(props.asset, parent, steps));
   const line = ancestors(versions, v);
   const mesh = source(versions, v);
   const report = mesh && versions.filter((x) => x.step === "validate" && x.parent === mesh.version).at(-1);
   const budget = budgetOf(line);
-  const check = (
-    <button className="primary" disabled={busy} onClick={() => go(v.version, [["validate", budget ? { max_triangles: budget } : {}]])}>
-      Check model
-    </button>
-  );
-  const face = (v.step === "bake" || v.step === "project") && generated(versions, v) && <FacePanel asset={props.asset} version={v} chain={props.chain} />;
-  const detail = TEXTURED.has(v.step) && hasGlb(v) && (
-    <DetailPanel key={`detail-${v.version}`} asset={props.asset} version={v} versions={versions} chain={props.chain} missing={props.missing("refine")} />
-  );
-  const parts = stage === 2 && hasGlb(v) && v.step !== "export" && <PartsPanel key={v.version} asset={props.asset} version={v} chain={props.chain} missing={props.missing("parts")} />;
-  // M52: a character's animations (or a prepared prop) as 2D sprites
-  const sprites = spritesFrom(versions, v) && (
-    <section id="sprites">
-      <h3>Sprites for a 2D game</h3>
-      <SpritesForm key={`sprites-${v.version}`} asset={props.asset} version={v} chain={props.chain} />
-    </section>
-  );
-  // UX-05: the optional tools and the character work sit below the main action, collapsed (the Tools menu and the
-  // Character task open them); a tool's own checkpoint shows its panel open
-  const toolNames = [face && "face", detail && "texture detail", parts && "parts", sprites && "sprites"].filter(Boolean);
-  const tools = toolNames.length > 0 && (
-    <details id="tools" open={["project", "refine", "parts"].includes(v.step)}>
-      <summary>Tools: {toolNames.join(", ")}</summary>
-      <div className="stack">
-        {face}
-        {detail}
-        {parts}
-        {sprites}
-      </div>
-    </details>
-  );
-  const character = props.rig && (
-    <details id="character">
-      <summary>Character: fit a skeleton (optional)</summary>
-      {props.rig}
-    </details>
-  );
   const sheet = v.step === "validate" ? versions.find((x) => x.version === v.parent && is2D(x)) : undefined; // M53
-  const exporter = (title?: string, primary = false) => (
-    <ExportPanel
-      key={`export-${(sheet ?? mesh)?.version}`}
-      asset={props.asset}
-      mesh={sheet ?? mesh}
-      report={sheet ? v : (report ?? undefined)}
-      chain={props.chain}
-      title={title}
-      primary={primary}
-      profiles={sheet ? EXPORTS_2D : EXPORTS}
-    />
-  );
-
-  if (v.step === "brief") {
-    const missing = props.missing("concepts"); // UX-09: a known-missing capability makes the setup link the main action
-    return (
-      <>
-        <section>
-          <h3>Concept images</h3>
+  const imported = !generated(versions, v);
+  switch (tool) {
+    case "describe":
+      return <EditBrief asset={props.asset} version={v} versions={versions} chain={props.chain} missing={props.missing("concepts")} />;
+    case "concepts": {
+      if (v.step !== "brief") return <ConceptsPanel />;
+      const missing = props.missing("concepts"); // UX-09: a known-missing capability makes the setup link the main action
+      return (
+        <>
           <p>
             "{String(v.params.prompt ?? "")}" · {String(v.params.category ?? "")}
           </p>
-          <p className="muted">Four pictures from your description, the best-looking first.</p>
           {missing ? (
             <>
               <p className="note warn">Concept-image files weren't found. Your description stays here.</p>
@@ -2591,183 +2631,140 @@ function Actions(props: {
               Generate 4 concepts
             </button>
           )}
-        </section>
-        <EditBrief asset={props.asset} version={v} versions={versions} chain={props.chain} missing={missing} />
-      </>
-    );
-  }
-  if (v.step === "concepts") return <ConceptsPanel {...props} />;
-  if (v.step === "upload" && v.outputs.model && !hasGlb(v)) return <OriginalFile asset={props.asset} version={v} chain={props.chain} />;
-  if (hasImage(v) && !hasGlb(v) && v.step !== "export") { // an FBX or OBJ export ships PNG textures: not a picture
-    if (v.step === "prep") return <GeneratePanel {...props} />;
-    return (
-      <section>
-        <h3>Prepare the reference</h3>
-        <p className="muted">Cut out your subject, so the 3D model matches your picture. A picture that is already transparent keeps its own cut-out.</p>
-        <button className="primary" disabled={busy} onClick={() => go(v.version, [["prep", {}]])}>
-          Remove background
-        </button>
-      </section>
-    );
-  }
-  if (v.step === "motion" || v.step === "mocap" || v.step === "import_motion")
-    return <MotionInfo asset={props.asset} version={v} versions={versions} chain={props.chain} />;
-  if (v.step === "export") {
-    const files = Object.values(v.outputs);
-    const credits = (f: string) => /(CREDITS\.txt|LICENSES\.json)$/.test(f);
-    const main = files.find((f) => !credits(f) && /\.(glb|fbx|obj|stl|usdz|3mf)$/i.test(f)) ?? files[0];
-    const dest = [...EXPORTS, ...EXPORTS_2D].find((e) => e.id === String(v.metrics?.profile ?? v.params?.profile));
-    // the package is the folder: several files belong together (an FBX and its PNGs, an OBJ and its .mtl), so saving
-    // them all is the main action; a lone GLB stays a download (UX-10)
-    const many = files.filter((f) => !credits(f)).length > 1;
-    const download = (f: string, primary = false) => (
-      <a className={`button ${primary ? "primary" : "small"}`} href={fileUrl(props.asset, v.version, f)} download>
-        {primary ? `Download ${basename(f)}` : basename(f)}
-      </a>
-    );
-    return (
-      <>
-        <section>
-          <h3>Exported for {dest?.name ?? String(v.metrics?.profile ?? "")}</h3>
-          <p className="muted">
-            {files.length} file{files.length === 1 ? "" : "s"}, with CREDITS.txt and LICENSES.json for your game's credits. {dest?.next}
-          </p>
-          {many ? <SaveExport asset={props.asset} version={v} primary /> : main && download(main, true)}
-          {!many && files.length > 1 && (
-            <ul className="downloads">
-              {files
-                .filter((f) => f !== main)
-                .map((f) => (
-                  <li key={f}>{download(f)}</li>
-                ))}
-            </ul>
-          )}
-          <details>
-            <summary>{many ? "Or download the files one by one" : "Or save all files to a folder"}</summary>
-            {many ? (
-              <ul className="downloads">
-                {files.map((f) => (
-                  <li key={f}>{download(f)}</li>
-                ))}
-              </ul>
-            ) : (
-              <SaveExport asset={props.asset} version={v} />
-            )}
-          </details>
-        </section>
-        <details>
-          <summary>Export for another destination</summary>
-          {exporter()}
-        </details>
-      </>
-    );
-  }
-  if (v.step === "validate")
-    return (
-      <>
-        <Checklist asset={props.asset} version={v} />
-        {exporter("Export", true)}
-        {stage === 3 || stage === 4 ? props.rig : character}
-        {tools}
-      </>
-    );
-  if (RECIPE.some(([s]) => s === v.step)) {
-    // UX-07: what this checkpoint is, from what came after it and what runs; Continue only when steps remain
-    const p = prepState(versions, v, props.running);
-    const cap = (s: string) => s.replace(/^./, (c) => c.toUpperCase());
-    const again = cap(RECIPE.find(([s]) => s === v.step)![1]);
-    const left = p.remaining.map(cap);
-    const own = p.next?.parent === v.version; // the check is of this mesh, not of a later step's
-    const fails = Number(p.next?.metrics?.fail ?? 0);
-    const state =
-      p.state === "completed"
-        ? own
-          ? `${v.step === "bake" ? "Textures baked" : "Model prepared"}; ${fails ? `${fails} check${fails > 1 ? "s" : ""} failed` : "checked"}.`
-          : `An earlier step; the chain was checked later (${label(p.next!)} ${p.next!.version.slice(0, 3)}).`
-        : p.state === "active"
-          ? "Preparation is running."
-          : p.state === "historical"
-            ? `An earlier step; the newest is ${label(p.next!)} ${p.next!.version.slice(0, 3)}.`
-            : `Prepared up to ${again}; ${left.length > 1 ? `${left.slice(0, -1).join(", ")} and ${left.at(-1)} remain` : `${left[0]} remains`}.`;
-    return (
-      <>
-        <section id="finish">
-          <h3>Preparation</h3>
-          <p>{state}</p>
-          {p.state === "completed" && (
-            <button className="primary" onClick={() => props.pick(p.next!.version)}>
-              View checked result
-            </button>
-          )}
-          {p.state === "historical" && <button onClick={() => props.pick(p.next!.version)}>Open {label(p.next!)}</button>}
-          {p.state === "interrupted" && <PrepareForm {...props} from={v.step} button="Continue preparation" />}
-        </section>
-        {p.state === "completed" && own && exporter()}
-        <details>
-          <summary>Run this step again</summary>
-          <div className="stack">
-            <p className="muted">Only this step, on this model, with your own settings.</p>
-            <PrepareForm {...props} from={v.step} only={v.step} button={again} />
-          </div>
-        </details>
-        {tools}
-        {character}
-      </>
-    );
-  }
-  // a mesh: prepared before / retextured / imported → check it; raw from the generator → prepare it
-  const imported = !generated(versions, v);
-  if (stage >= 2 && stage <= 4)
-    return (
-      <>
-        {v.step === "import_model" && <ImportInfo asset={props.asset} version={v} chain={props.chain} />}
-        {(stage === 3 || stage === 4) && props.rig}
-        <section id="finish">
-          <h3>{imported ? "Imported model" : "Check the model"}</h3>
-          <p className="muted">{imported ? "Check it before you export it. Its original materials stay unchanged." : "Check it before you export it."}</p>
-          {check}
-        </section>
-        {exporter()}
-        {tools}
-        {stage === 2 && character}
-        {imported && (
-          <details>
-            <summary>Simplify geometry (copy)</summary>
-            <div className="stack">
-              <p className="muted">
-                A simpler copy, its materials baked into one texture set; skins and animation are not kept. The original stays in History.
-              </p>
-              <PrepareForm {...props} from="" button="Simplify geometry" />
-            </div>
-          </details>
-        )}
-      </>
-    );
-  const prep = line.find((a) => a.step === "prep");
-  return (
-    <>
-      <section id="prepare">
-        <h3>Prepare for your project</h3>
-        <p className="muted">Simplify and texture the model for your project.</p>
-        <PrepareForm {...props} from="" button="Prepare model" />
-      </section>
-      {v.step === "trellis2" && prep && (
-        <button disabled={busy} onClick={() => go(prep.version, [["trellis2", Object.fromEntries(Object.entries(v.params).filter(([k]) => k !== "seed"))]])}>
-          Try another variation
-        </button>
-      )}
-      {v.step === "trellis2" && (
-        <details>
-          <summary>Help</summary>
+        </>
+      );
+    }
+    case "prep":
+      return (
+        <>
+          <p className="muted">A picture that is already transparent keeps its own cut-out.</p>
+          <button className="primary" disabled={busy} onClick={() => go(v.version, [["prep", {}]])}>
+            Remove background
+          </button>
+        </>
+      );
+    case "generate":
+      return <GeneratePanel {...props} />;
+    case "variation": {
+      const prep = line.find((a) => a.step === "prep");
+      return (
+        <>
+          <button disabled={busy || !prep} onClick={() => go(prep!.version, [["trellis2", Object.fromEntries(Object.entries(v.params).filter(([k]) => k !== "seed"))]])}>
+            Try another variation
+          </button>
           <p className="muted">
             Right after generating, a model shows small holes and loose bits: Prepare model closes them (its first step is Clean). If a whole area is missing,
             such as a black cat's back, generate again from the picture with Background: Grey.
             {v.metrics?.background ? ` This one was made on ${v.metrics.background}.` : ""}
           </p>
-        </details>
-      )}
-    </>
-  );
+        </>
+      );
+    }
+    case "prepare": {
+      const from = RECIPE.some(([s]) => s === v.step) ? v.step : ""; // an interrupted preparation goes on from its last step
+      return (
+        <section id="prepare">
+          <PrepareForm key={tool} {...props} from={from} button={from ? "Continue preparation" : "Prepare model"} />
+        </section>
+      );
+    }
+    case "clean":
+    case "remesh":
+    case "uv":
+    case "bake": {
+      const cap = RECIPE.find(([s]) => s === tool)![1].replace(/^./, (c) => c.toUpperCase());
+      return <PrepareForm key={tool} {...props} from="" only={tool} button={cap} />;
+    }
+    case "face":
+      return <FacePanel asset={props.asset} version={v} chain={props.chain} />;
+    case "detail":
+      return <DetailPanel key={`detail-${v.version}`} asset={props.asset} version={v} versions={versions} chain={props.chain} missing={props.missing("refine")} />;
+    case "parts":
+      return <PartsPanel key={v.version} asset={props.asset} version={v} chain={props.chain} missing={props.missing("parts")} />;
+    case "sprites": // M52: a character's animations (or a prepared prop) as 2D sprites
+      return (
+        <section id="sprites">
+          <SpritesForm key={`sprites-${v.version}`} asset={props.asset} version={v} chain={props.chain} />
+        </section>
+      );
+    case "check":
+      return (
+        <>
+          {v.step === "validate" && <Checklist asset={props.asset} version={v} />}
+          {!sheet && (
+            <section id="finish">
+              {imported && <p className="muted">Its original materials stay unchanged.</p>}
+              <button className="primary" disabled={busy} onClick={() => go(v.step === "validate" ? v.parent : v.version, [["validate", budget ? { max_triangles: budget } : {}]])}>
+                Check model
+              </button>
+            </section>
+          )}
+        </>
+      );
+    case "export": {
+      const exporter = (primary = false) => (
+        <ExportPanel
+          key={`export-${(sheet ?? mesh)?.version}`}
+          asset={props.asset}
+          mesh={sheet ?? mesh}
+          report={sheet ? v : (report ?? undefined)}
+          chain={props.chain}
+          primary={primary}
+          profiles={sheet ? EXPORTS_2D : EXPORTS}
+        />
+      );
+      if (v.step !== "export") return exporter(v.step === "validate");
+      const files = Object.values(v.outputs);
+      const credits = (f: string) => /(CREDITS\.txt|LICENSES\.json)$/.test(f);
+      const main = files.find((f) => !credits(f) && /\.(glb|fbx|obj|stl|usdz|3mf)$/i.test(f)) ?? files[0];
+      const dest = [...EXPORTS, ...EXPORTS_2D].find((e) => e.id === String(v.metrics?.profile ?? v.params?.profile));
+      // the package is the folder: several files belong together (an FBX and its PNGs, an OBJ and its .mtl), so saving
+      // them all is the main action; a lone GLB stays a download (UX-10)
+      const many = files.filter((f) => !credits(f)).length > 1;
+      const download = (f: string, primary = false) => (
+        <a className={`button ${primary ? "primary" : "small"}`} href={fileUrl(props.asset, v.version, f)} download>
+          {primary ? `Download ${basename(f)}` : basename(f)}
+        </a>
+      );
+      return (
+        <>
+          <section>
+            <h3>Exported for {dest?.name ?? String(v.metrics?.profile ?? "")}</h3>
+            <p className="muted">
+              {files.length} file{files.length === 1 ? "" : "s"}, with CREDITS.txt and LICENSES.json for your game's credits. {dest?.next}
+            </p>
+            {many ? <SaveExport asset={props.asset} version={v} primary /> : main && download(main, true)}
+            {!many && files.length > 1 && (
+              <ul className="downloads">
+                {files
+                  .filter((f) => f !== main)
+                  .map((f) => (
+                    <li key={f}>{download(f)}</li>
+                  ))}
+              </ul>
+            )}
+            <details>
+              <summary>{many ? "Or download the files one by one" : "Or save all files to a folder"}</summary>
+              {many ? (
+                <ul className="downloads">
+                  {files.map((f) => (
+                    <li key={f}>{download(f)}</li>
+                  ))}
+                </ul>
+              ) : (
+                <SaveExport asset={props.asset} version={v} />
+              )}
+            </details>
+          </section>
+          <details>
+            <summary>Export for another destination</summary>
+            {exporter()}
+          </details>
+        </>
+      );
+    }
+  }
+  return null;
 }
 
 // the description and the category, editable under a brief or a concepts version: a new brief and four new concepts
@@ -2777,42 +2774,31 @@ function EditBrief(props: { asset: string; version: Meta; versions: Meta[]; chai
   const [category, setCategory] = useState(String(brief?.params.category ?? "prop"));
   const [busy, run] = useBusy();
   return (
-    <details>
-      <summary>Edit description</summary>
-      <div className="stack">
-        <label>
-          Description
-          <textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-        </label>
-        <Category name="edit-category" value={category} onChange={setCategory} />
-        <button
-          disabled={busy || props.missing || !prompt.trim()}
-          onClick={() =>
-            run(() =>
-              props.chain(props.asset, null, [
-                ["brief", { prompt, category }],
-                ["concepts", {}],
-              ]),
-            )
-          }
-        >
-          Generate 4 concepts from this
-        </button>
-      </div>
-    </details>
+    <div className="stack">
+      <label>
+        Description
+        <textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      </label>
+      <Category name="edit-category" value={category} onChange={setCategory} />
+      <button
+        disabled={busy || props.missing || !prompt.trim()}
+        onClick={() =>
+          run(() =>
+            props.chain(props.asset, null, [
+              ["brief", { prompt, category }],
+              ["concepts", {}],
+            ]),
+          )
+        }
+      >
+        Generate 4 concepts from this
+      </button>
+    </div>
   );
 }
 
-function ConceptsPanel(props: { asset: string; version: Meta; versions: Meta[]; chain: Chain; missing: (group: string) => boolean }) {
-  return (
-    <>
-      <section>
-        <h3>Pick a concept</h3>
-        <p className="muted">Click the best picture, then Use this image. The ranking is only a hint. It does not promise a good 3D model.</p>
-      </section>
-      <EditBrief asset={props.asset} version={props.version} versions={props.versions} chain={props.chain} missing={props.missing("concepts")} />
-    </>
-  );
+function ConceptsPanel() {
+  return <p className="muted">Click the best picture in the view, then Use this image. The ranking is only a hint. It does not promise a good 3D model.</p>;
 }
 
 // M46b: best first (server/presets.PRESETS); the default is the first this card runs, the user's own pick is kept
@@ -2944,11 +2930,11 @@ function GeneratePanel(props: {
       {big && (
         <p className="note warn">
           {why(big)}
-          {names.some((n) => !tooBig(n)) ? " Another generator may fit: Advanced." : ""}
+          {names.some((n) => !tooBig(n)) ? " Another generator may fit: More settings." : ""}
         </p>
       )}
       <details>
-        <summary>Advanced</summary>
+        <summary>More settings</summary>
         <div className="stack">
           <fieldset>
             <legend>Generator</legend>
@@ -3126,13 +3112,13 @@ function PrepareForm(props: { asset: string; version: Meta; versions: Meta[]; ch
           <input type="number" min={0} step={0.1} placeholder="keep the current size" value={height} onChange={(e) => setHeight(e.target.value)} />
         </label>
       )}
-      {/* one step run again shows all of its settings; the recipe keeps the specialist ones under Advanced (UX-15) */}
+      {/* one step run again shows all of its settings; the recipe keeps the specialist ones under More settings (UX-15) */}
       {advanced.length > 0 &&
         (props.only ? (
           advanced
         ) : (
           <details>
-            <summary>Advanced</summary>
+            <summary>More settings</summary>
             <div className="stack">{advanced}</div>
           </details>
         ))}
@@ -3644,13 +3630,8 @@ function RunStep(props: { steps: Presets; parent: string | null; onRun: (step: s
     setParams(JSON.stringify(STEP_HELP[s]?.example ?? {}, null, 1));
   };
   return (
-    <details>
-      <summary>Run a step on {props.parent ?? "(no parent)"}</summary>
       <div className="stack">
-        <p className="muted">
-          Use this when the normal buttons are not enough. Run one step on the model you are viewing, with your own settings. The result is a new version in
-          History. Nothing is overwritten.
-        </p>
+        <p className="muted">Runs on {props.parent ?? "(no parent)"}.</p>
         <select aria-label="step" value={other ? "…" : step} onChange={(e) => pick(e.target.value)}>
           <option value="">Choose a step…</option>
           {Object.keys(props.steps).map((s) => (
@@ -3698,7 +3679,6 @@ function RunStep(props: { steps: Presets; parent: string | null; onRun: (step: s
           Run {help?.title.split(":")[0] ?? step}
         </button>
       </div>
-    </details>
   );
 }
 
@@ -3813,6 +3793,10 @@ const markerLabel = (m: string) =>
     .toLowerCase()
     .replace(/^./, (c) => c.toUpperCase());
 
+// M71: the Character tools RigPanel shows, and the ClipPicker source each of the clip tools stands for
+const CLIP: Record<string, "clips" | "text" | "video" | "file"> = { clips: "clips", text: "text", video: "video", file: "file" };
+const CHARACTER = new Set(["fit", "skeleton", "attach", "connect", "editanim", ...Object.keys(CLIP)]);
+
 // rig_skin's qa.json: the §3.9 Rig checks, and what each means for the user
 const SKIN_CHECKS: Record<string, [string, string]> = {
   unweighted: ["vertices no bone moves", "they'd stay behind when the character moves"],
@@ -3829,6 +3813,7 @@ function ClipPicker(props: {
   asset: string;
   rig: string;
   template?: string; // M36: a creature's own clips; the motions from text or a video are for people
+  source?: "clips" | "text" | "video" | "file"; // M71: the tool chosen in the strip; none: the radio choice
   onRun: (params: object, step?: string, parent?: string) => void;
   busy: boolean;
   motions: Meta[];
@@ -3862,7 +3847,7 @@ function ClipPicker(props: {
     </option>
   );
   const motions = animal ? [] : props.motions;
-  const from = animal ? "clips" : (picked ?? (clips.length || motions.length ? "clips" : "text")); // ready-made by default, when there are any
+  const from = animal ? "clips" : (props.source ?? picked ?? (clips.length || motions.length ? "clips" : "text")); // ready-made by default, when there are any
   return (
     <div className="stack">
       {!clips.length && !motions.length && (
@@ -3872,7 +3857,7 @@ function ClipPicker(props: {
       )}
       {animal ? (
         <p className="muted">Animations from a sentence or a video are for people. This animal gets its own ready-made ones below.</p>
-      ) : (
+      ) : props.source ? null : (
         <fieldset>
           <legend>Animation source</legend>
           {(
@@ -4327,6 +4312,7 @@ function MotionInfo(props: { asset: string; version: Meta; versions: Meta[]; cha
 function AnimInfo(props: {
   asset: string;
   version: Meta;
+  tool?: string; // M71: Edit animation or Connect clips show their part of the panel; the rest is this version's info
   onPick: (version: string) => void;
   onEdit: () => void;
   onRun: (params: object, step?: string, parent?: string) => void;
@@ -4381,18 +4367,24 @@ function AnimInfo(props: {
           ))}
         </ul>
       )}
-      <div className="row">
-        <button className="primary" onClick={props.onEdit}>
-          Edit animation
-        </button>
-        {props.version.parent && props.version.step !== "import_model" && (
-          <button onClick={() => props.onPick(props.version.parent!)}>{props.version.step === "anim" ? "Back to the skinned model" : "Back to the previous animation"}</button>
-        )}
-      </div>
-      <p className="muted">Edit animation opens a timeline under the view: turn bones at any frame to correct a pose, trim, loop or smooth a clip.</p>
-      {person && !!clips?.length && (
-        <ConnectClips clips={clips.map((c) => c.name)} busy={props.busy} onRun={(params) => props.onRun(params, "motion", props.version.version)} />
+      {props.tool === "editanim" && (
+        <>
+          <div className="row">
+            <button className="primary" onClick={props.onEdit}>
+              Edit animation
+            </button>
+            {props.version.parent && props.version.step !== "import_model" && (
+              <button onClick={() => props.onPick(props.version.parent!)}>{props.version.step === "anim" ? "Back to the skinned model" : "Back to the previous animation"}</button>
+            )}
+          </div>
+        </>
       )}
+      {props.tool === "connect" &&
+        (person && !!clips?.length ? (
+          <ConnectClips clips={clips.map((c) => c.name)} busy={props.busy} onRun={(params) => props.onRun(params, "motion", props.version.version)} />
+        ) : (
+          <p className="muted">Kimodo connects the clips of a person.</p>
+        ))}
     </div>
   );
 }
@@ -4426,9 +4418,7 @@ function ConnectClips(props: { clips: string[]; busy: boolean; onRun: (params: o
       seconds,
     });
   return (
-    <details>
-      <summary>Connect two clips</summary>
-      <div className="stack">
+    <div className="stack">
         <p className="muted">
           Kimodo makes the motion that leads from the end of one clip into the start of another, for example from Idle into a fighting stance. Leave one side
           empty to continue a clip or to lead into one. The result is a transition clip: in the game it plays between the two. Its page puts it on the model with
@@ -4466,8 +4456,7 @@ function ConnectClips(props: { clips: string[]; busy: boolean; onRun: (params: o
         <button disabled={props.busy || (!from && !to) || !(seconds >= 0.5 && seconds <= 8) || !(Math.abs(turn) <= 180)} onClick={make}>
           Make transition
         </button>
-      </div>
-    </details>
+    </div>
   );
 }
 
@@ -4538,14 +4527,7 @@ function FitCheck(props: { asset: string; version: Meta; joints?: Record<string,
   );
 }
 
-function SkinQA(props: {
-  asset: string;
-  version: Meta;
-  motions: Meta[];
-  onPick: (version: string) => void;
-  onRun: (params: object, step?: string, parent?: string) => void;
-  busy: boolean;
-}) {
+function SkinQA(props: { asset: string; version: Meta; onPick: (version: string) => void }) {
   const [qa, setQa] = useState<{
     items: Record<string, { status: string; value: number | null }>;
     picked?: string;
@@ -4593,14 +4575,6 @@ function SkinQA(props: {
           .
         </p>
       )}
-      <ClipPicker
-        asset={props.asset}
-        rig={props.version.version}
-        template={String(props.version.metrics?.template ?? "mixamo52")}
-        onRun={props.onRun}
-        busy={props.busy}
-        motions={props.motions}
-      />
       <details open={total > n("pass")}>
         <summary>Skin checks: {summary}</summary>
         <div className="stack">
@@ -4634,6 +4608,7 @@ function SkinQA(props: {
 
 function RigPanel(props: {
   asset: string;
+  tool?: string; // M71: the strip's tool; a Character tool shows its part, anything else only an editor that is open
   version: Meta;
   motions: Meta[];
   onView: (r: RigView | null) => void;
@@ -4780,9 +4755,11 @@ function RigPanel(props: {
       : step === "rig_skin"
         ? "Skinned model"
         : "Skeleton";
+  const tool = props.tool ?? "";
+  const mine = CHARACTER.has(tool);
   const body = () => {
     if (!v.outputs.skeleton)
-      return (
+      return tool !== "fit" ? null : (
         <div className="stack">
           <p className="muted">
             Add a skeleton to a character or an animal; skip this for props and scenery.
@@ -4821,9 +4798,25 @@ function RigPanel(props: {
           onClose={() => setAnimEditing(false)}
         />
       ) : (
-        <AnimInfo asset={props.asset} version={v} onPick={props.onPick} onEdit={() => setAnimEditing(true)} onRun={onRun} busy={busy} />
+        <AnimInfo asset={props.asset} version={v} tool={tool} onPick={props.onPick} onEdit={() => setAnimEditing(true)} onRun={onRun} busy={busy} />
       );
-    if (step === "rig_skin") return <SkinQA asset={props.asset} version={v} motions={props.motions} onPick={props.onPick} onRun={onRun} busy={busy} />;
+    if (step === "rig_skin")
+      return (
+        <>
+          <SkinQA asset={props.asset} version={v} onPick={props.onPick} />
+          {tool in CLIP && (
+            <ClipPicker
+              asset={props.asset}
+              rig={v.version}
+              template={String(v.metrics?.template ?? "mixamo52")}
+              source={CLIP[tool]}
+              onRun={onRun}
+              busy={busy}
+              motions={props.motions}
+            />
+          )}
+        </>
+      );
     if (!data) return <p className="muted">Loading the skeleton…</p>;
     const r = data.report;
     if (hist) {
@@ -4971,7 +4964,7 @@ function RigPanel(props: {
             </p>
           )}
           {r.low_confidence.length > 0 && <p className="note warn">Unsure placement: {r.low_confidence.map(markerLabel).join(", ")}. Check these markers.</p>}
-          {parts.length > 0 && (
+          {tool === "attach" && parts.length > 0 && (
             <>
               <p className="muted">
                 Parts: a hard piece, such as a helmet, a shield or a weapon, can move with one bone instead of bending with the body. The nearest bone is
@@ -5003,10 +4996,16 @@ function RigPanel(props: {
               </ul>
             </>
           )}
-          <button className="primary" disabled={busy} onClick={() => onRun(Object.keys(rigid).length ? { rigid } : {}, "rig_skin")}>
-            Attach to skeleton
-          </button>
-          <p className="muted">Attach the mesh to the skeleton: about 10 seconds, then the result is tested in 10 poses.</p>
+          {tool === "attach" && (
+            <>
+              <button className="primary" disabled={busy} onClick={() => onRun(Object.keys(rigid).length ? { rigid } : {}, "rig_skin")}>
+                Attach to skeleton
+              </button>
+              <p className="muted">Attach the mesh to the skeleton: about 10 seconds, then the result is tested in 10 poses.</p>
+            </>
+          )}
+          {tool === "skeleton" && (
+            <>
           <div className="row">
             {!creature && <button onClick={() => (mk.start({ ...data.markers }), setSel("Chin"))}>Edit markers</button>}
             <button onClick={() => (sk.start({ joints: {}, twists: {} }), setSel(creature ? data.joints.find((j) => j.parent)!.name : "Hips"))}>
@@ -5028,6 +5027,8 @@ function RigPanel(props: {
           <p className="muted">
             Green dots are joints and yellow lines are bones. To fix one joint, click Edit skeleton.{creature ? "" : " To fix a whole area, click Edit markers."}
           </p>
+            </>
+          )}
         </div>
       );
     const moved = MARKER_NAMES.some((n) => edit[n] && !edit[n].every((x, i) => x === data.markers[n][i]));
@@ -5080,9 +5081,10 @@ function RigPanel(props: {
       </div>
     );
   };
+  if (!mine && !hist && !edit && !animEditing) return null;
   return (
     <section>
-      <h3>{title}</h3>
+      {!mine && <h3>{title}</h3>}
       {body()}
     </section>
   );
@@ -5297,10 +5299,12 @@ function ViewerPane(props: {
   );
 }
 
-function BlenderPanel(props: { asset: string; version: Meta; onPull: () => Promise<void> }) {
+/** M71: the Blender group's state, shared by the header and the History rows: whether an add-on answers, and the open of a version. */
+function useBlender(asset: string) {
   const [link, setLink] = useState<"pro" | "free" | null | undefined>(undefined);
   const [start, setStart] = useState(false); // Setup: Open in Blender starts it when none answers
   const [busy, run] = useBusy();
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const check = () =>
     api
       .blenderStatus()
@@ -5308,54 +5312,23 @@ function BlenderPanel(props: { asset: string; version: Meta; onPull: () => Promi
       .catch(() => setLink(null));
   useEffect(() => {
     check();
-  }, []);
-  const short = props.version.version.slice(0, 3);
-  const [opened, setOpened] = useState<{ ok: boolean; text: string } | null>(null);
-  const openInBlender = () =>
+  }, [asset]);
+  const open = (version: string) =>
     run(() =>
-      api.blenderOpen(props.asset, props.version.version).then(
+      api.blenderOpen(asset, version).then(
         (r) => (
-          setOpened({
-            ok: true,
-            text: `Opened ${r.version} in Blender as collection EFFIGY_${props.asset}_v${r.version.slice(0, 3)}: switch to Blender.`,
-          }),
+          setNote({ ok: true, text: `Opened ${r.version} in Blender as collection EFFIGY_${asset}_v${r.version.slice(0, 3)}: switch to Blender.` }),
           check()
         ),
-        (e) => setOpened({ ok: false, text: explain(e) }),
+        (e) => setNote({ ok: false, text: explain(e) }),
       ),
     );
-  return (
-    <div className="stack">
-      <span className={link ? "tag ok" : "muted"}>
-        {link === undefined
-          ? "Checking Blender…"
-          : link
-            ? `● Connected (${link === "pro" ? "Blender MCP Pro" : "blender-mcp, free"})`
-            : start
-              ? "○ Not connected: Open starts your Blender and its add-on's server (Setup)."
-              : "○ Not connected: open Blender, press N, and start the add-on's server (Blender MCP Pro or blender-mcp), or let Setup start it."}
-        {!link && link !== undefined && (
-          <button className="small" onClick={check}>
-            Check again
-          </button>
-        )}
-      </span>
-      <div className="row">
-        <button disabled={!(link || start) || busy} onClick={openInBlender}>
-          {busy && !link ? "Starting Blender…" : `Open ${short} in Blender`}
-        </button>
-        <button disabled={!link || busy} onClick={() => run(props.onPull)}>
-          Save Blender changes as version
-        </button>
-      </div>
-      {opened && (
-        <span className={opened.ok ? "muted" : "error"} role="status">
-          {opened.text}
-        </span>
-      )}
-      <span className="muted">Click Save Blender changes as version to bring the model from Blender back. It becomes a new version. The old one stays.</span>
-    </div>
-  );
+  const help =
+    (link ? `Connected (${link === "pro" ? "Blender MCP Pro" : "blender-mcp, free"}).` : start
+      ? "Not connected: Open starts your Blender and its add-on's server (Setup)."
+      : "Not connected: open Blender, press N, and start the add-on's server (Blender MCP Pro or blender-mcp), or let Setup start it.") +
+    " Click to check again. Save back brings the model back from Blender as a new version; the old one stays.";
+  return { link, busy, run, note, check, open, help, can: !!(link || start) };
 }
 
 // M40: Claude, Codex and other agents use the app over MCP; this shows each one what to paste, and tests the bridge
@@ -6094,6 +6067,8 @@ function Setup(props: {
   track: (job_id: string, step: string) => void;
   guard: (p: Promise<unknown>) => Promise<void>;
   cap?: string; // a capability's card to show (a blocked action's link, UX-12)
+  dev: boolean;
+  onDev: (on: boolean) => void;
 }) {
   const [licences, setLicences] = useState<Licence[]>([]);
   const [envs, setEnvs] = useState<Env[] | null>(null);
@@ -6274,6 +6249,12 @@ function Setup(props: {
             ))}
         </ul>
       </div>
+      <h2>Developer options</h2>
+      <label className="check">
+        <input type="checkbox" checked={props.dev} onChange={(e) => props.guard(api.setDeveloper(e.target.checked).then((r) => props.onDev(r.on)))} /> Show Run any step in the
+        workspace
+      </label>
+      <p className="muted">Run any step puts a step by name, with your own settings, at the end of the tool strip. Off by default.</p>
       <h2>Advanced</h2>
       <details>
         <summary>Model files and licences</summary>
@@ -6369,7 +6350,7 @@ function Jobs(props: { jobs: Record<string, Job>; assetName: (id?: string) => st
     <footer aria-label="Activity">
       {list.length === 0 ? <span className="muted">No activity yet.</span> : row(list[0])}
       {list.length > 1 && (
-        <details>
+        <details className="earlier">
           <summary>Earlier activity ({list.length - 1})</summary>
           {list.slice(1).map(row)}
         </details>

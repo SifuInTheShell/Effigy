@@ -5,7 +5,7 @@ when set, wins: a developer's shell, the tests). `welcomed`: the user started an
 setup or skipped it; until then, and while nothing is installed, the app opens it by itself. `port`: the port
 the app serves on, chosen in Setup and read at start (EFFIGY_PORT, when set, wins). `blender_start`,
 `blender_exe`: Open in Blender starts that Blender (the user's own, with the MCP add-on) when none answers
-(server/blender_client.ensure). EFFIGY_SETTINGS points at another file (the UI tests use their own).
+(server/blender_client.ensure). `developer`: Setup's Developer options (the workspace shows Run any step). EFFIGY_SETTINGS points at another file (the UI tests use their own).
 """
 
 import json

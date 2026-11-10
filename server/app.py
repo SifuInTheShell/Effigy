@@ -459,6 +459,22 @@ def welcomed():
     return {"ok": True}
 
 
+class Developer(BaseModel):
+    on: bool
+
+
+@app.get("/api/setup/developer")
+def developer():
+    """Setup's Developer options: whether the workspace shows Run any step."""
+    return {"on": bool(settings.read().get("developer"))}
+
+
+@app.post("/api/setup/developer")
+def choose_developer(body: Developer):
+    settings.write(developer=body.on)
+    return {"on": body.on}
+
+
 @app.get("/api/setup/presets")
 def setup_presets():
     return install.presets()

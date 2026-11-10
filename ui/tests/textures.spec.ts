@@ -630,6 +630,14 @@ test("Textures: import map set and apply a pinned Library version to an animated
   expect(finalDoc.animations).toEqual(doc.animations);
   expect(finalDoc.skins).toEqual(doc.skins);
   expect(finalDoc.meshes).toEqual(doc.meshes);
+  // The texture task remains reachable from M71's new workspace, including after a saved edit.
+  await page.getByRole("button", { name: "Back to model", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Tools", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Check", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.locator(".stages").getByRole("button", { name: /Textures/ }).click();
+  await expect(page.locator(".texture-workspace")).toBeVisible();
+  await expect(page.getByLabel("Texture version", { exact: true })).toHaveValue(selectedVersion);
+  await page.getByRole("tab", { name: "Library", exact: true }).click();
   await page.getByRole("button", { name: "Save this set to Library" }).click();
   await expect(page.locator(".texture-foot")).toContainText(
     "Standalone material",

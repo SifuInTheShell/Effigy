@@ -155,14 +155,41 @@ def _two_bone(pw, WU, WL, WB, a, b, c, P):
 
 
 def _lock(rot, pos, off, par, lk, F):
-    """One foot lock (§3.2 step 3b): two-bone IK of U > L > B pinning B to its world position at the span's middle."""
+    """One foot lock (§3.2 step 3b): two-bone IK of U > L > B pinning B to its world position at the span's middle.
+    M69 `reach` (a share of the leg's length): where the pinned foot is further from the hip than that, the top
+    translated bone above it (the hips) moves toward it, the least that brings it back, eased (`_hold_blur` over the
+    blend), before the solve."""
     chain = _path(par, lk["bone"])  # root .. U, L, B
     T = _fk(chain, rot, pos, off, (lk["from"] + lk["to"]) // 2)[1][-1]
-    for f in range(max(0, lk["from"] - lk["blend"]), min(F - 1, lk["to"] + lk["blend"]) + 1):
+    span = range(max(0, lk["from"] - lk["blend"]), min(F - 1, lk["to"] + lk["blend"]) + 1)
+
+    def weight(f):
         if f < lk["from"]:
-            w = float(_s(1 - (lk["from"] - f) / lk["blend"]))
-        else:
-            w = 1.0 if f <= lk["to"] else float(_s(1 - (f - lk["to"]) / lk["blend"]))
+            return float(_s(1 - (lk["from"] - f) / lk["blend"]))
+        return 1.0 if f <= lk["to"] else float(_s(1 - (f - lk["to"]) / lk["blend"]))
+
+    hips = next((n for n in chain if n in pos), None)
+    if lk.get("reach") and hips is not None:
+        need, toward = np.zeros(F), np.zeros(3)
+        for f in span:
+            ps = _fk(chain, rot, pos, off, f)[1]
+            a, b, c = ps[-3:]
+            P = c + (T - c) * weight(f)
+            excess = np.linalg.norm(P - a) - lk["reach"] * (
+                np.linalg.norm(b - a) + np.linalg.norm(c - b)
+            )
+            if excess > 0:
+                need[f] = excess
+                toward += (P - a) / np.linalg.norm(P - a) * excess
+        if need.any():
+            toward /= np.linalg.norm(toward)
+            eased = _hold_blur(need, max(lk["blend"], 1))
+            up = _path(par, hips)[:-1]
+            for f in np.nonzero(eased > 1e-12)[0]:
+                Wp = _fk(up, rot, pos, off, f)[0][-1] if up else _ID
+                pos[hips][f] = pos[hips][f] + _qrot(_qinv(Wp), toward * eased[f])
+    for f in span:
+        w = weight(f)
         Ws, ps = _fk(chain, rot, pos, off, f)
         c = ps[-1]
         pw = Ws[-4] if len(Ws) > 3 else _ID
@@ -254,6 +281,121 @@ def _ik(rot, pos, off, par, ctl, F):
                 rot[name][f] = q
 
 
+# --- M69: Butterworth, mirror, reach ----------------------------------------------------------------------
+
+
+def _butter(x, sigma):
+    """A zero-phase second-order Butterworth low-pass along frames (forward, then backward), its half-power point where
+    a Gaussian of `sigma` frames has it (0.1325 / sigma cycles a frame; the two passes put the cut at 0.1652 / sigma, at
+    most 0.45), so one slider means the same in both; the ends padded by odd reflection (at most 30 frames), the filter
+    started at rest on the first sample. Flatter below the cut than the Gaussian: the jitter goes, a quick gesture keeps
+    more of its size."""
+    x = np.asarray(x, float)
+    N = len(x)
+    if N < 3:
+        return x.copy()
+    K = math.tan(math.pi * min(0.1652 / sigma, 0.45))
+    n = 1 / (1 + math.sqrt(2) * K + K * K)
+    b0, a1, a2 = K * K * n, 2 * (K * K - 1) * n, (1 - math.sqrt(2) * K + K * K) * n
+    P = min(N - 1, 30)
+    pad = np.concatenate([2 * x[0] - x[P:0:-1], x, 2 * x[-1] - x[np.arange(N - 2, N - P - 2, -1)]])
+
+    def run(s):
+        y = np.empty_like(s)
+        x1 = x2 = y1 = y2 = s[0]
+        for i in range(len(s)):
+            y[i] = b0 * s[i] + 2 * b0 * x1 + b0 * x2 - a1 * y1 - a2 * y2
+            x2, x1, y2, y1 = x1, s[i], y1, y[i]
+        return y
+
+    return run(run(pad)[::-1])[::-1][P : P + N]
+
+
+def _partner(n, names):
+    """The bone on the other side ("Left" and "Right" swapped), or n itself (a middle bone, or no partner)."""
+    for a, b in (("Left", "Right"), ("Right", "Left")):
+        if a in n:
+            return m if (m := n.replace(a, b)) in names else n
+    return n
+
+
+def _reflect(q, n):
+    """A turn seen in a mirror whose plane has the unit normal n: its axis mirrored, its angle reversed."""
+    v = q[..., :3]
+    return np.concatenate([2 * (v @ n)[..., None] * n - v, q[..., 3:]], -1)
+
+
+def _mirror(names, par, rot, pos, off, rest):
+    """M69 step 1b, in place: the clip as its mirror image. Each bone's world motion from its rest (skeleton space,
+    as the locks' FK sees it: a bone without a rotation channel turns nothing) is reflected across the body's middle
+    plane (through the middle of its left/right pairs at rest, the normal from right to left) and put on its
+    partner's rest; the root's translation is reflected across the plane. Nothing happens without a left/right pair
+    or a rest for every bone."""
+    if any(n not in rest for n in names):
+        return
+    order, seen = [], set()
+
+    def visit(n):
+        if n not in seen:
+            seen.add(n)
+            if par.get(n) in names:
+                visit(par[n])
+            order.append(n)
+
+    for n in names:
+        visit(n)
+    Wr, pr = {}, {}
+    for n in order:
+        up = par.get(n)
+        Wp, pp = (Wr[up], pr[up]) if up in Wr else (_ID, np.zeros(3))
+        Wr[n] = qmul(Wp, np.asarray(rest[n]["q"], float)) if n in rot else Wp
+        pr[n] = pp + _qrot(Wp, np.asarray(rest[n]["t"], float))
+    pairs = [(n, m) for n in names if (m := _partner(n, names)) != n and "Left" in n]
+    if not pairs:
+        return
+    side = sum(pr[a] - pr[b] for a, b in pairs)
+    if np.linalg.norm(side) < 1e-9:
+        return
+    nrm = side / np.linalg.norm(side)
+    mid = sum(pr[a] + pr[b] for a, b in pairs) / (2 * len(pairs))
+    F = len(next(iter({**rot, **pos}.values())))
+    W = {}
+    for n in order:
+        up = par.get(n)
+        Wp = W[up] if up in W else np.tile(_ID, (F, 1))
+        W[n] = _unit(qmul(Wp, rot[n])) if n in rot else Wp
+    # each bone's new world turn: its partner's motion from rest, mirrored, on its own rest
+    want = {
+        m: qmul(_reflect(qmul(W[n], _qinv(Wr[n])), nrm), Wr[m])
+        for n in names
+        if (m := _partner(n, names))
+    }
+    Wn = {}
+    for n in order:
+        up = par.get(n)
+        Wp = Wn[up] if up in Wn else np.tile(_ID, (F, 1))
+        if n in rot:
+            rot[n] = _unit(qmul(_qinv(Wp), want[n]))
+            Wn[n] = want[n]
+        else:
+            Wn[n] = Wp
+    old = {n: v.copy() for n, v in pos.items()}
+    for n in pos:
+        m = _partner(n, names)
+        p = old[m] if m in old else old[n]
+        if par.get(n) not in names:  # a root: its place reflected across the middle plane
+            p = p - 2 * ((p - mid) @ nrm)[:, None] * nrm
+        pos[n] = p
+
+
+def _hold_blur(need, k):
+    """A per-frame need held over ±k frames, blurred (Gaussian, sigma k / 2), never below the need: a correction that
+    starts before it is needed and ends after (M67's easing, in frames)."""
+    F = len(need)
+    held = np.array([need[max(0, f - k) : f + k + 1].max() for f in range(F)])
+    return np.maximum(_gauss(held[:, None], max(k / 2, 0.5))[:, 0], need)
+
+
 # --- evaluate ---------------------------------------------------------------------------------------------
 
 
@@ -289,7 +431,8 @@ def _apply_keys(arr, keys, ident, mix):
 
 def evaluate(base: dict, layer: dict) -> dict:
     """`base` clip + correction `layer` -> the edited clip (same shape, "frames" = new length).
-    Order: 1 dense base (given) · 2 smooth · 3 keys, offsets, 3b feet, 3c ik · 4 trim · 5 in_place · 6 ground · 7 loop · 8 speed."""
+    Order: 1 dense base (given) · 1b mirror · 2 smooth · 3 keys, offsets, 3b feet, 3c ik · 4 trim · 5 in_place · 6 ground ·
+    7 loop · 8 speed."""
     fps = base["fps"]
     names = [b["name"] for b in base["bones"]]
     par = {b["name"]: b.get("parent") for b in base["bones"]}
@@ -306,12 +449,16 @@ def evaluate(base: dict, layer: dict) -> dict:
         return True
 
     tops = [n for n in pos if top(n)]
+    if layer.get("mirror"):  # 1b (M69)
+        rest = {b["name"]: b["rest"] for b in base["bones"] if "rest" in b}
+        _mirror(names, par, rot, pos, off, rest)
+    blur = _butter if layer.get("filter") == "butterworth" else _gauss  # M69
     for n, sigma in (layer.get("smooth") or {}).items():  # 2
         if sigma > 0:
             if n in rot:
-                rot[n] = _unit(_gauss(_consistent(rot[n]), sigma))
+                rot[n] = _unit(blur(_consistent(rot[n]), sigma))
             if n in pos:
-                pos[n] = _gauss(pos[n], sigma)
+                pos[n] = blur(pos[n], sigma)
     for n, ks in (layer.get("keys") or {}).items():  # 3
         if ks:
             rot[n] = _unit(qmul(rot[n], _apply_keys(rot[n], ks, np.array([0, 0, 0, 1.0]), slerp)))
@@ -466,6 +613,12 @@ def sample_clip(doc, blob, name, fps) -> dict:
                 doc["nodes"][k].get("translation", [0, 0, 0]),
             )
             b["offset"] = np.asarray(const, float)
+    for k, b in nodes.items():  # M69: its node's rest (the mirror's reference)
+        node = doc["nodes"][k]
+        b["rest"] = {
+            "q": node.get("rotation", [0, 0, 0, 1]),
+            "t": node.get("translation", [0, 0, 0]),
+        }
     if len({b["name"] for b in nodes.values()}) != len(nodes):
         raise StepError("failed", f"clip {name!r}: bone names are not unique")
     for k, b in nodes.items():
