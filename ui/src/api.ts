@@ -28,6 +28,7 @@ export type Asset = {
   licenses?: string[];
   restricted?: boolean;
   imported?: boolean;
+  folder?: string; // the library folder it is filed in (one at most)
   kind?: string; // "2d" for a 2D asset (research 15, the 2D contract); absent = a 3D asset
 };
 export type CopyResult = {
@@ -123,6 +124,7 @@ export const api = {
   textureUV: (id: string, version: string, material: number) => call<{ triangles: number[][][] }>("GET", `/api/assets/${id}/versions/${version}/textures/uv?material=${material}`),
   extractTexture: (id: string, version: string, material: number, name: string) => call<{ asset: Asset; version: Meta }>("POST", `/api/assets/${id}/versions/${version}/textures/extract`, { material, name }),
   renameAsset: (id: string, name: string) => call<Asset>("PATCH", `/api/assets/${id}`, { name }),
+  setFolder: (id: string, folder: string) => call<Asset>("PATCH", `/api/assets/${id}`, { folder }),
   archiveAsset: (id: string, archived: boolean) => call<Asset>("PATCH", `/api/assets/${id}`, { archived }),
   patchTags: (id: string, tags: string[]) => call<Asset>("PATCH", `/api/assets/${id}`, { tags }),
   batchPlan: (source: string, license: string) => call<{ items: BatchItem[] }>("POST", "/api/import/batch", { source, license, dry_run: true }),

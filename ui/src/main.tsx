@@ -558,6 +558,7 @@ function App() {
                 guard(api.deleteAsset(a.id));
             }}
             onRestored={refresh}
+            onMove={(ids, folder) => guard(Promise.all(ids.map((id) => api.setFolder(id, folder))).finally(refresh))}
           />
         )}
         {route.page === "setup" && <Setup models={models} reload={loadModels} jobs={jobs} track={track} guard={guard} cap={route.cap} />}
@@ -599,15 +600,16 @@ const FOLDED = new Set(["clean", "remesh", "uv"]); // History folds these: the s
 
 // Library filters: bench and golden runs are the test assets; everything else is the owner's
 const isTest = (a: Asset) => a.id.startsWith("bench_") || a.id.startsWith("golden_");
-// the library's view (search, sort, filter, tag, scroll): in the address while the library shows, so Back and a link bring it
-// back, and remembered here for the Library button (UX-11: it reset whenever the user went elsewhere)
-type LibView = { q: string; sort: string; filter: string; tag: string; top: number };
-let libView: LibView = { q: "", sort: "new", filter: "All", tag: "", top: 0 };
+// the library's view (search, sort, filter, tag, folder, scroll): in the address while the library shows, so Back and a link
+// bring it back, and remembered here for the Library button (UX-11: it reset whenever the user went elsewhere). folder: the
+// one open, null the top level (its folders and the assets in none)
+type LibView = { q: string; sort: string; filter: string; tag: string; folder: string | null; top: number };
+let libView: LibView = { q: "", sort: "new", filter: "All", tag: "", folder: null, top: 0 };
 const libFromHash = (hash: string): Partial<LibView> => {
   const i = hash.indexOf("?");
   if (i < 0 || !/^#\/(library)?\?/.test(hash)) return {};
   const p = new URLSearchParams(hash.slice(i + 1));
-  return Object.fromEntries((["q", "sort", "filter", "tag"] as const).filter((k) => p.has(k)).map((k) => [k, p.get(k)!]));
+  return Object.fromEntries((["q", "sort", "filter", "tag", "folder"] as const).filter((k) => p.has(k)).map((k) => [k, p.get(k)!]));
 };
 const libHash = (v: LibView, base = "#/") => {
   const p = new URLSearchParams();
@@ -615,9 +617,12 @@ const libHash = (v: LibView, base = "#/") => {
   if (v.sort !== "new") p.set("sort", v.sort);
   if (v.filter !== "All") p.set("filter", v.filter);
   if (v.tag) p.set("tag", v.tag);
+  if (v.folder) p.set("folder", v.folder);
   const s = p.toString();
   return s ? `${base}?${s}` : base;
 };
+
+const squash = (s: string) => s.toLowerCase().replace(/[\s_.\-]+/g, "");
 
 const FILTERS: Record<string, (a: Asset) => boolean> = {
   All: () => true,
@@ -637,10 +642,14 @@ function Library(props: {
   onArchive: (a: Asset, on: boolean) => void;
   onTags: (a: Asset) => void;
   onRestored: () => void;
+  onMove: (ids: string[], folder: string) => Promise<unknown>;
 }) {
   const [start] = useState(() => ({ ...libView, ...libFromHash(location.hash) }));
   const [q, setQ] = useState(start.q);
   const [tagSel, setTag] = useState(start.tag);
+  const [folderSel, setFolder] = useState(start.folder);
+  const [moving, setMoving] = useState(false);
+  const [target, setTarget] = useState("");
   const [picking, setPicking] = useState(false); // M42: selection mode for the batch export
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [batch, setBatch] = useState(false);
@@ -652,11 +661,18 @@ function Library(props: {
   const [filter, setFilter] = useState(FILTERS[start.filter] || start.filter === "Archived" ? start.filter : "All");
   const page = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    libView = { ...libView, q, sort, filter, tag: tagSel };
+    libView = { ...libView, q, sort, filter, tag: tagSel, folder: folderSel };
     if (!/^(#\/(library)?(\?.*)?)?$/.test(location.hash)) return; // the library's own address only
     const hash = libHash(libView, location.hash.startsWith("#/library") ? "#/library" : "#/");
     if (location.hash !== hash) history.replaceState(null, "", hash); // no new history entry
-  }, [q, sort, filter, tagSel]);
+  }, [q, sort, filter, tagSel, folderSel]);
+  useEffect(() => {
+    // a folder opens through a link (a history entry, like a file browser's): Back and Forward come here too
+    const go = () => /^#\/(library)?(\?.*)?$/.test(location.hash) && (setFolder(libFromHash(location.hash).folder || null), setPicked(new Set()));
+    window.addEventListener("hashchange", go);
+    return () => window.removeEventListener("hashchange", go);
+  }, []);
+  const into = (f: string | null) => libHash({ q, sort, filter, tag: tagSel, folder: f, top: 0 }, "#/library");
   useEffect(() => {
     // back where the user was in a long library, once the cards are there
     if (props.assets && page.current) page.current.scrollTop = libView.top;
@@ -666,12 +682,21 @@ function Library(props: {
   const total = props.assets ?? [];
   const stamp = (a: Asset) => a.updated ?? a.created;
   const needle = q.trim().toLowerCase();
+  // each word anywhere in the name, id, folder or tags, in any order; spaces, _ . - left out of both ("air vent" finds s_airvent_01)
+  const words = needle.split(/\s+/).map(squash).filter(Boolean);
   const tags = [...new Set(total.flatMap((a) => a.tags ?? []))].sort();
   const tag = tags.includes(tagSel) ? tagSel : ""; // a tag no asset has any more is no filter
+  // a folder exists while an asset is in it; one nothing is in any more is no filter
+  const live = total.filter((a) => !a.archived);
+  const folders = [...new Set(live.flatMap((a) => (a.folder ? [a.folder] : [])))].sort((a, b) => a.localeCompare(b));
+  const folder = folderSel && folders.includes(folderSel) ? folderSel : null;
+  const flat = !!needle || !!tag || filter === "Archived"; // a search looks in every folder, as a file browser's does
+  const tiles = folder === null && !flat ? folders.map((f) => [f, live.filter((a) => a.folder === f && FILTERS[filter](a)).length] as const).filter(([, n]) => n) : [];
   const all = total
     .filter((a) => (filter === "Archived" ? !!a.archived : !a.archived && FILTERS[filter](a)))
     .filter((a) => !tag || a.tags?.includes(tag))
-    .filter((a) => !needle || a.id.toLowerCase().includes(needle) || a.name.toLowerCase().includes(needle) || a.tags?.some((t) => t.toLowerCase().includes(needle)))
+    .filter((a) => flat || (a.folder ?? null) === folder)
+    .filter((a) => !words.length || words.every((w) => squash([a.id, a.name, a.folder ?? "", ...(a.tags ?? [])].join(" ")).includes(w)))
     .sort(
       sort === "name"
         ? (a, b) => a.name.localeCompare(b.name)
@@ -721,13 +746,21 @@ function Library(props: {
               ))}
             </select>
           )}
-          <button aria-pressed={picking} onClick={() => (setPicking(!picking), setPicked(new Set()), setBatch(false))}>
+          <button aria-pressed={picking} onClick={() => (setPicking(!picking), setPicked(new Set()), setBatch(false), setMoving(false))}>
             {picking ? "Done selecting" : "Select assets"}
           </button>
           {picking && (
-            <button className="primary" disabled={!chosen.length} onClick={() => setBatch(true)}>
-              Export selected ({chosen.length})
-            </button>
+            <>
+              <button onClick={() => setPicked(new Set(chosen.length === all.length ? [] : all.map((a) => a.id)))}>
+                {chosen.length === all.length ? "Select none" : `Select all ${all.length}`}
+              </button>
+              <button disabled={!chosen.length} onClick={() => (setMoving(true), setTarget(folder ?? ""))}>
+                Move to folder… ({chosen.length})
+              </button>
+              <button className="primary" disabled={!chosen.length} onClick={() => setBatch(true)}>
+                Export selected ({chosen.length})
+              </button>
+            </>
           )}
           {filtered && (
             <button className="small" onClick={clear}>
@@ -738,6 +771,42 @@ function Library(props: {
             {all.length} of {total.length} assets
           </span>
         </div>
+      )}
+      {folder !== null && (
+        <nav className="row crumbs" aria-label="Folder">
+          <a className="button small" href={into(null)}>
+            ↑ Up
+          </a>
+          <a href={into(null)}>Library</a>
+          <span aria-hidden="true">›</span>
+          <strong>{folder}</strong>
+          {flat && <span className="muted">(searching every folder)</span>}
+        </nav>
+      )}
+      {moving && picking && chosen.length > 0 && (
+        <form
+          className="note row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            props.onMove(chosen.map((a) => a.id), target.trim()).then(() => (setMoving(false), setPicked(new Set())));
+          }}
+        >
+          <label>
+            Move {chosen.length} {chosen.length === 1 ? "asset" : "assets"} to the folder{" "}
+            <input list="library-folder-names" value={target} autoFocus placeholder="a new or existing folder" onChange={(e) => setTarget(e.target.value)} />
+          </label>
+          <datalist id="library-folder-names">
+            {folders.map((f) => (
+              <option key={f} value={f} />
+            ))}
+          </datalist>
+          <button className="primary" type="submit">
+            {target.trim() ? "Move" : "Take out of their folders"}
+          </button>
+          <button type="button" onClick={() => setMoving(false)}>
+            Cancel
+          </button>
+        </form>
       )}
       {batch && <BatchExport assets={chosen} onClose={() => setBatch(false)} />}
       {props.fresh && (
@@ -765,7 +834,7 @@ function Library(props: {
             </a>
           </div>
         </div>
-      ) : all.length === 0 ? (
+      ) : all.length === 0 && !tiles.length ? (
         <p className="muted">
           No assets match.{" "}
           <button className="small" onClick={clear}>
@@ -774,10 +843,26 @@ function Library(props: {
         </p>
       ) : (
         <ul className="cards">
+          {tiles.map(([f, n]) => (
+            <li key={`folder:${f}`}>
+              <a className="card" href={into(f)} aria-label={`Folder ${f}, ${n} asset${n === 1 ? "" : "s"}`}>
+                <span className="thumb folder-thumb" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h4l2 2.5h7A2.5 2.5 0 0 1 21 9v8.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" />
+                  </svg>
+                </span>
+                <strong>{f}</strong>
+                <span className="muted">
+                  Folder · {n} asset{n === 1 ? "" : "s"}
+                </span>
+              </a>
+            </li>
+          ))}
           {all.map((a) => (
             <li key={a.id}>
               <Card
                 a={a}
+                where={flat ? a.folder : undefined}
                 dup={dup(a)}
                 credit={(a.licenses ?? []).map((n) => credits[n]).filter(Boolean).join("\n")}
                 picking={picking}
@@ -862,7 +947,7 @@ function Trash(props: { onRestored: () => void; count: number }) {
 const prefersStill = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** One library card: the still thumbnail, swapped for the turntable after 400 ms of hover or focus once its WebP has loaded (M42). */
-function Card(props: { a: Asset; dup: boolean; credit: string; picking: boolean; picked: boolean; onPick: () => void }) {
+function Card(props: { a: Asset; where?: string; dup: boolean; credit: string; picking: boolean; picked: boolean; onPick: () => void }) {
   const { a } = props;
   const [turn, setTurn] = useState(false);
   const timer = useRef(0);
@@ -914,6 +999,7 @@ function Card(props: { a: Asset; dup: boolean; credit: string; picking: boolean;
           {props.dup && ` · ${a.id}`}
         </span>
         <span className="chips">
+          {props.where && <span className="chip">In {props.where}</span>}
           {a.kind === "texture" && <span className="chip">Texture / Material</span>}
           {a.restricted && <span className="chip bad">Restricted</span>}
           {a.imported && (

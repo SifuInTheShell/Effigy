@@ -259,7 +259,8 @@ numbers went in tens). `asset.json` may carry `archived`, (M42) `tags` (a list o
 picks its stage list by it, `POST /api/assets` and the MCP `create_asset`/`import_file` set it, steps never read
 it), (batch import, research 18) `origin` `{"library", "source_key", "sha256"?, "license", "restricted"}` (where a
 batch-imported asset came from; `sha256` of the file once its import_model is done; a rerun matches on library and
-source_key); `meta.json` may carry `starred` and `label` (M28, the user's marks; steps
+source_key), (library folders, 2026-11-10) `folder` (the one library folder it is filed in, 1-64 printable
+characters; absent = none; a folder exists while an asset is in it); `meta.json` may carry `starred` and `label` (M28, the user's marks; steps
 never read them)
 (steps write outputs; the backend writes `meta.json` from the step's `RESULT`). Version numbers are
 allocated by the backend (`max(NNN)+10` so manual insertions remain possible).
@@ -299,7 +300,7 @@ All under `http://127.0.0.1:8000` (the port: Setup, App address, or EFFIGY_PORT;
 | GET | `/api/assets/{id}` | → `{"asset", "versions": [meta.json…]}` |
 | PUT | `/api/assets/{id}/upload/{name}` | raw file body (`.png/.jpg/.jpeg/.webp/.glb`; `.mp4/.mov/.webm` since M34; `.gltf/.fbx/.obj/.stl/.ply/.usd/.usda/.usdc/.usdz/.zip` since M39), at most 1 GB counted while streaming to disk → `meta.json` of a new root `NNN_upload`; 400 `bad_request` (extension), `bad_zip` (unreadable, encrypted, unsafe or over a limit; M39), `no_model` (a zip without a model file); 413 `too_large` |
 | GET | `/api/steps` | → `{step: {preset_name: params}}` for every `steps/<name>.py` (presets from `server/presets.py`) |
-| PATCH | `/api/assets/{id}` | `{"name"?, "archived"?, "tags"?}` → the asset (M28; `tags` M42: replaces the list; each trimmed, 1–32 characters, no comma, at most 20, repeats (ignoring case) dropped, else 400 `bad_params`) |
+| PATCH | `/api/assets/{id}` | `{"name"?, "archived"?, "tags"?, "folder"?}` → the asset (M28; `tags` M42: replaces the list; each trimmed, 1–32 characters, no comma, at most 20, repeats (ignoring case) dropped, else 400 `bad_params`; `folder` (2026-11-10): trimmed, up to 64 printable characters, `""` takes the asset out of its folder) |
 | PATCH | `/api/assets/{id}/versions/{v}` | `{"starred"?, "label"?}` → the version's meta (M28) |
 | POST | `/api/assets/{id}/steps/{step}` | `{"parent": "NNN_step", "params": {}, "dedupe"?: false}` → `{"job_id", "deduped"}` (202); `dedupe` (the MCP bridge, M40): the queued or running job with the same asset, step, parent and params instead of a new one, `deduped: true` then (not the caller's to cancel) |
 | POST | `/api/assets/{id}/versions/{v}/fit-check` | `{"joints"?: {name: [x, y, z]}}` (unsaved moves) → `steps/_rig.fit_quality`: `{"score", "joints", "inside", "centred", "bones_outside", "attention": [[joint, why]…]}`; 404 for a version without a skeleton (Check fit) |
@@ -2730,6 +2731,24 @@ trigger yet, PLAN §7), generic rigs (M59, dropped 2026-10-13 by the owner (Skin
   `TEXCOORD_1` through import and export: not checked (needs Blender). The Parkour library (459 files, ~630 MB) on the
   laptop with time per asset and peak memory: not run. Batches live in memory (a restart forgets one; a rerun picks up
   where it stopped, by `origin`). Parallel imports: one at a time until measured.
+
+### Library folders (owner 2026-11-10, `library-folders`)
+
+- An asset is filed in one folder at most (`asset.json.folder`, §3.2), set and cleared through `PATCH /api/assets/{id}`
+  (§3.5). No folder list is stored: a folder exists while an asset is in it. Tags stay the way to give an asset
+  several labels.
+- UI: Library browses like a file browser: the top level shows a tile per folder (its count) before the assets in no
+  folder; a tile is a link (`#/library?folder=<name>`, a history entry, so Back steps out), inside it the folder's assets
+  under "↑ Up · Library › <name>". A search, a tag or Archived looks in every folder, each card saying "In <folder>". Select
+  assets adds Select all and Move to folder…: a new or existing folder's name (empty: out of their folders), one PATCH per
+  asset. The search matches each typed word anywhere in the name, id, folder or tags, in any order, spaces, `_`, `.` and `-`
+  left out of both ("air vent" finds `s_airvent_01`).
+- Files: `server/library.py`, `server/app.py`, `ui/src/api.ts`, `ui/src/main.tsx`, `tests/test_library_folders.py`.
+- Acceptance: an asset goes into a folder and out again, its other fields kept, a bad name refused
+  (`tests/test_library_folders.py`); in the browser, two assets moved into a new folder show under it, a folder opens
+  from its tile and Back returns, "air vent" and "vent 02" find the vents in their folder.
+- Skipped (ponytail): folders inside folders, renaming a folder (select all in it, move to the new name), empty folders,
+  a folder on the MCP tools and in batch import → add when asked.
 
 ### Mesh gates (2026-10-12, `mesh-gates`)
 

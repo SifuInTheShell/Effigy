@@ -408,6 +408,18 @@ meter {
   border-radius: 8px;
   background: #28282c;
 }
+.card .folder-thumb {
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+.folder-thumb svg {
+  width: 45%;
+}
+.crumbs {
+  align-items: center;
+  margin-bottom: 16px;
+}
 #versions .thumb-sm {
   width: 36px;
   height: 36px;

@@ -143,13 +143,14 @@ class AssetPatch(BaseModel):
     name: str | None = None
     archived: bool | None = None
     tags: list[str] | None = None
+    folder: str | None = None  # "" takes the asset out of its folder
 
 
 @app.patch("/api/assets/{asset_id}")
 def update_asset(asset_id: str, body: AssetPatch):
-    if body.name is None and body.archived is None and body.tags is None:
-        raise ApiError(400, "bad_params", "nothing to change: name, archived or tags")
-    return library.update_asset(asset_id, body.name, body.archived, body.tags)
+    if body.model_dump(exclude_none=True) == {}:
+        raise ApiError(400, "bad_params", "nothing to change: name, archived, tags or folder")
+    return library.update_asset(asset_id, body.name, body.archived, body.tags, folder=body.folder)
 
 
 class ExportItem(BaseModel):

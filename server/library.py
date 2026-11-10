@@ -255,11 +255,19 @@ def update_asset(
     archived: bool | None = None,
     tags: list[str] | None = None,
     origin: dict | None = None,
+    folder: str | None = None,
 ) -> dict:
-    """Rename, archive (M28: hidden from the grid's default view, nothing else), tag (M42: replaces the list) and/or
-    record where it came from (`origin`, a batch import: research 18)."""
+    """Rename, archive (M28: hidden from the grid's default view, nothing else), tag (M42: replaces the list),
+    record where it came from (`origin`, a batch import: research 18) and/or file it in a library folder (one per asset,
+    "" takes it out)."""
     if name is not None and not name.strip():
         raise ApiError(400, "bad_params", "a name can't be empty")
+    if folder is not None:
+        folder = folder.strip()
+        if len(folder) > 64 or not folder.isprintable():
+            raise ApiError(
+                400, "bad_params", f"a folder name is up to 64 printable characters: {folder!r}"
+            )
     new_tags = None if tags is None else _tags(tags)
     path = asset_dir(asset_id) / "asset.json"
     with _meta:  # read, change and write as one: a patch beside another kept both (BE-004)
@@ -272,6 +280,10 @@ def update_asset(
             asset["archived"] = bool(archived)
         if origin is not None:
             asset["origin"] = origin
+        if folder:
+            asset["folder"] = folder
+        elif folder is not None:
+            asset.pop("folder", None)
         _write(path, asset)
     return asset
 
