@@ -34,6 +34,9 @@ export type CopyResult = {
   copied: { asset_id: string; version: string; dir: string; files: string[] }[];
   skipped: { asset_id: string; version: string; reason: string }[];
 };
+/** Research 18: one manifest item; `action` from a dry run, `status` once it runs. */
+export type BatchItem = { name: string; file: string; tags: string[]; restricted: boolean; license: string; action: "new" | "update" | "skip"; reason?: string; status?: string; asset_id?: string; version?: string; error?: string };
+export type Batch = { batch_id: string; status: "running" | "done" | "cancelled"; items: BatchItem[]; counts: Record<string, number> };
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 export type TextureRole = "basecolor" | "roughness" | "metallic" | "normal" | "ao" | "height" | "emissive";
 export type TextureMaterial = {
@@ -122,6 +125,11 @@ export const api = {
   renameAsset: (id: string, name: string) => call<Asset>("PATCH", `/api/assets/${id}`, { name }),
   archiveAsset: (id: string, archived: boolean) => call<Asset>("PATCH", `/api/assets/${id}`, { archived }),
   patchTags: (id: string, tags: string[]) => call<Asset>("PATCH", `/api/assets/${id}`, { tags }),
+  batchPlan: (source: string, license: string) => call<{ items: BatchItem[] }>("POST", "/api/import/batch", { source, license, dry_run: true }),
+  batchStart: (source: string, license: string) => call<{ batch_id: string; items: number }>("POST", "/api/import/batch", { source, license }),
+  pick: (kind: "folder" | "file") => call<{ path: string | null }>("POST", "/api/import/pick", { kind }),
+  batch: (id: string) => call<Batch>("GET", `/api/import/batch/${id}`),
+  batchCancel: (id: string) => call<{ ok: boolean }>("POST", `/api/import/batch/${id}/cancel`, {}),
   exportCopy: (folder: string, items: { asset_id: string; version: string }[]) => call<CopyResult>("POST", "/api/export/copy", { folder, items }),
   patchVersion: (id: string, version: string, body: { starred?: boolean; label?: string }) =>
     call<Meta>("PATCH", `/api/assets/${id}/versions/${version}`, body),

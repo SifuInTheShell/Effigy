@@ -580,6 +580,42 @@ def import_file(
     return head | _start(asset_id, upload, step, params, wait_s, ctx)
 
 
+@server.tool(annotations=ADD)
+def import_batch(
+    source: str,
+    only: list[str] | None = None,
+    limit: int = 0,
+    license: str = "",
+    dry_run: bool = False,
+) -> dict:
+    """Use this to import many model files at once: `source` is the absolute path of a folder (every model file under
+    it: .glb .fbx .obj .stl .ply .usd* .zip, named after the file, tagged with its subfolders; a .gltf is skipped,
+    zip it with its .bin) or of a manifest: effigy-import/1 ({"schema", "defaults", "items": [{"file", "name"?,
+    "tags"?, "category"?, "source"?, "license"?, "restricted"?}]}, files relative to it) or a Parkour library.json.
+    Each file becomes a still model (import_model) with its tags, one at a time. `license`: the licence of files that
+    name none (a folder's: all); without a clean one (CC0-1.0, MIT, Apache-2.0, or "own": the owner's own work) a
+    file is imported restricted and export refuses it, so ask the owner when unsure. A rerun skips unchanged files
+    and re-imports changed ones into the same asset. dry_run=true lists the items and what would happen (new |
+    update | skip), creating nothing. `only`: names or source keys containing one of these words; `limit`: the first
+    n. Returns {batch_id, items}: follow it with batch_status."""
+    body = {"source": source, "only": only or None, "limit": limit or None, "license": license}
+    return api("POST", "/api/import/batch", body | {"dry_run": dry_run})
+
+
+@server.tool(annotations=READ)
+def batch_status(batch_id: str, wait_s: float = 0) -> dict:
+    """Use this to follow an import_batch: waits up to wait_s (0-45) for it to finish; returns {status: running |
+    done | cancelled, counts, items: [{name, status: queued | running | done | skipped | failed, asset_id?, version?,
+    error?}]}."""
+    end = time.monotonic() + max(0.0, min(wait_s, 45.0))
+    while (b := api("GET", f"/api/import/batch/{_q(batch_id)}"))["status"] == "running":
+        if time.monotonic() >= end:
+            break
+        time.sleep(1)
+    keep = ("name", "status", "asset_id", "version", "reason", "error")
+    return b | {"items": [{k: it[k] for k in keep if k in it} for it in b["items"]]}
+
+
 TEXTURE_ROLES = {"basecolor", "roughness", "metallic", "normal", "ao", "height", "emissive"}
 TEXTURE_OPS = {
     "create",

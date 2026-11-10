@@ -107,6 +107,12 @@ version)` removes the other (a pull without `version` takes the one opened last 
 weld first (Mesh > Clean Up > Merge by Distance, `remove_doubles` in bmesh): a pulled-in glTF is split along its
 UV seams, and a hole fill or a cut on the unwelded mesh caps the seam loops too.
 
+**Many files** (a kit, a whole asset library): `import_batch(source)` with a folder (every model file under it,
+tagged with its subfolders), an effigy-import/1 manifest or a Parkour `library.json`; `dry_run=true` first, then
+`batch_status(batch_id, wait_s=45)` until it is done: still models with tags. Files without a clean licence (CC0-1.0,
+MIT, Apache-2.0, or `license="own"` for the owner's own work: ask) are imported `restricted` (export refuses them);
+a rerun skips what is already there and re-imports a changed file.
+
 **Generate** (picture to 3D): `trellis2` on a prep version, `{"weights": "fast"|"faithful", "seed", "texture_size"}`
 or a preset's name, `{"preset": "faithful"}` (describe_steps lists them; your own keys override the preset's);
 `faithful` follows the picture closest and is slower. `{"preset": "best"}` is the best this card runs (the

@@ -38,6 +38,7 @@ READ_ONLY = {
     "read_file",
     "job_status",
     "fit_check",
+    "batch_status",
     "inspect_textures",
     "texture_map",
 }
@@ -45,6 +46,7 @@ ALL = READ_ONLY | {
     "create_asset",
     "close_in_blender",
     "import_file",
+    "import_batch",
     "run_step",
     "cancel_job",
     "validate",

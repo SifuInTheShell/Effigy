@@ -257,7 +257,9 @@ Fixed output names per step (the next step reads these names; don't invent other
 numbers went in tens). `asset.json` may carry `archived`, (M42) `tags` (a list of the user's words, absent = none) and
 (research 15, 2026-10-12) `kind: "2d"` (a 2D asset: pictures, pixel art, sprite sheets; absent = a 3D asset; the UI
 picks its stage list by it, `POST /api/assets` and the MCP `create_asset`/`import_file` set it, steps never read
-it); `meta.json` may carry `starred` and `label` (M28, the user's marks; steps
+it), (batch import, research 18) `origin` `{"library", "source_key", "sha256"?, "license", "restricted"}` (where a
+batch-imported asset came from; `sha256` of the file once its import_model is done; a rerun matches on library and
+source_key); `meta.json` may carry `starred` and `label` (M28, the user's marks; steps
 never read them)
 (steps write outputs; the backend writes `meta.json` from the step's `RESULT`). Version numbers are
 allocated by the backend (`max(NNN)+10` so manual insertions remain possible).
@@ -307,6 +309,10 @@ All under `http://127.0.0.1:8000` (the port: Setup, App address, or EFFIGY_PORT;
 | GET | `/api/assets/{id}/versions/{v}/turntable` | → animated WebP (M42): the model turning once, 24 frames of 256², 67 ms each, looping; cached as `_turn.webp` in the version folder; a `validate` or `export` version shows the version it was made from; 400 `nothing_to_show` (no model) |
 | GET | `/api/assets/{id}/turntable` | → the same for the version the asset's thumbnail shows when that is a model (M42), `Cache-Control: no-cache`; 404 `not_found` (no model) |
 | POST | `/api/export/copy` | `{"folder", "items": [{"asset_id", "version"}]}` (each an `export` version) → `{"copied": [{"asset_id", "version", "dir", "files"}], "skipped": [{"asset_id", "version", "reason"}]}` (M42): each export's files into a new `<folder>/<asset_id>_<profile>/`; an existing one is skipped (`exists`), never overwritten; a failed copy leaves no folder (`failed: …`); 400 `bad_path` (not an existing absolute folder), 400 `bad_params` (no items, or not an export version), 404 unknown asset or version |
+| POST | `/api/import/batch` | `{"source", "only"?, "limit"?, "license"?, "dry_run"?}` → `{"batch_id", "items": n}`, or with `dry_run` `{"items": [{"file", "name", "tags", "library", "source_key", "license", "restricted", "action": "new"\|"update"\|"skip", "reason"?, "asset_id"?}]}` (research 18): `source` the absolute path of a folder (every model file under it but a `.gltf` and anything hidden: name = the file's stem, tags = its subfolders, `library` = the folder's name, `source_key` = its relative path) or of an `effigy-import/1` (`{"schema", "defaults"?, "items": [{"file" (relative to it), "name"?, "tags"?, "category"?, "source"?, "license"?, "restricted"?, "library"?}]}`) or `parkour-asset-library/1` file; `license` the licence of items that name none (a folder's: all); `only` keeps items whose name or source key contains one of the words, `limit` the first n; each item: an asset (new, or for `update` the one its `origin` names), the file copied in as an `upload` (restricted unless its licence is `CC0-1.0`, `MIT`, `Apache-2.0` or `own` (the user's own work), or `restricted: false`), tags (category + tags fitted to M42's rule), then `import_model` `{"rig": false}`, one item at a time and one batch at a time; `skip` `reason`: `exists` (same library, source key and SHA-256) or `missing`; 400 `bad_path`, `bad_manifest`; 409 `missing_env` (not for `dry_run`) when `.venv-ml` or Blender is missing, before anything is created |
+| GET | `/api/import/batch/{id}` | → `{"batch_id", "source", "status": "running"\|"done"\|"cancelled", "counts": {status: n}, "items": [… "status": "queued"\|"running"\|"done"\|"skipped"\|"failed"\|"cancelled", "job_id"?, "version"?, "error"?]}`; in memory: gone after a restart; SSE `batch` carries the same on each item's start and at the end |
+| POST | `/api/import/batch/{id}/cancel` | → `{"ok": true}`: the running item's job cancelled, the rest not started |
+| POST | `/api/import/pick` | `{"kind": "folder"\|"file"}` → `{"path": str\|null}`: the system's folder or file dialog (tkinter, in its own process; the browser can't give a path), null when cancelled or after 10 minutes; 409 `no_dialog` where none can open (no display) |
 | GET | `/api/agent/setup` | → `{root, python, server, uv, clients: [{id, name, how, text}]}` (M40): what each agent client needs to start the MCP bridge, this install's paths filled in |
 | POST | `/api/agent/test` | → `{ok, tools?, error?}` (M40): the bridge started over stdio as the setup says, its tools listed within 30 s |
 | POST | `/api/assets/{id}/blender/open` | `{"version"}` → `{"ok"}`; with Setup's "Start Blender when it is needed" and none answering, the chosen Blender is started with its add-on's server first and waited for (`blender_client.ensure`, up to 90 s, one start at a time; 504 `blender_timeout`) (2026-10-13) |
@@ -384,7 +390,8 @@ Every request must name `127.0.0.1`, `localhost` or `[::1]` as its Host (else 40
   `http://127.0.0.1:8000`). Tool names are frozen once released; M40's set (M9's seven kept, `run_step` and `export`
   extended): `list_assets`, `get_asset`, `get_version`, `describe_steps`, `look`, `read_file`, `job_status`,
   `fit_check` (read-only); `create_asset`, `import_file`, `run_step`, `cancel_job`, `validate`, `export`,
-  `open_in_blender`, `pull_from_blender`. Every tool carries correct `readOnlyHint`/`destructiveHint`/
+  `open_in_blender`, `pull_from_blender`. Batch import (research 18): `import_batch(source, only, limit, license, dry_run)`
+  and `batch_status(batch_id, wait_s)` (read-only), over `/api/import/batch`. Every tool carries correct `readOnlyHint`/`destructiveHint`/
   `idempotentHint` annotations and a description that starts with when to use it. Mistakes the agent can fix
   come back as tool errors (`ToolError`, "code: message, how to fix"), never as protocol errors.
 - Long jobs: a tool that starts a job waits at most `wait_s` (default 40, at most 45: Codex's 60 s tool timeout),
@@ -2697,6 +2704,31 @@ trigger yet, PLAN §7), generic rigs (M59, dropped 2026-10-13 by the owner (Skin
   (`test_an_animation_file_comes_in_and_goes_back_onto_the_rig`); on the farmer, a Kimodo BVH, the Mesh2Motion
   pack's Jog (one of 87) and the viking's animated GLB, each in 1–2 s and onto the rig together in 2 s, looked at
   in four-frame sheets. Not done: agents (`import_file` makes a new asset; an animation needs the character's).
+
+### Batch import (research 18, 2026-11-10, `batch-import`)
+
+- A library of model files comes in from a folder (each model file under it, tagged with its subfolders) or one
+  manifest (§3.5 `/api/import/batch`, §3.7 `import_batch`/`batch_status`): `effigy-import/1`, or Parkour's
+  `library.json` read as is (`id` → name, `category` + `tags` → tags, no licence: restricted unless `license` is given). `server/batch.py` runs one item at a time through the existing upload (`library.import_file`, now with
+  `restricted`), tags (`library.update_asset`, now with `origin`) and job queue; `asset.json.origin` (§3.2) makes a
+  rerun skip an unchanged file and re-import a changed one into the same asset. A restricted upload makes every
+  version made from it restricted (the ancestor rule), and `export` already refuses those without `allow_restricted`.
+- UI: Import page, "Many models (a folder)": a folder or manifest path (typed, or Choose folder… / Choose manifest…:
+  the system dialog through `/api/import/pick`), the licence (unknown: restricted, own, CC0, MIT,
+  Apache 2.0), Check (the dry run's list: name, tags, licence, what will
+  happen), Import, then each item's status, Stop after this model.
+- Files: `server/batch.py`, `server/library.py`, `server/app.py`, `mcp/effigy_server.py`, `mcp/SKILL.md`,
+  `ui/src/Import.tsx`, `ui/src/api.ts`, `tests/test_batch_import.py`, `tests/test_mcp_server.py`.
+- Acceptance: a dry run lists every item and its tags and creates nothing; the items import, a rerun skips them all,
+  a changed file re-imports into its asset; a restricted item's upload and import are restricted, a CC0 one's are not;
+  Parkour's catalogue reads as is; a folder's model files are found, hidden ones and `.gltf` left out
+  (`tests/test_batch_import.py`, on `steps._echo`).
+- Skipped (ponytail): the import options `keep_pivot`, `collision` (hulls as `collision.json`, used by export) and
+  `keep_parts` in `blender_ops/import_model.py` → add on the reference laptop, where Blender runs and the Godot
+  `-convcolonly` round trip can be checked; until then imports recentre, drop hulls and join meshes as before.
+  `TEXCOORD_1` through import and export: not checked (needs Blender). The Parkour library (459 files, ~630 MB) on the
+  laptop with time per asset and peak memory: not run. Batches live in memory (a restart forgets one; a rerun picks up
+  where it stopped, by `origin`). Parallel imports: one at a time until measured.
 
 ### Mesh gates (2026-10-12, `mesh-gates`)
 

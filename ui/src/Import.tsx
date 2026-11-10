@@ -2,7 +2,7 @@
 // skeleton the app knows and its clips, and brings anything else in as a still model (docs/IMPLEMENTATION.md M39)
 import { useEffect, useRef, useState } from "react";
 import { NewTexture } from "./textures/Workspace";
-import { api, type Asset, type Meta } from "./api";
+import { api, type Asset, type Batch, type BatchItem, type Meta } from "./api";
 import { useBusy } from "./hooks";
 import { actsAs } from "./workflow";
 
@@ -29,7 +29,7 @@ export function ImportPage(props: {
   const [inputKey, setInputKey] = useState(0); // remounts the file input to clear it
   const [busy, run] = useBusy();
   const made = useRef<string | null>(null); // the asset a failed upload created: retry in it, not in a new one
-  const [mode, setMode] = useState<"model" | "animation" | "texture">("model");
+  const [mode, setMode] = useState<"model" | "animation" | "texture" | "batch">("model");
   useEffect(() => {
     if (!props.hidden && new URLSearchParams(location.hash.split("?")[1]).get("kind") === "texture") setMode("texture");
   }, [props.hidden]);
@@ -73,6 +73,9 @@ export function ImportPage(props: {
             An animation for a character
           </button>
           <button aria-pressed={mode === "texture"} onClick={() => setMode("texture")}>Textures / Materials</button>
+          <button aria-pressed={mode === "batch"} onClick={() => setMode("batch")}>
+            Many models (a folder)
+          </button>
         </div>
         {mode === "model" ? (
           <>
@@ -120,6 +123,8 @@ export function ImportPage(props: {
               {busy ? "Importing…" : "Import"}
             </button>
           </>
+        ) : mode === "batch" ? (
+          <BatchImport onError={props.onError} />
         ) : mode === "texture" ? (
           <NewTexture importOnly chain={props.chain} onCreated={props.onCreated} onError={props.onError} missing={() => false} />
         ) : (
@@ -313,5 +318,99 @@ export function OriginalFile(props: { asset: string; version: Meta; chain: Chain
         Import it
       </button>
     </section>
+  );
+}
+
+// research 18: a folder's model files, or those a manifest lists (effigy-import/1 or a Parkour library.json), checked
+// first, then imported one at a time on the server; the page follows it
+function BatchImport(props: { onError: (e: unknown) => void }) {
+  const [source, setSource] = useState("");
+  const [license, setLicense] = useState("");
+  const [plan, setPlan] = useState<BatchItem[] | null>(null);
+  const [batch, setBatch] = useState<Batch | null>(null);
+  const [busy, run] = useBusy();
+  const id = batch?.status === "running" ? batch.batch_id : null;
+  useEffect(() => {
+    if (!id) return;
+    const t = setInterval(() => api.batch(id).then(setBatch, props.onError), 1000);
+    return () => clearInterval(t);
+  }, [id]);
+  const check = () => run(() => api.batchPlan(source.trim(), license).then((r) => (setBatch(null), setPlan(r.items)), props.onError));
+  const start = () => run(() => api.batchStart(source.trim(), license).then((r) => api.batch(r.batch_id)).then(setBatch, props.onError));
+  const choose = (kind: "folder" | "file") =>
+    run(() => api.pick(kind).then((r) => r.path && (setSource(r.path), setPlan(null), setBatch(null)), props.onError));
+  const rows = batch?.items ?? plan ?? [];
+  const todo = (plan ?? []).filter((i) => i.action !== "skip").length;
+  return (
+    <>
+      <h2>Bring in many models at once</h2>
+      <p className="muted">
+        The full path of a folder on this computer: every model file in it and its subfolders comes in as a still model, named after the file and tagged
+        with its subfolders' names (a .gltf is skipped: zip it with its .bin and textures). Or the path of a manifest: an <code>effigy-import/1</code> file
+        listing the models with names, tags and licences, or a Parkour <code>library.json</code>. A model without a clean licence is marked restricted and
+        can't be exported. Importing again skips what is already here.
+      </p>
+      <label>
+        Folder or manifest
+        <input value={source} onChange={(e) => (setSource(e.target.value), setPlan(null), setBatch(null))} placeholder="D:\assets" />
+      </label>
+      <div className="row">
+        <button disabled={busy || !!id} onClick={() => choose("folder")}>
+          Choose folder…
+        </button>
+        <button disabled={busy || !!id} onClick={() => choose("file")}>
+          Choose manifest…
+        </button>
+      </div>
+      <label>
+        Licence of the models (where a manifest names none)
+        <select value={license} onChange={(e) => (setLicense(e.target.value), setPlan(null), setBatch(null))}>
+          <option value="">Unknown or someone else's: restricted</option>
+          <option value="own">My own work</option>
+          <option value="CC0-1.0">CC0 1.0</option>
+          <option value="MIT">MIT</option>
+          <option value="Apache-2.0">Apache 2.0</option>
+        </select>
+      </label>
+      <div className="row">
+        <button disabled={busy || !source.trim() || !!id} onClick={check}>
+          Check
+        </button>
+        {plan && !batch && (
+          <button className="primary" disabled={busy || todo === 0} onClick={start}>
+            {todo === 0 ? "Nothing new to import" : `Import ${count(todo, "model")}`}
+          </button>
+        )}
+        {id && <button onClick={() => api.batchCancel(id).catch(props.onError)}>Stop after this model</button>}
+      </div>
+      {batch && (
+        <p role="status">
+          {batch.status === "running" ? "Importing: " : batch.status === "done" ? "Finished: " : "Stopped: "}
+          {Object.entries(batch.counts).map(([k, n]) => `${n} ${k}`).join(", ")}
+        </p>
+      )}
+      {rows.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Tags</th>
+              <th>Licence</th>
+              <th>{batch ? "Status" : "Will be"}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((i, k) => (
+              <tr key={k}>
+                <td>{i.asset_id && i.status === "done" ? <a href={`#/asset/${i.asset_id}`}>{i.name}</a> : i.name}</td>
+                <td>{i.tags.join(", ")}</td>
+                <td>{i.restricted ? `restricted${i.license ? ` (${i.license})` : ""}` : i.license}</td>
+                <td>{batch ? (i.error ? `failed: ${i.error}` : i.status) : i.action === "skip" ? `skipped: ${i.reason}` : i.action}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
   );
 }

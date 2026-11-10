@@ -254,8 +254,10 @@ def update_asset(
     name: str | None = None,
     archived: bool | None = None,
     tags: list[str] | None = None,
+    origin: dict | None = None,
 ) -> dict:
-    """Rename, archive (M28: hidden from the grid's default view, nothing else) and/or tag (M42: replaces the list)."""
+    """Rename, archive (M28: hidden from the grid's default view, nothing else), tag (M42: replaces the list) and/or
+    record where it came from (`origin`, a batch import: research 18)."""
     if name is not None and not name.strip():
         raise ApiError(400, "bad_params", "a name can't be empty")
     new_tags = None if tags is None else _tags(tags)
@@ -268,6 +270,8 @@ def update_asset(
             asset["name"] = name.strip()
         if archived is not None:
             asset["archived"] = bool(archived)
+        if origin is not None:
+            asset["origin"] = origin
         _write(path, asset)
     return asset
 
@@ -517,9 +521,10 @@ def _unzip(zf: zipfile.ZipFile, keep: list, dest: Path) -> None:
                 f.write(chunk)
 
 
-def import_file(asset_id: str, name: str, path: Path) -> dict:
+def import_file(asset_id: str, name: str, path: Path, restricted: bool = False) -> dict:
     """A user's file on disk (moved away) becomes a root version `NNN_upload`: `image.<ext>`, `mesh.glb`,
-    `video.<ext>`, or (M39) a model under `source/` (a .zip is unpacked there)."""
+    `video.<ext>`, or (M39) a model under `source/` (a .zip is unpacked there). `restricted`: third-party material
+    (a batch import's, research 18), so it and everything made from it is restricted."""
     ext = Path(name).suffix.lower()
     if ext not in UPLOAD_KINDS and ext not in MODEL_EXTS and ext not in (".zip", ".bvh"):
         raise ApiError(
@@ -558,7 +563,8 @@ def import_file(asset_id: str, name: str, path: Path) -> dict:
             (out / "source").mkdir()
             shutil.move(path, out / "source" / safe)
             outputs = {"model": f"source/{safe}"}
-        return write_meta(out, None, {"name": name}, {"outputs": outputs}, provenance="upload")
+        result = {"outputs": outputs, "restricted": restricted}
+        return write_meta(out, None, {"name": name}, result, provenance="upload")
     except BaseException:
         shutil.rmtree(out, ignore_errors=True)
         raise

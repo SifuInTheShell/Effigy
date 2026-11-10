@@ -21,6 +21,7 @@ from starlette.concurrency import run_in_threadpool
 
 from server import (
     agent,
+    batch,
     blender_client,
     hf,
     install,
@@ -244,6 +245,43 @@ async def upload(asset_id: str, name: str, request: Request):
         return await run_in_threadpool(library.import_file, asset_id, name, part)
     finally:
         part.unlink(missing_ok=True)
+
+
+class Batch(BaseModel):
+    source: str  # the absolute path of a manifest (effigy-import/1, parkour-asset-library/1) or a folder
+    only: list[str] | None = None
+    limit: int | None = None
+    license: str = ""  # the licence of items that name none (a folder's: all of them)
+    dry_run: bool = False
+
+
+@app.post("/api/import/batch")
+def import_batch(body: Batch):
+    """Research 18: the model files of a manifest or a folder into assets, one import_model at a time; `dry_run` only
+    lists them."""
+    args = body.source, body.only, body.limit, body.license
+    return {"items": batch.plan(*args)} if body.dry_run else batch.start(*args)
+
+
+class Pick(BaseModel):
+    kind: str  # folder | file
+
+
+@app.post("/api/import/pick")
+def import_pick(body: Pick):
+    """The system's folder or file dialog on this computer (the browser can't give a path): {"path": str | null}."""
+    return {"path": batch.pick(body.kind)}
+
+
+@app.get("/api/import/batch/{batch_id}")
+def import_batch_status(batch_id: str):
+    return batch.public(batch.get(batch_id))
+
+
+@app.post("/api/import/batch/{batch_id}/cancel")
+def import_batch_cancel(batch_id: str):
+    batch.cancel(batch_id)
+    return {"ok": True}
 
 
 class Version(BaseModel):
