@@ -2716,7 +2716,8 @@ trigger yet, PLAN §7), generic rigs (M59, dropped 2026-10-13 by the owner (Skin
 - UI: Import page, "Many models (a folder)": a folder or manifest path (typed, or Choose folder… / Choose manifest…:
   the system dialog through `/api/import/pick`), the licence (unknown: restricted, own, CC0, MIT,
   Apache 2.0), Check (the dry run's list: name, tags, licence, what will
-  happen), Import, then each item's status, Stop after this model.
+  happen), Import, then each item's status and Cancel import (confirmed; the running model's job is cancelled
+  too); a running batch's id is kept in the browser, so the page follows it again after a reload.
 - Files: `server/batch.py`, `server/library.py`, `server/app.py`, `mcp/effigy_server.py`, `mcp/SKILL.md`,
   `ui/src/Import.tsx`, `ui/src/api.ts`, `tests/test_batch_import.py`, `tests/test_mcp_server.py`.
 - Acceptance: a dry run lists every item and its tags and creates nothing; the items import, a rerun skips them all,

@@ -36,7 +36,7 @@ export type CopyResult = {
 };
 /** Research 18: one manifest item; `action` from a dry run, `status` once it runs. */
 export type BatchItem = { name: string; file: string; tags: string[]; restricted: boolean; license: string; action: "new" | "update" | "skip"; reason?: string; status?: string; asset_id?: string; version?: string; error?: string };
-export type Batch = { batch_id: string; status: "running" | "done" | "cancelled"; items: BatchItem[]; counts: Record<string, number> };
+export type Batch = { batch_id: string; source: string; status: "running" | "done" | "cancelled"; items: BatchItem[]; counts: Record<string, number> };
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 export type TextureRole = "basecolor" | "roughness" | "metallic" | "normal" | "ao" | "height" | "emissive";
 export type TextureMaterial = {

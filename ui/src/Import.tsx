@@ -322,21 +322,41 @@ export function OriginalFile(props: { asset: string; version: Meta; chain: Chain
 }
 
 // research 18: a folder's model files, or those a manifest lists (effigy-import/1 or a Parkour library.json), checked
-// first, then imported one at a time on the server; the page follows it
+// first, then imported one at a time on the server; the page follows it, again after a reload (the running batch's id
+// kept in this browser: the server forgets batches when it restarts)
+const BATCH_KEY = "effigy.batch";
+const keep = (id: string | null) => {
+  try {
+    id ? localStorage.setItem(BATCH_KEY, id) : localStorage.removeItem(BATCH_KEY);
+  } catch {}
+};
 function BatchImport(props: { onError: (e: unknown) => void }) {
   const [source, setSource] = useState("");
   const [license, setLicense] = useState("");
   const [plan, setPlan] = useState<BatchItem[] | null>(null);
   const [batch, setBatch] = useState<Batch | null>(null);
   const [busy, run] = useBusy();
+  const [cancelling, setCancelling] = useState(false);
   const id = batch?.status === "running" ? batch.batch_id : null;
   useEffect(() => {
-    if (!id) return;
+    let id: string | null = null;
+    try {
+      id = localStorage.getItem(BATCH_KEY);
+    } catch {}
+    if (id) api.batch(id).then((b) => (setBatch(b), setSource(b.source)), () => keep(null));
+  }, []);
+  useEffect(() => {
+    if (!id) return (setCancelling(false), keep(null));
     const t = setInterval(() => api.batch(id).then(setBatch, props.onError), 1000);
     return () => clearInterval(t);
   }, [id]);
+  const cancel = () => {
+    if (!id || !window.confirm("Cancel the import?\n\nThe model being imported now is stopped; the ones already in stay. Importing again later continues where it stopped.")) return;
+    setCancelling(true);
+    api.batchCancel(id).catch((e) => (setCancelling(false), props.onError(e)));
+  };
   const check = () => run(() => api.batchPlan(source.trim(), license).then((r) => (setBatch(null), setPlan(r.items)), props.onError));
-  const start = () => run(() => api.batchStart(source.trim(), license).then((r) => api.batch(r.batch_id)).then(setBatch, props.onError));
+  const start = () => run(() => api.batchStart(source.trim(), license).then((r) => (keep(r.batch_id), api.batch(r.batch_id))).then(setBatch, props.onError));
   const choose = (kind: "folder" | "file") =>
     run(() => api.pick(kind).then((r) => r.path && (setSource(r.path), setPlan(null), setBatch(null)), props.onError));
   const rows = batch?.items ?? plan ?? [];
@@ -381,11 +401,19 @@ function BatchImport(props: { onError: (e: unknown) => void }) {
             {todo === 0 ? "Nothing new to import" : `Import ${count(todo, "model")}`}
           </button>
         )}
-        {id && <button onClick={() => api.batchCancel(id).catch(props.onError)}>Stop after this model</button>}
+        {id && (
+          <button className="danger" disabled={cancelling} onClick={cancel}>
+            {cancelling ? "Cancelling…" : "Cancel import"}
+          </button>
+        )}
       </div>
       {batch && (
         <p role="status">
-          {batch.status === "running" ? "Importing: " : batch.status === "done" ? "Finished: " : "Stopped: "}
+          {batch.status === "running"
+            ? `Importing ${batch.items.length - (batch.counts.queued ?? 0)} of ${batch.items.length}: `
+            : batch.status === "done"
+              ? "Finished: "
+              : "Cancelled: "}
           {Object.entries(batch.counts).map(([k, n]) => `${n} ${k}`).join(", ")}
         </p>
       )}
