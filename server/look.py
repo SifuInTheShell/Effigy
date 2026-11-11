@@ -91,26 +91,29 @@ def turntable(asset_id: str, version: str) -> Path:
     dst, n = d / "_turn.webp", 24
     if dst.is_file() and dst.stat().st_mtime >= glb.stat().st_mtime:
         return dst
-    # hover must never queue behind a render or take the GPU's time: busy now, the card retries on the next hover
-    if jobs.GPU.locked() or not _LOCK.acquire(blocking=False):
+    key = ("turn", asset_id, meta["version"])
+    if err := thumbs._failed.get(key):
+        raise ApiError(500, "render_failed", f"could not render {glb.name}: {err}")
+    # never in the request, never beside a job on the GPU: the card retries on the `thumb` event or the next hover
+    if jobs.GPU.locked():
         raise ApiError(503, "busy", "busy, try again later")
-    try:
-        from steps._blender import BlenderError, run_blender
+
+    def work() -> None:
+        from steps._blender import run_blender
 
         os.environ.setdefault("EFFIGY_BLENDER", str(blender_install.blender_exe()))
         tmp = d / "_turn_render"
         try:
-            run_blender("render_look", [glb], tmp, {"size": 256, "turn": n}, timeout=180)
+            with _LOCK:  # not beside an agent's look render
+                run_blender("render_look", [glb], tmp, {"size": 256, "turn": n}, timeout=180)
             frames = [Image.open(tmp / f"look_{i}.png").convert("RGB") for i in range(n)]
             part = dst.with_suffix(".tmp.webp")
             frames[0].save(
                 part, save_all=True, append_images=frames[1:], duration=67, loop=0, quality=80
             )
             part.replace(dst)
-        except (BlenderError, OSError) as e:
-            raise ApiError(500, "render_failed", f"could not render {glb.name}: {e}") from e
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
-    finally:
-        _LOCK.release()
-    return dst
+
+    thumbs.background(key, work)
+    raise ApiError(503, "rendering", "the turntable is being rendered: a `thumb` event follows")

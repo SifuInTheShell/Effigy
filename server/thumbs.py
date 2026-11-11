@@ -4,17 +4,22 @@ A version's thumbnail: its own preview (generate's Cycles render, a Blender pull
 render of its GLB (textured if baked, grey if not: clean/remesh still show their shape), else its picture
 (concepts: the 2×2 candidates; prep/upload: the image), else its parent's (validate; export always: its GLBs hold collision hulls and LODs, not a look).
 An asset's: its newest version with a 3D model, else its newest version with any thumbnail.
+
+A Blender render (a still, a turntable) never runs in a request: it goes to the library's render worker, the request
+answers at once (a blank still, a 503 turntable) and a `thumb` event says when the picture is there.
 """
 
 import json
 import os
+import queue
 import shutil
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 from PIL import Image
 
-from server import blender_install, library
+from server import blender_install, jobs, library
 from steps._mesh import textured
 
 SIZE = 256
@@ -24,8 +29,42 @@ PIXEL_STEPS = {
     "pixelize",
     "sprites",
 }  # research 15: their pictures are pixel art, shown with whole pixels
-# ponytail: one render at a time (each is a Blender on the CPU); a queue if it drags
-_LOCK = threading.Lock()
+PENDING = Path("<rendering>")  # a version_thumb answer: the render is queued, a `thumb` event follows
+
+# ponytail: one worker, one Blender at a time (each is a CPU render beside a job's GPU work); more threads on
+# _loop if a big library's first visit drags
+_work: queue.SimpleQueue = queue.SimpleQueue()
+_queued: set[tuple] = set()
+_failed: dict[tuple, str] = {}  # renders that came to nothing (no Blender, a broken GLB), until a restart
+_guard = threading.Lock()
+_worker: threading.Thread | None = None
+
+
+def background(key: tuple[str, str, str], work: Callable[[], None]) -> None:
+    """Queue `work` (kind, asset id, version) on the render worker once; a failure is kept in `_failed`."""
+    global _worker
+    with _guard:
+        if key in _queued:
+            return
+        _queued.add(key)
+        if _worker is None:
+            _worker = threading.Thread(target=_loop, name="library-renders", daemon=True)
+            _worker.start()
+    _work.put((key, work))
+
+
+def _loop() -> None:
+    while True:
+        key, work = _work.get()
+        try:
+            work()
+        except Exception as e:  # noqa: BLE001 - one bad render must not stop the worker
+            print(f"library render {key} failed: {e}")
+            _failed[key] = str(e)
+        finally:
+            with _guard:
+                _queued.discard(key)
+            jobs.publish("thumb", {"kind": key[0], "asset_id": key[1], "version": key[2]})
 
 
 def _fit(paths: list[Path], dst: Path, size: int = SIZE, nearest: bool = False) -> None:
@@ -83,16 +122,27 @@ def _has_mesh(path: Path) -> bool:
         return False
 
 
-def _make(d: Path, outputs: dict, dst: Path, nearest: bool = False) -> bool:
-    files = {k: v for k, v in outputs.items() if isinstance(v, str) and (d / v).is_file()}
-    own = next(
+def _files(d: Path, outputs: dict) -> dict:
+    return {k: v for k, v in outputs.items() if isinstance(v, str) and (d / v).is_file()}
+
+
+def _own(files: dict) -> str | None:
+    return next(
         (files[k] for k in ("preview", "thumb") if files.get(k, "").lower().endswith(IMAGES)), None
     )
-    if own:
+
+
+def _mesh(d: Path, files: dict) -> str | None:
+    return next((v for v in files.values() if v.lower().endswith(".glb") and _has_mesh(d / v)), None)
+
+
+def _make(d: Path, outputs: dict, dst: Path, nearest: bool = False, render: bool = True) -> bool:
+    files = _files(d, outputs)
+    if own := _own(files):
         _fit([d / own], dst, nearest=nearest)
         return True
-    glb = next((v for v in files.values() if v.lower().endswith(".glb") and _has_mesh(d / v)), None)
-    if glb and _render(d / glb, dst):
+    glb = _mesh(d, files)
+    if glb and render and _render(d / glb, dst):
         return True
     cands = [d / files[k] for k in sorted(files) if k.startswith("cand_")]
     picture = cands or (
@@ -104,18 +154,26 @@ def _make(d: Path, outputs: dict, dst: Path, nearest: bool = False) -> bool:
 
 
 def version_thumb(asset_id: str, version: str) -> Path | None:
+    """The cached still, else `PENDING` (its render queued), else its parent's, else None."""
     d = library.version_dir(asset_id, version)
     dst = d / CACHE
     if dst.is_file():
         return dst
     meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
-    with _LOCK:
-        made = dst.is_file() or (
-            meta.get("step") != "export"
-            and _make(d, meta.get("outputs", {}), dst, meta.get("step") in PIXEL_STEPS)
-        )
-    if made:
-        return dst
+    key = ("still", asset_id, version)
+    if meta.get("step") != "export":
+        outputs, nearest = meta.get("outputs", {}), meta.get("step") in PIXEL_STEPS
+        files = _files(d, outputs)
+        if key not in _failed and not _own(files) and _mesh(d, files):
+
+            def work() -> None:
+                if not _make(d, outputs, dst, nearest):
+                    raise RuntimeError("no render and no picture")
+
+            background(key, work)
+            return PENDING
+        if _make(d, outputs, dst, nearest, render=False):  # pictures only: quick, here
+            return dst
     return version_thumb(asset_id, meta["parent"]) if meta.get("parent") else None
 
 

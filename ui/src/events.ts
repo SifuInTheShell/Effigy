@@ -2,7 +2,7 @@
 
 type Handler = (event: string, data: any) => void;
 const handlers = new Set<Handler>();
-const NAMES = ["progress", "log", "job", "version_created", "versions_deleted", "asset_deleted", "gpu", "gpu_load"];
+const NAMES = ["progress", "log", "job", "version_created", "versions_deleted", "asset_deleted", "gpu", "gpu_load", "thumb"];
 const emit = (name: string, data: any) => handlers.forEach((h) => h(name, data));
 
 const source = new EventSource("/events");

@@ -86,6 +86,37 @@ def test_motion_only_glb_uses_parent_thumbnail_without_rendering(tmp_path, monke
     assert thumbs.asset_thumb("dancer") == a / "001_upload" / thumbs.CACHE
 
 
+def test_a_mesh_render_runs_on_the_worker_not_in_the_request(tmp_path, monkeypatch):
+    import threading
+
+    from server import jobs
+
+    monkeypatch.setenv("EFFIGY_LIBRARY", str(tmp_path))
+    a = tmp_path / "crate"
+    a.mkdir()
+    (a / "asset.json").write_text(json.dumps({"id": "crate", "name": "crate"}))
+    _version(a, "001_upload", None, {"mesh": "mesh.glb"})
+    shutil.copyfile(Path(__file__).parent / "fixtures/two_tris.glb", a / "001_upload" / "mesh.glb")
+    gate = threading.Event()
+
+    def render(glb, dst):
+        gate.wait(5)
+        Image.new("RGB", (4, 4)).save(dst)
+        return True
+
+    monkeypatch.setattr(thumbs, "_render", render)
+    events = jobs.subscribe()
+    try:
+        assert thumbs.asset_thumb("crate") is thumbs.PENDING  # answered while the render waits on the gate
+        assert thumbs.asset_thumb("crate") is thumbs.PENDING  # and queued once
+        gate.set()
+        done = ("thumb", {"kind": "still", "asset_id": "crate", "version": "001_upload"})
+        assert events.get(timeout=5) == done
+        assert thumbs.asset_thumb("crate") == a / "001_upload" / thumbs.CACHE
+    finally:
+        jobs.unsubscribe(events)
+
+
 def test_render_selects_mesh_even_when_motion_clip_is_first(tmp_path, monkeypatch):
     _glb.write(
         tmp_path / "clip.glb",

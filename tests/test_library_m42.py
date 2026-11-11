@@ -115,19 +115,48 @@ def test_export_copy_keeps_users_folders_and_skips_no_profile(lib, tmp_path):
 
 
 def test_turntable_busy(lib):
-    from server import jobs, look
+    from server import jobs
 
     a = library.create_asset("Tris")["id"]
     d = _version(a, "010_clean", "clean", outputs={"mesh": "m.glb"})
     shutil.copy(FIXTURES / "two_tris.glb", d / "m.glb")
     url = f"/api/assets/{a}/versions/010_clean/turntable"
-    with look._LOCK:
+    with jobs.GPU:  # beside a job: not even queued
         r = lib.get(url)
-    assert (r.status_code, r.json()["error"]["code"]) == (503, "busy")
-    with jobs.GPU:
-        assert lib.get(url).status_code == 503
+        assert (r.status_code, r.json()["error"]["code"]) == (503, "busy")
         (d / "_turn.webp").write_bytes(b"RIFF")  # cached: served even while busy
         assert lib.get(url).status_code == 200
+
+
+def test_turntable_renders_on_the_worker_not_in_the_request(lib, monkeypatch):
+    """The hover answers at once (503 rendering); the worker renders and says so with a `thumb` event."""
+    import threading
+
+    from server import jobs
+    from steps import _blender
+
+    a = library.create_asset("Tris")["id"]
+    d = _version(a, "010_clean", "clean", outputs={"mesh": "m.glb"})
+    shutil.copy(FIXTURES / "two_tris.glb", d / "m.glb")
+    gate = threading.Event()
+
+    def render(op, inputs, out, params, timeout):
+        gate.wait(5)
+        out.mkdir(parents=True, exist_ok=True)
+        for i in range(params["turn"]):
+            Image.new("RGB", (8, 8), (i * 10, 0, 0)).save(out / f"look_{i}.png")
+
+    monkeypatch.setattr(_blender, "run_blender", render)
+    events = jobs.subscribe()
+    try:
+        url = f"/api/assets/{a}/versions/010_clean/turntable"
+        r = lib.get(url)  # the render waits on the gate: this answered without it
+        assert (r.status_code, r.json()["error"]["code"]) == (503, "rendering")
+        gate.set()
+        assert events.get(timeout=5) == ("thumb", {"kind": "turn", "asset_id": a, "version": "010_clean"})
+        assert Image.open(io.BytesIO(lib.get(url).content)).n_frames == 24
+    finally:
+        jobs.unsubscribe(events)
 
 
 @pytest.mark.skipif(
@@ -141,7 +170,9 @@ def test_turntable(lib, monkeypatch):
     _version(a, "020_validate", "validate", "010_clean", {"report": "r.json"})
     _version(a, "030_brief", "brief")
     url = f"/api/assets/{a}/versions/010_clean/turntable"
-    r = lib.get(url)
+    deadline = time.time() + 180  # the first request queues the render on the worker
+    while (r := lib.get(url)).status_code == 503 and time.time() < deadline:
+        time.sleep(0.5)
     assert r.status_code == 200 and r.headers["content-type"] == "image/webp"
     im = Image.open(io.BytesIO(r.content))
     assert (im.n_frames, im.size) == (24, (256, 256))

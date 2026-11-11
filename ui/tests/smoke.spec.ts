@@ -1600,13 +1600,11 @@ test("Library grid: search, sort, filter, archive", async ({ page }) => {
   await page.getByLabel("Show").selectOption("All");
   await page.getByLabel("Search assets").fill("ALP");
   await expect.poll(names).toEqual(["alpha"]);
-  await page.locator(".cards li").first().getByText("More").click(); // card management sits in a disclosure (UX-14)
-  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await page.locator(".cards li").first().getByRole("button", { name: "Archive", exact: true }).click(); // always in view under the card
   await expect.poll(() => patches).toEqual([["PATCH", { archived: true }]]);
   await page.getByLabel("Search assets").fill("");
   await page.getByLabel("Show").selectOption("Archived");
   await expect.poll(names).toEqual(["old one", "alpha"]); // still sorted oldest first
-  await page.locator(".cards li").first().getByText("More").click();
   await expect(page.getByRole("button", { name: "Unarchive" }).first()).toBeVisible();
 });
 
@@ -1923,7 +1921,6 @@ test("Library: chips, tags and their filter, the hover turntable", async ({ page
 
   // tags: a prompt like Rename; the Tag filter and the search find them
   page.once("dialog", (d) => d.accept("hero, prop"));
-  await card("gamma").getByText("More").click();
   await card("gamma").getByRole("button", { name: "Tags" }).click();
   await expect.poll(() => seen.patched).toEqual([["hero", "prop"]]);
   await expect(card("gamma")).toContainText("#hero #prop");
@@ -1972,6 +1969,32 @@ test("Library: batch export runs each export, skips the restricted, copies into 
   expect(seen.copy.folder).toBe("C:/out");
   expect(seen.copy.items.map((i: any) => i.asset_id)).toEqual(["m42_a", "m42_c"]);
   await page.screenshot({ path: "test-results/m42-batch-done.png" });
+});
+
+test("Library folders: New folder takes the picked assets in, Move out takes them out", async ({ page }) => {
+  await mockLibrary(page); // licences, thumbs; the assets and their PATCH come from here
+  const at = "2026-10-09T10:00:00Z";
+  let assets: any[] = ["alpha", "beta", "gamma"].map((name, i) => ({ id: `m42_${"abc"[i]}`, name, created: at, updated: at, versions: 1, tags: [], licenses: [] }));
+  await page.route("**/api/assets", (r) => r.fulfill({ json: assets }));
+  await page.route(/\/api\/assets\/m42_\w$/, (r) => {
+    const id = r.request().url().split("/").pop();
+    const { folder } = r.request().postDataJSON();
+    assets = assets.map((a) => (a.id === id ? { ...a, folder: folder || undefined } : a));
+    return r.fulfill({ json: assets.find((a) => a.id === id) });
+  });
+  await page.goto("/#/library");
+  page.once("dialog", (d) => d.accept("Props"));
+  await page.getByRole("button", { name: "New folder" }).click();
+  await expect(page.getByText("Pick the assets that go in.")).toBeVisible();
+  for (const n of ["alpha", "beta"]) await page.getByLabel(`Select ${n}`).check();
+  await page.getByRole("button", { name: "Move", exact: true }).click();
+  await page.getByRole("link", { name: "Folder Props, 2 assets" }).click();
+  await page.getByLabel("Select alpha").check();
+  await page.getByRole("button", { name: "Move out of Props (1)" }).click();
+  await expect(page.getByLabel("Select alpha")).toHaveCount(0);
+  await page.getByRole("group", { name: "Manage beta" }).getByRole("button", { name: "Move out of Props" }).click();
+  await expect.poll(() => assets.filter((a) => a.folder).length).toBe(0);
+  await expect(page.getByLabel("Select gamma")).toBeVisible(); // the folder is gone: back at the top level
 });
 
 test("Compare: two linked viewers and the mirrored table; Licences panel", async ({ page }) => {
@@ -2782,7 +2805,6 @@ test("Library: Select assets is explicit; Recently deleted lists what deleting m
   await page.reload();
   await page.getByText("Recently deleted", { exact: true }).click();
   const card = page.locator(".cards li", { hasText: "bin test" });
-  await card.getByText("More").click();
   page.once("dialog", (d) => d.accept());
   await card.getByRole("button", { name: "Delete" }).click();
   await expect(card).toHaveCount(0);

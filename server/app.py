@@ -575,7 +575,7 @@ BLANK_PNG = base64.b64decode(
 
 
 def _thumb(path):
-    if path is None:
+    if path is None or path is thumbs.PENDING:  # a render on its way: a `thumb` event follows
         return Response(BLANK_PNG, media_type="image/png", headers={"Cache-Control": "no-cache"})
     return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
@@ -592,11 +592,7 @@ def asset_thumb(asset_id: str):
 @app.get("/api/assets/{asset_id}/versions/{version}/thumb")
 def version_thumb(asset_id: str, version: str):
     library.version_dir(asset_id, version)
-    if not (t := thumbs.version_thumb(asset_id, version)):
-        return _thumb(None)
-    return FileResponse(
-        t, headers={"Cache-Control": "no-cache"}
-    )  # revalidated (304): fixes reach the browser
+    return _thumb(thumbs.version_thumb(asset_id, version))  # revalidated (304): fixes reach the browser
 
 
 @app.get("/api/assets/{asset_id}/versions/{version}/turntable")

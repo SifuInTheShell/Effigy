@@ -352,6 +352,8 @@ SSE events (`event:` name, `data:` JSON):
 - `log` `{"job_id", "line"}`
 - `job` `{"job_id", "asset_id", "status", "version"?, "error"?, "progress"?, "text"?}`
 - `version_created` `{"asset_id", "meta"}`
+- `thumb` `{"kind": "still"|"turn", "asset_id", "version"}` (2026-11-11): the library render worker finished a
+  thumbnail or turntable (or gave up on it); the cards reload the picture
 - `gpu` `{"resident": "trellis2"|null, "free_gb": float}`
 - `gpu_load` `{"step": str|null, "util": %, "used_gb", "total_gb"}` every 2 s while a job holds the GPU lock,
   then once with `step: null` (nvidia-smi; values `null` without it)
@@ -2170,6 +2172,12 @@ trigger yet, PLAN §7), generic rigs (M59, dropped 2026-10-13 by the owner (Skin
   - **As built (2026-10-09)**: a turntable never waits: the cached `_turn.webp` is served at once, otherwise 503
     `busy` while the GPU lock or look's lock is held (the card keeps its still; the next hover retries), so a hover
     sweep can't queue renders or meet a heavy job; a turntable that loads after the pointer left is dropped.
+    **Changed 2026-11-11 (render worker)**: no Blender render runs in a request any more. A still that needs one
+    answers the blank PNG and a turntable 503 `rendering`, both queued once on one background worker
+    (`thumbs.background`, one Blender at a time, a failure remembered until a restart: then the picture/parent
+    fallback, or 500 `render_failed`); the `thumb` SSE event reloads the card (the turntable only while still
+    hovered). 503 `busy` is now only beside a GPU job. Card actions (Rename, Tags, Archive, Delete) sit under every
+    card, no "More" disclosure (owner, same day).
     `export_copy` refuses a folder inside the library, copies through its own `mkdtemp` folder, accepts an empty
     list (the dialog's folder check before any export runs) and skips `no_profile`; the batch reuses an export only
     when its params are exactly `{profile}`, and judges `restricted` on the picked version. Cards in a row are one
@@ -2749,7 +2757,8 @@ trigger yet, PLAN §7), generic rigs (M59, dropped 2026-10-13 by the owner (Skin
   folder; a tile is a link (`#/library?folder=<name>`, a history entry, so Back steps out), inside it the folder's assets
   under "↑ Up · Library › <name>". A search, a tag or Archived looks in every folder, each card saying "In <folder>". Select
   assets adds Select all and Move to folder…: a new or existing folder's name (empty: out of their folders), one PATCH per
-  asset. The search matches each typed word anywhere in the name, id, folder or tags, in any order, spaces, `_`, `.` and `-`
+  asset. New folder (2026-11-11) asks a name, then opens that move with the name filled in for the user to pick what goes
+  in; inside a folder, Move out of <name> (the selection, or one card's More) takes assets out. The search matches each typed word anywhere in the name, id, folder or tags, in any order, spaces, `_`, `.` and `-`
   left out of both ("air vent" finds `s_airvent_01`).
 - Files: `server/library.py`, `server/app.py`, `ui/src/api.ts`, `ui/src/main.tsx`, `tests/test_library_folders.py`.
 - Acceptance: an asset goes into a folder and out again, its other fields kept, a bad name refused

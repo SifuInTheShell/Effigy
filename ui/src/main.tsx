@@ -758,6 +758,15 @@ function Library(props: {
               ))}
             </select>
           )}
+          <button
+            onClick={() => {
+              // a folder exists while an asset is in it: name it, then pick what goes in
+              const name = window.prompt("Name of the new folder")?.trim();
+              if (name) setPicking(true), setBatch(false), setMoving(true), setTarget(name);
+            }}
+          >
+            New folder
+          </button>
           <button aria-pressed={picking} onClick={() => (setPicking(!picking), setPicked(new Set()), setBatch(false), setMoving(false))}>
             {picking ? "Done selecting" : "Select assets"}
           </button>
@@ -769,6 +778,11 @@ function Library(props: {
               <button disabled={!chosen.length} onClick={() => (setMoving(true), setTarget(folder ?? ""))}>
                 Move to folder… ({chosen.length})
               </button>
+              {folder !== null && (
+                <button disabled={!chosen.length} onClick={() => props.onMove(chosen.map((a) => a.id), "").then(() => setPicked(new Set()))}>
+                  Move out of {folder} ({chosen.length})
+                </button>
+              )}
               <button className="primary" disabled={!chosen.length} onClick={() => setBatch(true)}>
                 Export selected ({chosen.length})
               </button>
@@ -795,7 +809,7 @@ function Library(props: {
           {flat && <span className="muted">(searching every folder)</span>}
         </nav>
       )}
-      {moving && picking && chosen.length > 0 && (
+      {moving && picking && (
         <form
           className="note row"
           onSubmit={(e) => {
@@ -812,9 +826,10 @@ function Library(props: {
               <option key={f} value={f} />
             ))}
           </datalist>
-          <button className="primary" type="submit">
+          <button className="primary" type="submit" disabled={!chosen.length}>
             {target.trim() ? "Move" : "Take out of their folders"}
           </button>
+          {!chosen.length && <span className="muted">Pick the assets that go in.</span>}
           <button type="button" onClick={() => setMoving(false)}>
             Cancel
           </button>
@@ -881,17 +896,16 @@ function Library(props: {
                 picked={picked.has(a.id)}
                 onPick={() => setPicked((p) => (p.delete(a.id) || p.add(a.id), new Set(p)))}
               />
-              <details className="card-more">
-                <summary aria-label={`More for ${a.name}`}>More</summary>
-                <div className="card-actions">
-                  <button onClick={() => props.onRename(a)}>Rename</button>
-                  <button onClick={() => props.onTags(a)}>Tags</button>
-                  <button onClick={() => props.onArchive(a, !a.archived)}>{a.archived ? "Unarchive" : "Archive"}</button>
-                  <button className="danger" onClick={() => props.onDelete(a)}>
-                    Delete
-                  </button>
-                </div>
-              </details>
+              {/* always in view under the card (owner 2026-11-11; UX-14 had them in a "More" disclosure) */}
+              <div className="card-actions" role="group" aria-label={`Manage ${a.name}`}>
+                <button onClick={() => props.onRename(a)}>Rename</button>
+                <button onClick={() => props.onTags(a)}>Tags</button>
+                {a.folder && <button onClick={() => props.onMove([a.id], "")}>Move out of {a.folder}</button>}
+                <button onClick={() => props.onArchive(a, !a.archived)}>{a.archived ? "Unarchive" : "Archive"}</button>
+                <button className="danger" onClick={() => props.onDelete(a)}>
+                  Delete
+                </button>
+              </div>
             </li>
           ))}
         </ul>
@@ -958,6 +972,13 @@ function Trash(props: { onRestored: () => void; count: number }) {
 
 const prefersStill = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+/** Counts the library render worker's finished stills of an asset: its thumbnails reload (a blank was served meanwhile). */
+function useThumbRev(id: string) {
+  const [rev, setRev] = useState(0);
+  useEffect(() => onEvent((name, d) => name === "thumb" && d.kind === "still" && d.asset_id === id && setRev((r) => r + 1)), [id]);
+  return rev;
+}
+
 /** One library card: the still thumbnail, swapped for the turntable after 400 ms of hover or focus once its WebP has loaded (M42). */
 function Card(props: { a: Asset; where?: string; dup: boolean; credit: string; picking: boolean; picked: boolean; onPick: () => void }) {
   const { a } = props;
@@ -967,15 +988,19 @@ function Card(props: { a: Asset; where?: string; dup: boolean; credit: string; p
   const pending = useRef<HTMLImageElement | null>(null);
   const stamp = a.updated ?? a.created;
   const url = `/api/assets/${a.id}/turntable?v=${encodeURIComponent(a.updated ?? "")}`;
+  const rev = useThumbRev(a.id);
+  const load = () => {
+    const im = (pending.current = new Image());
+    im.onload = () => hover.current && setTurn(true);
+    im.src = url;
+  };
+  // the first hover queues the turntable's render (a 503): still hovering when it is done, it turns
+  useEffect(() => onEvent((name, d) => name === "thumb" && d.kind === "turn" && d.asset_id === a.id && hover.current && load()), [url]);
   const enter = () => {
     if (a.kind === "texture" || a.kind === "2d" || prefersStill()) return;
     hover.current = true;
     clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      const im = (pending.current = new Image());
-      im.onload = () => hover.current && setTurn(true);
-      im.src = url;
-    }, 400);
+    timer.current = window.setTimeout(load, 400);
   };
   const leave = () => {
     hover.current = false;
@@ -998,7 +1023,7 @@ function Card(props: { a: Asset; where?: string; dup: boolean; credit: string; p
       >
         <img
           className="thumb"
-          src={turn ? url : `/api/assets/${a.id}/thumb`}
+          src={turn ? url : `/api/assets/${a.id}/thumb${rev ? `?r=${rev}` : ""}`}
           alt=""
           loading="lazy"
           onError={(e) => (e.currentTarget.style.visibility = "hidden")}
@@ -1634,6 +1659,7 @@ function Workspace(props: {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [side]);
+  const thumbRev = useThumbRev(props.sel.asset ?? "");
   const { sel, version: v } = props;
   const versions = sel.versions;
   const id = sel.asset!;
@@ -1843,7 +1869,7 @@ function Workspace(props: {
         >
           <img
             className="thumb-sm"
-            src={`/api/assets/${id}/versions/${x.version}/thumb`}
+            src={`/api/assets/${id}/versions/${x.version}/thumb${thumbRev ? `?r=${thumbRev}` : ""}`}
             alt=""
             loading="lazy"
             onError={(e) => (e.currentTarget.style.visibility = "hidden")}

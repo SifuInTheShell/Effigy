@@ -722,12 +722,6 @@ header.top button.small {
   display: block;
   max-width: 100%;
 }
-.card-more > summary {
-  cursor: pointer;
-  color: var(--text-2);
-  font-size: 13px;
-  padding: 4px 0;
-}
 /* the 2D track's viewer (M50/M51): pictures and sheets in whole pixels over a checkerboard */
 .pixel-view {
   min-height: 240px;
@@ -1582,13 +1576,13 @@ ul.cards {
   color: #ff8a00;
 }
 .card-actions {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+  display: flex;
+  flex-wrap: wrap; /* a fifth button (Move out of …) wraps instead of squeezing */
   gap: 6px;
   padding: 6px 0 0;
 }
 .card-actions button {
+  flex: 1 1 auto;
   font-size: 12px;
   min-height: 28px;
   padding: 0 4px;
