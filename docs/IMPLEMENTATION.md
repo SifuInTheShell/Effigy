@@ -317,7 +317,7 @@ All under `http://127.0.0.1:8000` (the port: Setup, App address, or EFFIGY_PORT;
 | GET | `/api/agent/setup` | → `{root, python, server, uv, clients: [{id, name, how, text}]}` (M40): what each agent client needs to start the MCP bridge, this install's paths filled in |
 | POST | `/api/agent/test` | → `{ok, tools?, error?}` (M40): the bridge started over stdio as the setup says, its tools listed within 30 s |
 | POST | `/api/assets/{id}/blender/open` | `{"version"}` → `{"ok"}`; with Setup's "Start Blender when it is needed" and none answering, the chosen Blender is started with its add-on's server first and waited for (`blender_client.ensure`, up to 90 s, one start at a time; 504 `blender_timeout`) (2026-10-13) |
-| GET | `/api/blender/status` | → `{"link": "pro"\|"free"\|null, "start"}`: which add-on answers; `start` (2026-10-13): Open in Blender starts one when none answers (Setup's option on and its `blender.exe` there) |
+| GET | `/api/blender/status` | → `{"link": "pro"\|"lab"\|"free"\|null, "start"}`: which add-on answers; `start` (2026-10-13): Open in Blender starts one when none answers (Setup's option on and its `blender.exe` there) |
 | GET | `/api/setup/blender` | → `{"start", "exe", "found"}` (2026-10-13): start the user's Blender when needed, which one; `found`, while none is chosen: the connected Blender's `bpy.app.binary_path` |
 | POST | `/api/setup/blender` | `{"start", "exe"}` → as GET; 400 `bad_path` when `exe` is not a `blender*` file, or `start` without one; saved in settings.json (`blender_start`, `blender_exe`) |
 | POST | `/api/assets/{id}/blender/pull` | `{"version"?}` → `{"version": "NNN_blender"}` (2026-10-12: with several versions of the asset open, `version` says which; else the one opened last, the note naming what else was open) |
@@ -376,6 +376,14 @@ Every request must name `127.0.0.1`, `localhost` or `[::1]` as its Host (else 40
   first; the Claude run gets the free add-on's MCP server (`blender`, `blender-mcp==2.0.0` via `uv tool
   run`) and is told which one is live. Protocol checked against the add-on's source (v1.8) with a fake
   server; not yet run against the real free add-on.
+  **Blender's own MCP add-on** (owner 2026-11-11: "stick to the official blender mcp docs"; Blender Lab, GPL,
+  `projects.blender.org/lab/blender_mcp`, extension `mcp` 1.0.3, Blender 5.1+), also on `127.0.0.1:9876`: one
+  request per connection, UTF-8 JSON `{"type": "execute", "code", "strict_json": false}` + `\0`; reply
+  `{"status": "ok"|"error", "result", "stdout"|"message"}` + `\0` (its `mcp/blmcp/tools_helpers/connection.py`).
+  Python only: `run_python` reads the snippet's stdout as with the free add-on, the viewport screenshot is a
+  `screen.screenshot_area` snippet. Which add-on holds 9876 is probed once per port opening: Lab's answers a lone
+  `\0` at once (an error reply), blender-mcp says nothing (3 s). `START` calls its `blmcp.server_start` after
+  Pro's. Run against the real add-on (Open, Pull with thumbnail, 2026-11-11).
 - **Snapshot before any mutating session**: `execute_python` → `bpy.ops.wm.save_as_mainfile(filepath=…, copy=True)`
   + `bpy.ops.ed.undo_push(message="effigy: before <job>")`.
 - **Headless ops** (`blender_ops/<op>.py`): `blender -b --factory-startup --offline-mode --python-exit-code 1

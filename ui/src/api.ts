@@ -151,7 +151,7 @@ export const api = {
   blenderOpen: (id: string, version: string) =>
     call<{ ok: boolean; version: string; objects: string[] }>("POST", `/api/assets/${id}/blender/open`, { version }),
   blenderPull: (id: string) => call<{ version: string }>("POST", `/api/assets/${id}/blender/pull`, {}),
-  blenderStatus: () => call<{ link: "pro" | "free" | null; start?: boolean }>("GET", "/api/blender/status"),
+  blenderStatus: () => call<{ link: "pro" | "lab" | "free" | null; start?: boolean }>("GET", "/api/blender/status"),
   blenderSetup: () => call<BlenderSetup>("GET", "/api/setup/blender"),
   setBlenderSetup: (start: boolean, exe: string) => call<BlenderSetup>("POST", "/api/setup/blender", { start, exe }),
   models: () => call<Model[]>("GET", "/api/models"),

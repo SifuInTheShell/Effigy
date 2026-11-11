@@ -221,7 +221,9 @@ def test_free_blender_mcp_addon(monkeypatch):
             except OSError:
                 return
             with conn:
-                if not (data := conn.recv(65536)):  # link()'s probe: connect, then close
+                data = conn.recv(65536)
+                # link()'s connect, or the probe for Lab's add-on: no answer
+                if data in (b"", b"\0"):
                     continue
                 req = json.loads(data)
                 seen.append(req)
@@ -241,6 +243,58 @@ def test_free_blender_mcp_addon(monkeypatch):
     assert blender_client.link() == "free"
     assert blender_client.run_python("print('noise')\n__result__ = {'n': n}", n=3) == {"n": 3}
     assert seen[-1]["type"] == "execute_code"
+    srv.close()
+
+
+def test_blender_lab_mcp_addon(monkeypatch):
+    """Blender's own MCP add-on (Blender Lab, also on 9876; its mcp_to_blender_server.py): one request per
+    connection, JSON + a null byte both ways, `stdout` in the reply; an empty request is answered at once
+    (an error), which tells it from blender-mcp. The screenshot is a Python snippet there."""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen()
+    monkeypatch.setattr(blender_client, "PRO", _closed_port())
+    monkeypatch.setattr(blender_client, "FREE", srv.getsockname())
+    seen = []
+
+    def serve():
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            with conn:
+                buf = b""
+                while b"\0" not in buf and (chunk := conn.recv(65536)):
+                    buf += chunk
+                if not buf:  # a connect without a request
+                    continue
+                data = buf.split(b"\0", 1)[0]
+                if not data:
+                    reply = {"status": "error", "message": "JSONDecodeError"}
+                else:
+                    req = json.loads(data)
+                    seen.append(req)
+                    out = io.StringIO()
+                    try:
+                        with contextlib.redirect_stdout(out):
+                            exec(req["code"], {"result": {}})  # noqa: S102 - plays the add-on
+                        reply = {"status": "ok", "result": {}, "stdout": out.getvalue()}
+                    except Exception as e:  # noqa: BLE001 - the add-on sends any traceback back
+                        reply = {"status": "error", "message": repr(e)}
+                body = json.dumps(reply).encode() + b"\0"
+                conn.sendall(body[:10])  # arrives in pieces
+                conn.sendall(body[10:])
+
+    threading.Thread(target=serve, daemon=True).start()
+    assert blender_client.link() == "lab"
+    assert blender_client.run_python("print('noise')\n__result__ = {'n': n}", n=3) == {"n": 3}
+    assert seen[-1]["type"] == "execute" and seen[-1]["strict_json"] is False
+    # bpy is not here: the snippet's error comes back as Blender's
+    with pytest.raises(ApiError) as e:
+        blender_client.call("get_viewport_screenshot", filepath="C:/t.png")
+    assert e.value.code == "blender_error" and "screenshot_area" in seen[-1]["code"]
+    assert "filepath = 'C:/t.png'" in seen[-1]["code"]
     srv.close()
 
 

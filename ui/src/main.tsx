@@ -5299,9 +5299,16 @@ function ViewerPane(props: {
   );
 }
 
+type BlenderLink = "pro" | "lab" | "free";
+const BLENDER_ADDON: Record<BlenderLink, string> = {
+  pro: "Blender MCP Pro",
+  lab: "Blender's MCP add-on",
+  free: "blender-mcp",
+};
+
 /** M71: the Blender group's state, shared by the header and the History rows: whether an add-on answers, and the open of a version. */
 function useBlender(asset: string) {
-  const [link, setLink] = useState<"pro" | "free" | null | undefined>(undefined);
+  const [link, setLink] = useState<BlenderLink | null | undefined>(undefined);
   const [start, setStart] = useState(false); // Setup: Open in Blender starts it when none answers
   const [busy, run] = useBusy();
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
@@ -5324,9 +5331,9 @@ function useBlender(asset: string) {
       ),
     );
   const help =
-    (link ? `Connected (${link === "pro" ? "Blender MCP Pro" : "blender-mcp, free"}).` : start
+    (link ? `Connected (${BLENDER_ADDON[link]}).` : start
       ? "Not connected: Open starts your Blender and its add-on's server (Setup)."
-      : "Not connected: open Blender, press N, and start the add-on's server (Blender MCP Pro or blender-mcp), or let Setup start it.") +
+      : "Not connected: open Blender and start its MCP add-on's server (Blender's own MCP add-on, Blender MCP Pro or blender-mcp), or let Setup start it.") +
     " Click to check again. Save back brings the model back from Blender as a new version; the old one stays.";
   return { link, busy, run, note, check, open, help, can: !!(link || start) };
 }
@@ -6086,7 +6093,7 @@ function Setup(props: {
     card?.scrollIntoView({ block: "center" });
     card?.focus({ preventScroll: true });
   }, [props.cap, !!props.models]);
-  const [link, setLink] = useState<"pro" | "free" | null | undefined>(undefined);
+  const [link, setLink] = useState<BlenderLink | null | undefined>(undefined);
   const check = () =>
     api
       .blenderStatus()
@@ -6224,7 +6231,7 @@ function Setup(props: {
             {link === undefined
               ? "Checking…"
               : link
-                ? `Connected: ${link === "pro" ? "Blender MCP Pro" : "blender-mcp"}`
+                ? `Connected: ${BLENDER_ADDON[link]}`
                 : "Not connected · open Blender and start its add-on server"}
           </span>
           <button onClick={check}>Check again</button>

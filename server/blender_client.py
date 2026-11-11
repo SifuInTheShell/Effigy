@@ -1,10 +1,13 @@
 """Live link to the user's running Blender through an MCP add-on's socket (§3.6, M8).
 
 Blender MCP Pro (paid, 127.0.0.1:9877): 4-byte big-endian length + UTF-8 JSON {"command", "params"}; reply
-{"status", "result"|"message"}. The free blender-mcp add-on (MIT, ahujasid, 127.0.0.1:9876): raw JSON
-{"type", "params"}; reply {"status": "success"|"error", "result"|"message"}; `execute_code` returns the
-snippet's stdout. Pro is tried first. Open and Pull are one Python snippet each (collection + tags + undo
-step / backup + export).
+{"status", "result"|"message"}. On 127.0.0.1:9876 either Blender's official MCP add-on (Blender Lab, GPL,
+projects.blender.org/lab/blender_mcp, its mcp/blmcp/tools_helpers/connection.py): one request per connection,
+UTF-8 JSON {"type": "execute", "code", "strict_json"} + a null byte; reply {"status": "ok"|"error", "result",
+"stdout"|"message"} + a null byte; or the free blender-mcp add-on (MIT, ahujasid): raw JSON {"type", "params"};
+reply {"status": "success"|"error", "result"|"message"}; `execute_code` returns the snippet's stdout. Both take
+stdout back, which run_python reads. Pro is tried first. Open and Pull are one Python snippet each (collection +
+tags + undo step / backup + export).
 """
 
 import json
@@ -48,40 +51,57 @@ def _recv_json(sock: socket.socket):
 
 
 _last = [PRO]  # the add-on that answered last: Windows takes ~2 s to refuse a closed port
+_kind: dict = {}  # FREE's add-on, "lab" or "free", until its port closes
+PROBE = 3.0  # Lab's idle poll is 1 s
 
 
-def _connect() -> tuple[tuple, socket.socket]:
+def _probe(addr: tuple) -> str:
+    """Which add-on listens on 9876: Lab's answers a lone null byte (an empty request) with an error reply;
+    blender-mcp waits for a whole JSON object and says nothing."""
+    with socket.create_connection(addr, timeout=5) as s:
+        s.settimeout(PROBE)
+        s.sendall(b"\0")
+        try:
+            return "lab" if s.recv(1) else "free"
+        except TimeoutError:
+            return "free"
+
+
+def _connect() -> tuple[str, socket.socket]:
     for addr in sorted((PRO, FREE), key=lambda a: a != _last[0]):
         try:
+            if addr == FREE and addr not in _kind:
+                _kind[addr] = _probe(addr)
             sock = socket.create_connection(addr, timeout=5)
         except OSError:
+            _kind.pop(addr, None)  # another add-on may answer there next time
             continue
         _last[0] = addr
-        return addr, sock
+        return ("pro" if addr == PRO else _kind[addr]), sock
     raise ApiError(
         409,
         "blender_not_connected",
-        "start the add-on's server in Blender's N panel (Blender MCP Pro, or the free blender-mcp), or turn on "
-        "Setup's Start Blender when it is needed",
+        "start the add-on's server in Blender (Blender's own MCP add-on: Preferences → Add-ons → MCP → Start; "
+        "Blender MCP Pro or blender-mcp: the N panel), or turn on Setup's Start Blender when it is needed",
     )
 
 
 def link() -> str:
-    """ "pro" or "free": which add-on answers (409 if none)."""
-    addr, sock = _connect()
+    """ "pro", "lab" or "free": which add-on answers (409 if none)."""
+    kind, sock = _connect()
     sock.close()
-    return "pro" if addr == PRO else "free"
+    return kind
 
 
 WAIT = 90  # seconds for a started Blender's add-on server to answer (the agent's 5.1 took ~6 s)
-# run by the started Blender once it is up: the add-on's server (Pro's, else the free one's), retried each second for a
-# minute while the add-ons load
+# run by the started Blender once it is up: the add-on's server (Pro's, else Blender Lab's, else blender-mcp's), retried
+# each second for a minute while the add-ons load
 START = """
 import bpy
 def _effigy_start(tries=[60]):
-    for addon in ("bmpro", "blendermcp"):
+    for addon, op in (("bmpro", "start_server"), ("blmcp", "server_start"), ("blendermcp", "start_server")):
         try:
-            getattr(bpy.ops, addon).start_server()
+            getattr(getattr(bpy.ops, addon), op)()
             return None
         except Exception:
             pass
@@ -135,8 +155,8 @@ def ensure() -> str:
     raise ApiError(
         504,
         "blender_timeout",
-        f"Blender started, but its add-on's server did not answer in {WAIT} s: is Blender MCP Pro or "
-        f"blender-mcp enabled in {exe}?",
+        f"Blender started, but its add-on's server did not answer in {WAIT} s: is Blender's MCP add-on, "
+        f"Blender MCP Pro or blender-mcp enabled in {exe}?",
     )
 
 
@@ -164,15 +184,46 @@ def choose(start: bool, exe: str) -> dict:
     return setup()
 
 
+# Lab's add-on runs Python only: the viewport screenshot is a snippet there
+LAB_SCREENSHOT = """
+import bpy
+win = bpy.context.window_manager.windows[0]
+area = next(a for a in win.screen.areas if a.type == "VIEW_3D")
+with bpy.context.temp_override(window=win, area=area):
+    bpy.ops.screen.screenshot_area(filepath=filepath)
+"""
+
+
+def _lab(sock: socket.socket, command: str, params: dict) -> dict:
+    """One request to Blender Lab's add-on; the reply as the other add-ons give it (the stdout in `result`)."""
+    if command == "execute_python":
+        code = params["code"]
+    elif command == "get_viewport_screenshot":
+        code = f"filepath = {params['filepath']!r}\n{LAB_SCREENSHOT}"
+    else:
+        raise ApiError(502, "blender_error", f"{command}: not a command of Blender's MCP add-on")
+    req = {"type": "execute", "code": code, "strict_json": False}
+    sock.sendall(json.dumps(req).encode() + b"\0")
+    buf = b""
+    while b"\0" not in buf:
+        if not (chunk := sock.recv(65536)):
+            raise ApiError(502, "blender_error", "Blender closed the connection")
+        buf += chunk
+    reply = json.loads(buf.split(b"\0", 1)[0])
+    return {**reply, "result": {"result": reply.get("stdout", "")}}
+
+
 def call(command: str, **params):
-    addr, sock = _connect()
+    kind, sock = _connect()
     with sock:
         sock.settimeout(TIMEOUT)
         try:
-            if addr == PRO:
+            if kind == "pro":
                 body = json.dumps({"command": command, "params": params}).encode()
                 sock.sendall(struct.pack(">I", len(body)) + body)
                 reply = json.loads(_recv(sock, struct.unpack(">I", _recv(sock, 4))[0]))
+            elif kind == "lab":
+                reply = _lab(sock, command, params)
             else:
                 kind = {"execute_python": "execute_code"}.get(command, command)
                 sock.sendall(json.dumps({"type": kind, "params": params}).encode())

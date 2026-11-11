@@ -157,11 +157,17 @@ Open any version in Blender, edit it, pull it back as a new version.
 3. In the 3D viewport press **N** → **Blender MCP Pro** tab → **Start**.
 4. In Effigy: click a version → **Open in Blender**. Edit, then **Pull from Blender**.
 
-**No Blender MCP Pro licence?** The free, open-source [blender-mcp](https://github.com/ahujasid/blender-mcp)
+**No Blender MCP Pro licence?** Use Blender's own MCP add-on (Blender 5.1+, free, from Blender Lab:
+[blender.org/lab/mcp-server](https://www.blender.org/lab/mcp-server/)): install it as that page says, then
+**Edit → Preferences → Add-ons → MCP** → **Start** (or tick its auto-start). It listens on port 9876 and Effigy
+uses it directly; no AI is needed to open and pull.
+
+The free, open-source [blender-mcp](https://github.com/ahujasid/blender-mcp)
 add-on (MIT) works too: install its `addon.py` the same way (Install from Disk…), then in the N panel →
 **BlenderMCP** tab → **Connect to Claude** (it listens on port 9876). The app uses whichever add-on is
 running (Pro first). An agent then uses the free add-on's own MCP server, which `uv` downloads on first use;
-step 8's `EFFIGY_BLENDER_MCP_PRO_DIR` isn't needed. Don't run both add-ons at once.
+step 8's `EFFIGY_BLENDER_MCP_PRO_DIR` isn't needed. Blender's MCP add-on and blender-mcp both use port 9876:
+run one of them, not both.
 
 ## Step 8 (optional): Let an AI agent work with the app
 

@@ -303,7 +303,7 @@ def blender_open(asset_id: str, body: Version):
 
 @app.get("/api/blender/status")
 def blender_status():
-    """Which Blender add-on answers: "pro", "free" or null (the UI's connection line); `start`: Open in Blender starts
+    """Which Blender add-on answers: "pro", "lab", "free" or null (the UI's connection line); `start`: Open in Blender starts
     one when none answers (Setup)."""
     s = settings.read()
     start = bool(s.get("blender_start") and Path(s.get("blender_exe") or "").is_file())
