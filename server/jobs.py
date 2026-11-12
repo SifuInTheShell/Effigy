@@ -112,9 +112,10 @@ def _log(job: Job, line: str) -> None:
 
 
 def _pump(job_of, stream) -> None:
-    for line in stream:
-        if job := job_of():
-            _log(job, line)
+    with stream:  # closed at the end: JOBS keeps every Job, and with it its process's pipes
+        for line in stream:
+            if job := job_of():
+                _log(job, line)
 
 
 # --- step processes ---------------------------------------------------------------------------
@@ -259,6 +260,7 @@ def _run_oneshot(job: Job, in_dir: Path | None, out: Path) -> tuple[str, dict] |
         threading.Thread(target=_pump, args=(lambda: job, proc.stderr), daemon=True).start()
         reply = _read(job, proc.stdout)
         rc = proc.wait()
+        proc.stdout.close()  # _read stops at the reply; an open pipe per finished job ran out of handles
         if rc and (
             reply is None or reply[0] == "RESULT"
         ):  # a RESULT then a crash is a crash (BE-005)
