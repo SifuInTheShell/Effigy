@@ -3,8 +3,9 @@
 The source is a manifest, `effigy-import/1` or Parkour's `parkour-asset-library/1` (read as is), or a folder: every model
 file under it, named after the file, tagged with its subfolders. Each asset remembers where it came
 from in `asset.json.origin` `{library, source_key, sha256, license, restricted}`: a rerun skips an unchanged file and
-imports a changed one as a new version of the same asset. An item without a known clean licence imports restricted
-(meta.restricted on its upload and everything made from it), so export refuses it without `allow_restricted`.
+imports a changed one as a new version of the same asset, keeping the tags given to it since. An item without a known
+clean licence imports restricted (meta.restricted on its upload and everything made from it), so export refuses it
+without `allow_restricted`. A model comes in still unless its item says `"rig": true` (a known skeleton is kept).
 """
 
 import hashlib
@@ -41,7 +42,8 @@ def _tags(words: list) -> list[str]:
 
 
 def read(source: str, license: str = "") -> list[dict]:
-    """The items of a manifest or a folder: {file (absolute), name, tags, library, source_key, license, restricted}.
+    """The items of a manifest or a folder: {file (absolute), name, tags, library, source_key, license, restricted,
+    rig}.
     `license`: the licence of the items that name none."""
     path = Path(source)
     if not path.is_absolute() or not path.exists():
@@ -100,6 +102,7 @@ def _items(base: Path, defaults: dict, rows: list) -> list[dict]:
                 "source_key": row.get("source") or row["file"],
                 "license": lic,
                 "restricted": bool(row.get("restricted", lic not in CLEAN)),
+                "rig": row.get("rig") is True,
             }
         )
     return items
@@ -147,9 +150,15 @@ def _import(it: dict, b: dict) -> None:
     """One item: its asset (new or the one it came into before), the upload, its tags, import_model."""
     sha = _sha(it["file"])  # before the copy: a file changing meanwhile re-imports next time
     origin = {k: it[k] for k in ("library", "source_key", "license", "restricted")}
-    asset_id = it.get("asset_id") or library.create_asset(it["name"])["id"]
+    if asset_id := it.get(
+        "asset_id"
+    ):  # an update keeps the tags given since, the catalogue's added after them
+        kept = library.get_asset(asset_id)["asset"].get("tags", [])
+    else:
+        asset_id, kept = library.create_asset(it["name"])["id"], []
     it["asset_id"] = asset_id
-    library.update_asset(asset_id, tags=it["tags"], origin=origin)  # sha256 only once imported
+    tags = _tags([*kept, *it["tags"]])
+    library.update_asset(asset_id, tags=tags, origin=origin)  # sha256 only once imported
     inbox = library.asset_dir(asset_id) / "inbox"
     inbox.mkdir(exist_ok=True)
     part = inbox / f"{uuid.uuid4().hex}.part"
@@ -161,7 +170,7 @@ def _import(it: dict, b: dict) -> None:
     finally:
         part.unlink(missing_ok=True)
     jobs.publish("version_created", {"asset_id": asset_id, "meta": up})
-    job, _ = jobs.submit(asset_id, IMPORT_STEP, up["version"], {"rig": False})
+    job, _ = jobs.submit(asset_id, IMPORT_STEP, up["version"], {"rig": it.get("rig", False)})
     it["job_id"] = job.id
     while job.status in ("queued", "running"):
         if b["cancel"]:

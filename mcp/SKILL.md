@@ -109,9 +109,9 @@ UV seams, and a hole fill or a cut on the unwelded mesh caps the seam loops too.
 
 **Many files** (a kit, a whole asset library): `import_batch(source)` with a folder (every model file under it,
 tagged with its subfolders), an effigy-import/1 manifest or a Parkour `library.json`; `dry_run=true` first, then
-`batch_status(batch_id, wait_s=45)` until it is done: still models with tags. Files without a clean licence (CC0-1.0,
+`batch_status(batch_id, wait_s=45)` until it is done: still models with tags (a manifest item with `"rig": true` keeps its skeleton: a character). Files without a clean licence (CC0-1.0,
 MIT, Apache-2.0, or `license="own"` for the owner's own work: ask) are imported `restricted` (export refuses them);
-a rerun skips what is already there and re-imports a changed file.
+a rerun skips what is already there and re-imports a changed file, keeping the tags given to it since.
 
 **Organise** (the Library page's folders, tags, names): `update_asset(asset, name=, folder=, tags=, archived=)` changes
 only what is given; `folder` is a path (`"Props/Crates"` is Crates inside Props), a new folder exists as soon as an

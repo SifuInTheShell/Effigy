@@ -51,6 +51,12 @@ def test_job_runs_and_writes_meta(client):
     assert first["status"] == "done", first
     second = wait(client, run(client, asset, parent=first["version"]))
     assert second["version"] == "002__echo"
+    # a finished job's pipes are closed: JOBS keeps the job, a batch of thousands ran out of handles
+    proc = jobs.get(first["job_id"]).proc
+    end = time.time() + 5
+    while not proc.stderr.closed and time.time() < end:  # the pump thread closes it at EOF
+        time.sleep(0.02)
+    assert proc.stdout.closed and proc.stderr.closed
 
     versions = client.get(f"/api/assets/{asset}").json()["versions"]
     meta = versions[1]

@@ -38,7 +38,13 @@ def test_batch_import(client, tmp_path):
     shutil.copy(GLB, src / "props" / "vent.glb")
     manifest = src / "manifest.json"
     items = [
-        {"file": "props/crate.glb", "name": "Crate", "tags": ["wood"], "license": "CC0-1.0"},
+        {
+            "file": "props/crate.glb",
+            "name": "Crate",
+            "tags": ["wood"],
+            "license": "CC0-1.0",
+            "rig": True,
+        },
         {"file": "props/vent.glb", "category": ["Ventilation", "a,b"], "tags": ["x" * 40]},
         {"file": "props/gone.glb"},
     ]
@@ -67,14 +73,20 @@ def test_batch_import(client, tmp_path):
         m["restricted"] for m in client.get(f"/api/assets/{vent['id']}").json()["versions"]
     ] == [True, True]
     assert assets["Crate"]["restricted"] is False
+    # the item that asks for its rig keeps it, the others come in still
+    for name, rig in (("Crate", True), ("vent", False)):
+        versions = client.get(f"/api/assets/{assets[name]['id']}").json()["versions"]
+        assert versions[1]["params"]["rig"] is rig
 
     again = client.post("/api/import/batch", json=body | {"dry_run": True}).json()["items"]
     assert [i["action"] for i in again] == ["skip", "skip", "skip"]
+    client.patch(f"/api/assets/{assets['Crate']['id']}", json={"tags": ["mine", "wood"]})
     (src / "props" / "crate.glb").write_bytes(GLB.read_bytes() + b"\0\0\0\0")
     b = finish(client, client.post("/api/import/batch", json=body).json()["batch_id"])
     assert [i["status"] for i in b["items"]] == ["done", "skipped", "skipped"], b
     crate = client.get(f"/api/assets/{assets['Crate']['id']}").json()
     assert len(crate["versions"]) == 4  # a new upload and import in the same asset
+    assert crate["asset"]["tags"] == ["mine", "wood"]  # an update keeps the tags given since
     assert len(client.get("/api/assets").json()) == 2
 
     bad = client.post("/api/import/batch", json={"source": "manifest.json"})
