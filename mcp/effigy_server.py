@@ -652,11 +652,12 @@ def import_batch(
     """Use this to import many model files at once: `source` is the absolute path of a folder (every model file under
     it: .glb .fbx .obj .stl .ply .usd* .zip, named after the file, tagged with its subfolders; a .gltf is skipped,
     zip it with its .bin) or of a manifest: effigy-import/1 ({"schema", "defaults", "items": [{"file", "name"?,
-    "tags"?, "category"?, "source"?, "license"?, "restricted"?}]}, files relative to it) or a Parkour library.json.
-    Each file becomes a still model (import_model) with its tags, one at a time. `license`: the licence of files that
+    "tags"?, "category"?, "source"?, "license"?, "restricted"?, "rig"?}]}, files relative to it) or a Parkour
+    library.json. Each file becomes a still model (import_model) with its tags, one at a time; an item with
+    "rig": true keeps its known skeleton (a character). `license`: the licence of files that
     name none (a folder's: all); without a clean one (CC0-1.0, MIT, Apache-2.0, or "own": the owner's own work) a
     file is imported restricted and export refuses it, so ask the owner when unsure. A rerun skips unchanged files
-    and re-imports changed ones into the same asset. dry_run=true lists the items and what would happen (new |
+    and re-imports changed ones into the same asset, keeping the tags given to it since. dry_run=true lists the items and what would happen (new |
     update | skip), creating nothing. `only`: names or source keys containing one of these words; `limit`: the first
     n. Returns {batch_id, items}: follow it with batch_status."""
     body = {"source": source, "only": only or None, "limit": limit or None, "license": license}
