@@ -262,12 +262,17 @@ def update_asset(
     "" takes it out)."""
     if name is not None and not name.strip():
         raise ApiError(400, "bad_params", "a name can't be empty")
-    if folder is not None:
-        folder = folder.strip()
-        if len(folder) > 64 or not folder.isprintable():
+    if folder is not None and folder.strip():  # a path: "Props/Crates" is Crates inside Props
+        parts = [p.strip() for p in folder.split("/")]
+        if len(parts) > 8 or any(not p or len(p) > 64 or not p.isprintable() for p in parts):
             raise ApiError(
-                400, "bad_params", f"a folder name is up to 64 printable characters: {folder!r}"
+                400,
+                "bad_params",
+                f"a folder is up to 8 names separated by /, each 1-64 printable characters: {folder!r}",
             )
+        folder = "/".join(parts)
+    elif folder is not None:
+        folder = ""  # blank: out of its folder
     new_tags = None if tags is None else _tags(tags)
     path = asset_dir(asset_id) / "asset.json"
     with _meta:  # read, change and write as one: a patch beside another kept both (BE-004)

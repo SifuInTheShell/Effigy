@@ -113,6 +113,12 @@ tagged with its subfolders), an effigy-import/1 manifest or a Parkour `library.j
 MIT, Apache-2.0, or `license="own"` for the owner's own work: ask) are imported `restricted` (export refuses them);
 a rerun skips what is already there and re-imports a changed file.
 
+**Organise** (the Library page's folders, tags, names): `update_asset(asset, name=, folder=, tags=, archived=)` changes
+only what is given; `folder` is a path (`"Props/Crates"` is Crates inside Props), a new folder exists as soon as an
+asset is in it, `""` takes it out. `move_folder(folder, to)` renames or moves a folder with everything under it;
+`to=""` removes the folder (its contents go to the top level; nothing is deleted). `list_assets(folder=)` lists a
+folder and the ones inside it, and returns every `folders` path.
+
 **Generate** (picture to 3D): `trellis2` on a prep version, `{"weights": "fast"|"faithful", "seed", "texture_size"}`
 or a preset's name, `{"preset": "faithful"}` (describe_steps lists them; your own keys override the preset's);
 `faithful` follows the picture closest and is slower. `{"preset": "best"}` is the best this card runs (the

@@ -200,15 +200,22 @@ def label(m: dict) -> str:
 
 
 @server.tool(annotations=READ)
-def list_assets(query: str = "", limit: int = 30, offset: int = 0, kind: str = "") -> dict:
+def list_assets(
+    query: str = "", limit: int = 30, offset: int = 0, kind: str = "", folder: str = ""
+) -> dict:
     """Use this first to find an asset id: lists the library, newest first, optionally only assets whose
-    name or id contains `query`. Returns {assets: [{id, name, created, versions, newest: {version, label}}],
-    total}; page with limit (1-100) and offset. kind: texture (standalone materials), 2d, 3d, or empty for all."""
+    name or id contains `query`. Returns {assets: [{id, name, created, versions, newest: {version, label},
+    folder?, tags?, archived?}], total, folders}; page with limit (1-100) and offset. kind: texture (standalone
+    materials), 2d, 3d, or empty for all. folder: only assets in that library folder or a folder inside it
+    ("Props/Crates" is Crates inside Props). `folders`: every folder in the library."""
     q = query.lower()
-    found = [a for a in api("GET", "/api/assets") if q in a["id"].lower() or q in a["name"].lower()]
+    every = api("GET", "/api/assets")
+    found = [a for a in every if q in a["id"].lower() or q in a["name"].lower()]
     if kind not in ("", "texture", "2d", "3d"):
         raise ToolError("bad_params: kind must be texture, 2d, 3d or empty")
     found = [a for a in found if not kind or a.get("kind", "3d") == kind]
+    f = folder.strip().strip("/")
+    found = [a for a in found if not f or _inside(a.get("folder", ""), f)]
     found.sort(key=lambda a: a.get("updated", ""), reverse=True)
     page = []
     for a in found[max(0, offset) :][: max(1, min(limit, 100))]:
@@ -217,8 +224,19 @@ def list_assets(query: str = "", limit: int = 30, offset: int = 0, kind: str = "
         page.append(
             {k: a[k] for k in ("id", "name", "created")}
             | {"kind": a.get("kind", "3d"), "versions": len(vs), "newest": newest}
+            | {k: a[k] for k in ("folder", "tags", "archived") if a.get(k)}
         )
-    return {"assets": page, "total": len(found)}
+    return {"assets": page, "total": len(found), "folders": _folders(every)}
+
+
+def _inside(path: str, folder: str) -> bool:
+    return path == folder or path.startswith(folder + "/")
+
+
+def _folders(assets: list[dict]) -> list[str]:
+    """Every folder and each one above it (a folder exists while an asset is under it)."""
+    parts = (a["folder"].split("/") for a in assets if a.get("folder"))
+    return sorted({"/".join(p[: i + 1]) for p in parts for i in range(len(p))})
 
 
 @server.tool(annotations=READ)
@@ -443,6 +461,49 @@ def create_asset(name: str, kind: str = "") -> dict:
     Leave it empty for a 3D asset. To start from a file use import_file or import_texture_set."""
     body = {"name": name} | ({"kind": kind} if kind else {})
     return {"asset_id": api("POST", "/api/assets", body)["id"]}
+
+
+# --- organising the library (as the Library page does) ------------------------------------------
+
+
+@server.tool(annotations=SAME)
+def update_asset(
+    asset_id: str,
+    name: str | None = None,
+    folder: str | None = None,
+    tags: list[str] | None = None,
+    archived: bool | None = None,
+) -> dict:
+    """Use this to organise the library: rename an asset, file it in a folder, tag or archive it (versions are
+    untouched). folder: a path, "Props/Crates" is Crates inside Props (up to 8 names of 1-64 characters); a new
+    one exists as soon as an asset is in it, "" takes the asset out of its folder. tags replaces the list.
+    archived hides it from the Library's default view. Only the arguments given change. Returns the asset."""
+    body = {"name": name, "folder": folder, "tags": tags, "archived": archived}
+    return api(
+        "PATCH", f"/api/assets/{_q(asset_id)}", {k: v for k, v in body.items() if v is not None}
+    )
+
+
+@server.tool(annotations=SAME)
+def move_folder(folder: str, to: str = "") -> dict:
+    """Use this to rename, move or remove a library folder: everything in `folder` and its subfolders moves
+    to `to` keeping the structure below it ("Props/Crates" to "Kit" makes "Kit/Small" of "Props/Crates/Small";
+    to "Props" puts Crates' contents in Props). to="" moves them to the top level: that removes the folder.
+    No asset is deleted. Returns {moved: [{asset_id, folder}]}."""
+    f, t = folder.strip().strip("/"), to.strip().strip("/")
+    if not f:
+        raise ToolError("bad_params: folder is the path of an existing folder, e.g. Props/Crates")
+    if _inside(t, f) and t != f:
+        raise ToolError(f"bad_params: {to!r} is inside {folder!r}; pick a folder outside it")
+    moved = [a for a in api("GET", "/api/assets") if _inside(a.get("folder", ""), f)]
+    if not moved:
+        raise ToolError(f"not_found: no folder {folder!r}; list_assets returns `folders`")
+    out = []
+    for a in moved:
+        dest = (t + a["folder"][len(f) :]).strip("/")
+        api("PATCH", f"/api/assets/{_q(a['id'])}", {"folder": dest})
+        out.append({"asset_id": a["id"], "folder": dest})
+    return {"moved": out}
 
 
 # --- import and export ------------------------------------------------------------------------
