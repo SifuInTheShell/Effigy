@@ -32,6 +32,33 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
+test("Texture History opens earlier versions and asks only once before discarding painted changes", async ({ page, request }) => {
+  const asset = await (await request.post("/api/assets", { data: { name: "Texture History navigation", kind: "texture" } })).json();
+  const first = await step(request, asset.id, null, { op: "create", size: 64, color: "#ffffff" });
+  const latest = await step(request, asset.id, first, { op: "resize", size: 128 });
+  await page.goto(`/#/asset/${asset.id}?version=${latest}`);
+  const history = page.getByLabel("Texture version", { exact: true });
+  await history.selectOption(first);
+  await expect(history).toHaveValue(first);
+  await expect(page.locator(".texture-foot")).toContainText("64 × 64");
+  await page.getByRole("button", { name: "Paint map", exact: true }).click();
+  const canvas = page.getByLabel("Texture painting canvas");
+  await expect.poll(() => canvas.evaluate((e: HTMLCanvasElement) => e.width)).toBe(64);
+  await page.getByLabel("Brush colour", { exact: true }).fill("#ff0000");
+  await canvas.click();
+  await expect(page.getByRole("button", { name: "Save painted map" })).toBeEnabled();
+  let dialogs = 0, discard = false;
+  page.on("dialog", async (d) => { dialogs++; await (discard ? d.accept() : d.dismiss()); });
+  await history.selectOption(latest);
+  await expect(history).toHaveValue(first);
+  expect(dialogs).toBe(1);
+  discard = true;
+  await history.selectOption(latest);
+  await expect(history).toHaveValue(latest);
+  await expect(page.locator(".texture-foot")).toContainText("128 × 128");
+  expect(dialogs).toBe(2);
+});
+
 test("Painter: brushes, eraser, picker, zoom/pan, history and lossless save", async ({
   page,
   request,

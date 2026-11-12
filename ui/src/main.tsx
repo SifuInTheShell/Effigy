@@ -45,6 +45,7 @@ import {
   recommended,
   tabOfTool,
   taskOf,
+  toolHelp,
   type Task,
   type Tool,
 } from "./workflow";
@@ -635,6 +636,10 @@ const libHash = (v: LibView, base = "#/") => {
 };
 
 const squash = (s: string) => s.toLowerCase().replace(/[\s_.\-]+/g, "");
+// a folder is a path ("Props/Crates": Crates inside Props); null is the library's top level
+const parentOf = (f: string) => (f.includes("/") ? f.slice(0, f.lastIndexOf("/")) : null);
+const leafOf = (f: string) => f.slice(f.lastIndexOf("/") + 1);
+const inside = (a: Asset, f: string) => !!a.folder && (a.folder === f || a.folder.startsWith(f + "/"));
 
 const FILTERS: Record<string, (a: Asset) => boolean> = {
   All: () => true,
@@ -698,12 +703,23 @@ function Library(props: {
   const words = needle.split(/\s+/).map(squash).filter(Boolean);
   const tags = [...new Set(total.flatMap((a) => a.tags ?? []))].sort();
   const tag = tags.includes(tagSel) ? tagSel : ""; // a tag no asset has any more is no filter
-  // a folder exists while an asset is in it; one nothing is in any more is no filter
+  // a folder (and each folder above it) exists while an asset is in it; one emptied opens the nearest one left
   const live = total.filter((a) => !a.archived);
-  const folders = [...new Set(live.flatMap((a) => (a.folder ? [a.folder] : [])))].sort((a, b) => a.localeCompare(b));
-  const folder = folderSel && folders.includes(folderSel) ? folderSel : null;
+  const folders = [...new Set(live.flatMap((a) => (a.folder ? a.folder.split("/").map((_, i, s) => s.slice(0, i + 1).join("/")) : [])))].sort((a, b) => a.localeCompare(b));
+  let folder = folderSel || null;
+  while (folder !== null && !folders.includes(folder)) folder = parentOf(folder);
   const flat = !!needle || !!tag || filter === "Archived"; // a search looks in every folder, as a file browser's does
-  const tiles = folder === null && !flat ? folders.map((f) => [f, live.filter((a) => a.folder === f && FILTERS[filter](a)).length] as const).filter(([, n]) => n) : [];
+  const tiles = flat ? [] : folders.filter((f) => parentOf(f) === folder).map((f) => [f, live.filter((a) => inside(a, f) && FILTERS[filter](a)).length] as const).filter(([, n]) => n);
+  const up = folder === null ? "" : (parentOf(folder) ?? "");
+  const removeFolder = (f: string) => {
+    // its assets and folders move up one level; nothing is deleted (archived ones too, or the folder came back with them)
+    const moved = total.filter((a) => inside(a, f));
+    const to = parentOf(f);
+    if (!window.confirm(`Remove the folder "${leafOf(f)}"?\n\nIts ${moved.length} asset${moved.length === 1 ? "" : "s"} and any folders in it move up into ${to ?? "the Library"}. Nothing is deleted.`)) return;
+    const groups: Record<string, string[]> = {};
+    for (const a of moved) (groups[((to ?? "") + a.folder!.slice(f.length)).replace(/^\//, "")] ??= []).push(a.id);
+    Promise.all(Object.entries(groups).map(([dest, ids]) => props.onMove(ids, dest))).then(() => (location.hash = into(to)));
+  };
   const all = total
     .filter((a) => (filter === "Archived" ? !!a.archived : !a.archived && FILTERS[filter](a)))
     .filter((a) => !tag || a.tags?.includes(tag))
@@ -760,9 +776,9 @@ function Library(props: {
           )}
           <button
             onClick={() => {
-              // a folder exists while an asset is in it: name it, then pick what goes in
-              const name = window.prompt("Name of the new folder")?.trim();
-              if (name) setPicking(true), setBatch(false), setMoving(true), setTarget(name);
+              // a folder exists while an asset is in it: name it (inside the open one), then pick what goes in
+              const name = window.prompt(folder ? `Name of the new folder inside ${leafOf(folder)}` : "Name of the new folder")?.trim();
+              if (name) setPicking(true), setBatch(false), setMoving(true), setTarget(folder ? `${folder}/${name}` : name);
             }}
           >
             New folder
@@ -779,8 +795,8 @@ function Library(props: {
                 Move to folder… ({chosen.length})
               </button>
               {folder !== null && (
-                <button disabled={!chosen.length} onClick={() => props.onMove(chosen.map((a) => a.id), "").then(() => setPicked(new Set()))}>
-                  Move out of {folder} ({chosen.length})
+                <button disabled={!chosen.length} onClick={() => props.onMove(chosen.map((a) => a.id), up).then(() => setPicked(new Set()))}>
+                  Move out of {leafOf(folder)} ({chosen.length})
                 </button>
               )}
               <button className="primary" disabled={!chosen.length} onClick={() => setBatch(true)}>
@@ -800,13 +816,20 @@ function Library(props: {
       )}
       {folder !== null && (
         <nav className="row crumbs" aria-label="Folder">
-          <a className="button small" href={into(null)}>
+          <a className="button small" href={into(parentOf(folder))}>
             ↑ Up
           </a>
           <a href={into(null)}>Library</a>
-          <span aria-hidden="true">›</span>
-          <strong>{folder}</strong>
+          {folder.split("/").map((name, i, s) => (
+            <Fragment key={i}>
+              <span aria-hidden="true">›</span>
+              {i === s.length - 1 ? <strong>{name}</strong> : <a href={into(s.slice(0, i + 1).join("/"))}>{name}</a>}
+            </Fragment>
+          ))}
           {flat && <span className="muted">(searching every folder)</span>}
+          <button className="small" onClick={() => removeFolder(folder!)}>
+            Remove folder
+          </button>
         </nav>
       )}
       {moving && picking && (
@@ -819,7 +842,7 @@ function Library(props: {
         >
           <label>
             Move {chosen.length} {chosen.length === 1 ? "asset" : "assets"} to the folder{" "}
-            <input list="library-folder-names" value={target} autoFocus placeholder="a new or existing folder" onChange={(e) => setTarget(e.target.value)} />
+            <input list="library-folder-names" value={target} autoFocus placeholder="a new or existing folder, e.g. Props/Crates" onChange={(e) => setTarget(e.target.value)} />
           </label>
           <datalist id="library-folder-names">
             {folders.map((f) => (
@@ -872,13 +895,13 @@ function Library(props: {
         <ul className="cards">
           {tiles.map(([f, n]) => (
             <li key={`folder:${f}`}>
-              <a className="card" href={into(f)} aria-label={`Folder ${f}, ${n} asset${n === 1 ? "" : "s"}`}>
+              <a className="card" href={into(f)} aria-label={`Folder ${leafOf(f)}, ${n} asset${n === 1 ? "" : "s"}`}>
                 <span className="thumb folder-thumb" aria-hidden="true">
                   <svg viewBox="0 0 24 24" fill="currentColor">
                     <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h4l2 2.5h7A2.5 2.5 0 0 1 21 9v8.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" />
                   </svg>
                 </span>
-                <strong>{f}</strong>
+                <strong>{leafOf(f)}</strong>
                 <span className="muted">
                   Folder · {n} asset{n === 1 ? "" : "s"}
                 </span>
@@ -900,7 +923,7 @@ function Library(props: {
               <div className="card-actions" role="group" aria-label={`Manage ${a.name}`}>
                 <button onClick={() => props.onRename(a)}>Rename</button>
                 <button onClick={() => props.onTags(a)}>Tags</button>
-                {a.folder && <button onClick={() => props.onMove([a.id], "")}>Move out of {a.folder}</button>}
+                {a.folder && <button onClick={() => props.onMove([a.id], parentOf(a.folder!) ?? "")}>Move out of {leafOf(a.folder)}</button>}
                 <button onClick={() => props.onArchive(a, !a.archived)}>{a.archived ? "Unarchive" : "Archive"}</button>
                 <button className="danger" onClick={() => props.onDelete(a)}>
                   Delete
@@ -1733,8 +1756,11 @@ function Workspace(props: {
   const strip = inTab(tab);
   const chosen = cur.tool;
   const toolId =
-    chosen === "runstep" && props.dev ? chosen : strip.find((t) => t.id === chosen && fits(t))?.id ?? strip.find((t) => t.id === rec && fits(t))?.id ?? strip.find(fits)?.id ?? "";
+    chosen === "runstep" && props.dev ? chosen : strip.find((t) => t.id === chosen)?.id ?? strip.find((t) => t.id === rec && fits(t))?.id ?? strip.find(fits)?.id ?? strip[0]?.id ?? "";
   const tool = strip.find((t) => t.id === toolId);
+  const available = !tool || fits(tool);
+  // Offer a suitable checkpoint on this lineage; inspecting a requirement never starts a job.
+  const suitable = tool && !available ? versions.filter((x) => onBranch(x) && tool.ok({ versions, v: x, f2d: is2 ? tools2D(versions, x, isSheet(x), kind) : undefined })).at(-1) : undefined;
   const choose = (tool: string) => {
     setUi({ v: v.version, tab, tool });
     if (panel.current) panel.current.scrollTop = 0;
@@ -1779,7 +1805,7 @@ function Workspace(props: {
     <RigPanel
       key={`${id}/${src!.version}`}
       asset={id}
-      tool={toolId}
+      tool={available ? toolId : ""}
       version={src!}
       motions={versions.filter((x) => x.step === "motion" || x.step === "mocap" || x.step === "import_motion")}
       onView={setRigView}
@@ -1799,7 +1825,14 @@ function Workspace(props: {
   const running = active && RECIPE.some(([s]) => s === active.step) ? active.input : undefined;
   const mesh = (x: Meta) => ancestors(versions, x).some(hasGlb); // what Blender can open: a version with a 3D model in its chain
   const why = (x: Meta) => (!mesh(x) ? "this version has no 3D model" : !bl.can ? "Blender is not connected: see Setup" : undefined);
-  const body = !toolId ? null : toolId === "runstep" ? (
+  const body = !available && tool ? (
+    <section className="tool-requirements note" role="region" aria-label="Tool requirements">
+      <p><strong>Needs {tool.needs}.</strong></p>
+      <p>{toolHelp(tool)}</p>
+      {suitable && <button className="primary" onClick={() => { setUi({ v: suitable.version, tab, tool: tool.id }); props.pick(suitable.version); }}>Open {label(suitable)} {suitable.version.slice(0, 3)}</button>}
+      <button onClick={() => setSide("history")}>Choose a version in History</button>
+    </section>
+  ) : !toolId ? null : toolId === "runstep" ? (
     <RunStep
       steps={props.steps}
       parent={v.version}
@@ -1861,6 +1894,8 @@ function Workspace(props: {
     return (
       <li key={x.version}>
         <button
+          aria-label={`View ${label(x)} ${x.version.slice(0, 3)}`}
+          title="View this version. New work starts from the version you choose."
           aria-current={x.version === v.version ? "true" : undefined}
           style={{
             paddingLeft: 12 + 6 * Math.min(ancestors(versions, x).length - 1, 4), // deep chains must not squeeze the label
@@ -1993,15 +2028,13 @@ function Workspace(props: {
             return (
               <li key={t.id}>
                 {/* switches the strip to its tools, or opens the newest checkpoint of that task on this branch; never runs a step */}
-                {/* not reachable yet: still focusable, so the keyboard and a screen reader get the reason a pointer gets
-                    from the title (UX-15: guidance without relying on hover) */}
+                {/* Every task can be inspected; an unavailable task opens its requirements without running it. */}
                 <button
-                  aria-disabled={open ? undefined : true}
                   aria-describedby={open ? undefined : `needs-${t.id}`}
                   aria-current={i === tab ? "step" : undefined}
                   className={i < tab && to ? "done" : ""}
                   title={open ? undefined : `Needs ${t.needs}`}
-                  onClick={open ?? undefined}
+                  onClick={open ?? (() => goTab(i))}
                 >
                   {i < tab && to && "✓ "}
                   {t.label}
@@ -2037,12 +2070,14 @@ function Workspace(props: {
               {t.sep && <span className="sep" aria-hidden />}
               <button
                 role="tab"
+                aria-controls="workspace-tool"
                 aria-selected={t.id === toolId}
-                disabled={!fits(t)}
+                data-unavailable={fits(t) ? undefined : "true"}
                 title={fits(t) ? `${t.what}${t.id === rec ? " (the next step)" : ""}` : `needs ${t.needs}`}
                 onClick={() => choose(t.id)}
               >
                 {t.label}
+                {!fits(t) && <span className="requirement-mark" aria-hidden="true">ⓘ</span>}
                 {t.id === rec && fits(t) && <i className="dot" aria-hidden />}
               </button>
             </Fragment>
@@ -2052,6 +2087,7 @@ function Workspace(props: {
               ⋯ Run any step
             </button>
           )}
+          {strip.some((t) => !fits(t)) && <span className="toolstrip-help">ⓘ Select a marked tool to see its requirements</span>}
         </div>
       </nav>
       <div className={`ws-body${side ? " with-side" : ""}`}>
@@ -2172,12 +2208,13 @@ function Workspace(props: {
               {v.step === "import_model" && <ImportInfo asset={id} version={v} chain={props.chain} />}
               {v.step !== "validate" && RECIPE.some(([s]) => s === v.step) && <Preparation version={v} versions={versions} running={running} pick={props.pick} />}
               {(tool || toolId === "runstep") && (
-                <section className="tool">
+                <section id="workspace-tool" className="tool" role="tabpanel" aria-label={tool?.label ?? "Run any step"}>
                   <h3>{tool?.label ?? "Run any step"}</h3>
                   <p className="muted">{tool?.what ?? "Use this when the normal buttons are not enough. Run one step on the model you are viewing, with your own settings. The result is a new version in History. Nothing is overwritten."}</p>
                   {body}
                 </section>
               )}
+              {!toolId && <section className="tool-requirements note" role="region" aria-label="Tool requirements"><h3>{tasks[tab].label}</h3><p>Needs {tasks[tab].needs}.</p><p>Choose a model version in History to open this workspace.</p><button onClick={() => setSide("history")}>Choose a version in History</button></section>}
               {rig}
             </>
           )}

@@ -44,6 +44,8 @@ READ_ONLY = {
 }
 ALL = READ_ONLY | {
     "create_asset",
+    "update_asset",
+    "move_folder",
     "close_in_blender",
     "import_file",
     "import_batch",
@@ -182,6 +184,39 @@ def test_read_file_and_describe_steps(live):
     assert "profile" in one["doc"] and "godot" in one["doc"]
     assert listed["total"] == 1 and listed["assets"][0]["newest"]["label"] == "_echo"
     assert [v["label"] for v in got["versions"]][:1] == ["Imported model"]
+
+
+def test_organise_the_library(live):
+    api, crate = live
+    barrel = library.create_asset("barrel")["id"]
+
+    async def go():
+        async with session(api) as s:
+            _, a = await call(
+                s, "update_asset", asset_id=crate, folder="Props/Crates", tags=["wood"]
+            )
+            _, b = await call(s, "update_asset", asset_id=barrel, folder="Props", name="Big barrel")
+            _, inside = await call(s, "list_assets", folder="Props/Crates")
+            _, props = await call(s, "list_assets", folder="Props")
+            into_self, _ = await call(s, "move_folder", folder="Props", to="Props/Crates")
+            _, renamed = await call(s, "move_folder", folder="Props/Crates", to="Kit")
+            _, removed = await call(s, "move_folder", folder="Props")
+            gone, _ = await call(s, "move_folder", folder="Props")
+            _, top = await call(s, "list_assets")
+            return a, b, inside, props, into_self, renamed, removed, gone, top
+
+    a, b, inside, props, into_self, renamed, removed, gone, top = anyio.run(go)
+    assert a["folder"] == "Props/Crates" and a["tags"] == ["wood"]
+    assert b["folder"] == "Props" and b["name"] == "Big barrel"
+    assert [x["id"] for x in inside["assets"]] == [crate] and inside["assets"][0]["tags"] == [
+        "wood"
+    ]
+    assert props["total"] == 2 and props["folders"] == ["Props", "Props/Crates"]
+    assert into_self.is_error and "inside" in into_self.content[0].text
+    assert renamed["moved"] == [{"asset_id": crate, "folder": "Kit"}]
+    assert removed["moved"] == [{"asset_id": barrel, "folder": ""}]
+    assert gone.is_error and "not_found" in gone.content[0].text
+    assert top["folders"] == ["Kit"] and library.get_asset(barrel)["asset"]["name"] == "Big barrel"
 
 
 @needs_ml

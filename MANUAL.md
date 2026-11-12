@@ -189,8 +189,10 @@ credits. Native engine `.mat` and `.uasset` containers need exported maps or GLB
 Under the tabs, the **tool strip** lists the tools of the tab you are on. Click one and the panel on the right
 shows it: its name, one line on what it does, then its settings and button. The tool the shown version asks for
 next carries a small dot and is chosen for you whenever you open another version; opening a model that is rigged
-or animated lands on **Character** with the next tool chosen. A tool that does not fit the shown version is greyed
-out, and hovering it says why (for example "needs an animated model"). A tab whose tools fit the shown version
+or animated lands on **Character** with the next tool chosen. A tool that does not fit the shown version has a
+dashed outline and an **ⓘ** mark. Select it to see its requirements and how to meet them. If a suitable saved
+version exists, **Open [version]** takes you there; **Choose a version in History** opens the full list. Inspecting
+a tool never runs it. A tab whose tools fit the shown version
 only switches the strip (on a model with a skeleton, **Character** keeps the model, to fit the skeleton again);
 otherwise a tab opens its newest version. When a Parts, Face from image or Texture detail run finishes, its result
 opens on that tool.
@@ -230,7 +232,9 @@ The tab row starts with the asset's name and **Rename** and ends with the versio
 
 ### History
 
-**History** opens a list of all the versions beside the view. Click one to show it. Each row has:
+**History** opens a list of all the versions beside the view. Each version has a full-width name and number:
+click that button to show an earlier or later version. The highlighted version is the one you are viewing;
+new work starts from that version and preserves the others. The row's other actions sit underneath it:
 
 - **☆** to star it (stars keep a version easy to find; **Starred only** shows just those, and a batch export takes
   the newest starred version),

@@ -1408,13 +1408,15 @@ test("Tasks: six per 3D asset on one line, a task opens its newest checkpoint or
   expect(new Set(await tabs.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)))).size).toBe(1); // one line at laptop width
   await page.screenshot({ path: "test-results/tasks-1280.png", clip: { x: 0, y: 0, width: 1280, height: 140 } });
   const reference = page.getByRole("button", { name: "Reference" });
-  await expect(reference).toBeDisabled(); // nothing behind this model: the button says what it needs, never "in the future"
+  await expect(reference).toBeEnabled(); // a task can be inspected even before its input exists
   await expect(reference).toHaveAttribute("title", "Needs a picture or a description");
+  await reference.click();
+  await expect(page.getByRole("region", { name: "Tool requirements" })).toContainText("Needs a description");
   await page.getByRole("button", { name: /Generate$/ }).click(); // the raw model
   await expect(page).toHaveURL(/version=010_trellis2/);
   // the strip: the raw model's Generate tab, its tools greyed with why
   await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Generate 3D" })).toBeDisabled();
+  await expect(page.getByRole("tab", { name: "Generate 3D" })).toHaveAttribute("data-unavailable", "true");
   await expect(page.getByRole("tab", { name: "Generate 3D" })).toHaveAttribute("title", "needs a cut-out reference");
   await page.getByRole("button", { name: /Prepare$/ }).click();
   await expect(page.getByRole("tab", { name: "Texture detail" })).toHaveAttribute("title", "needs a textured model");
@@ -1995,6 +1997,44 @@ test("Library folders: New folder takes the picked assets in, Move out takes the
   await page.getByRole("group", { name: "Manage beta" }).getByRole("button", { name: "Move out of Props" }).click();
   await expect.poll(() => assets.filter((a) => a.folder).length).toBe(0);
   await expect(page.getByLabel("Select gamma")).toBeVisible(); // the folder is gone: back at the top level
+});
+
+test("Library folders: a folder inside a folder, and Remove folder moves its contents up", async ({ page }) => {
+  await mockLibrary(page);
+  const at = "2026-10-09T10:00:00Z";
+  let assets: any[] = [
+    ["alpha", "Props"],
+    ["beta", "Props/Crates"],
+    ["gamma", undefined],
+  ].map(([name, folder], i) => ({ id: `m42_${"abc"[i]}`, name, folder, created: at, updated: at, versions: 1, tags: [], licenses: [] }));
+  await page.route("**/api/assets", (r) => r.fulfill({ json: assets }));
+  await page.route(/\/api\/assets\/m42_\w$/, (r) => {
+    const id = r.request().url().split("/").pop();
+    const { folder } = r.request().postDataJSON();
+    assets = assets.map((a) => (a.id === id ? { ...a, folder: folder || undefined } : a));
+    return r.fulfill({ json: assets.find((a) => a.id === id) });
+  });
+  await page.goto("/#/library");
+  await expect(page.getByRole("link", { name: /^Folder Crates/ })).toHaveCount(0); // only at its own level
+  await page.getByRole("link", { name: "Folder Props, 2 assets" }).click();
+  await page.getByRole("link", { name: "Folder Crates, 1 asset" }).click();
+  await expect(page.getByRole("link", { name: /^beta / })).toBeVisible();
+  await expect(page.getByRole("link", { name: /^alpha / })).toHaveCount(0);
+  // a new folder inside Crates
+  page.once("dialog", (d) => d.accept("Small"));
+  await page.getByRole("button", { name: "New folder" }).click();
+  await page.getByLabel("Select beta").check();
+  await page.getByRole("button", { name: "Move", exact: true }).click();
+  await expect.poll(() => assets.find((a) => a.name === "beta").folder).toBe("Props/Crates/Small");
+  await page.getByRole("link", { name: "Folder Small, 1 asset" }).click();
+  await expect(page.getByRole("navigation", { name: "Folder" })).toContainText("Library›Props›Crates›Small");
+  // Remove Crates from inside it: Small moves up into Props, nothing is deleted
+  await page.getByRole("navigation", { name: "Folder" }).getByRole("link", { name: "Crates" }).click();
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Remove folder" }).click();
+  await expect.poll(() => assets.find((a) => a.name === "beta").folder).toBe("Props/Small");
+  await expect(page.getByRole("link", { name: "Folder Small, 1 asset" })).toBeVisible(); // now in Props
+  await expect(page.getByRole("link", { name: /^alpha / })).toBeVisible();
 });
 
 test("Compare: two linked viewers and the mirrored table; Licences panel", async ({ page }) => {
@@ -2698,7 +2738,7 @@ test("Accessibility: a skip link to the content, the asset name as the page's h1
   await mockAsset(page, "mock_needs", [{ version: "010_brief", step: "brief", parent: null, params: { prompt: "a lantern", category: "prop" }, outputs: { brief: "brief.yaml" } }]);
   await page.goto("/#/asset/mock_needs?version=010_brief");
   const generate = page.locator(".stages").getByRole("button", { name: "Generate" });
-  await expect(generate).toBeDisabled();
+  await expect(generate).toBeEnabled();
   await generate.focus();
   await expect(generate).toBeFocused();
   await expect(generate).toHaveAccessibleDescription("Needs a cut-out reference");

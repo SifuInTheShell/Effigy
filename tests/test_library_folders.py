@@ -16,4 +16,7 @@ def test_an_asset_goes_into_a_folder_and_out_again(tmp_path, monkeypatch):
         assert "folder" not in c.patch(f"/api/assets/{a}", json={"folder": ""}).json()
         assert c.patch(f"/api/assets/{a}", json={"folder": "x" * 65}).status_code == 400
         assert c.patch(f"/api/assets/{a}", json={"folder": "a\nb"}).status_code == 400
+        assert c.patch(f"/api/assets/{a}", json={"folder": " Props / Crates "}).json()["folder"] == "Props/Crates"
+        assert c.patch(f"/api/assets/{a}", json={"folder": "Props//Crates"}).status_code == 400
+        assert c.patch(f"/api/assets/{a}", json={"folder": "/".join("a" * 9)}).status_code == 400
         assert c.patch(f"/api/assets/{a}", json={}).status_code == 400
