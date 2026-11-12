@@ -636,7 +636,7 @@ export function TextureWorkspace(props: {
             <select
               aria-label="Texture version"
               value={selected.version}
-              onChange={(e) => leave() && props.pick(e.target.value)}
+              onChange={(e) => props.pick(e.target.value)}
             >
               {versions.map((m) => (
                 <option key={m.version} value={m.version}>

@@ -44,7 +44,8 @@ test("The chrome above the view is at most 112 px at 1280×720, and a tool that 
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/model.png` });
   await page.getByRole("button", { name: "Character" }).click();
   const edit = page.getByRole("tab", { name: "Edit animation" });
-  await expect(edit).toBeDisabled();
+  await expect(edit).toBeEnabled(); // opening the requirement does not run the tool
+  await expect(edit).toHaveAttribute("data-unavailable", "true");
   await expect(edit).toHaveAttribute("title", "needs an animated model");
   await expect(page.getByRole("tab", { name: "Fit skeleton" })).toBeEnabled();
 });
@@ -58,8 +59,54 @@ test("The strip follows the opened version: a skinned model lands on Ready-made 
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
   await expect(page.locator(".stages [aria-current=step]")).toContainText("Character");
   await expect(page.getByRole("tab", { name: "Edit animation" })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("tab", { name: "Ready-made clips" })).toBeDisabled();
+  await expect(page.getByRole("tab", { name: "Ready-made clips" })).toHaveAttribute("data-unavailable", "true");
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/animated.png` });
+});
+
+test("Unavailable tools explain their requirements and open an existing suitable version without running a job", async ({ page }) => {
+  await rigged(page);
+  let runs = 0;
+  await page.route("**/api/assets/m71_rig/steps/*", (r) => { runs++; return r.abort(); });
+  await page.goto("/#/asset/m71_rig?version=020_rig_skin");
+  const edit = page.getByRole("tab", { name: "Edit animation", exact: true });
+  await edit.focus();
+  await page.keyboard.press("Enter");
+  await expect(edit).toHaveAttribute("aria-selected", "true");
+  const requirement = page.getByRole("region", { name: "Tool requirements" });
+  await expect(requirement).toContainText("Needs an animated model");
+  await expect(requirement).toContainText("Add an animation");
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/tool-requirements.png` });
+  await requirement.getByRole("button", { name: /Open Animated model 030/ }).click();
+  await expect(page).toHaveURL(/version=030_anim$/);
+  await expect(page.getByRole("tab", { name: "Edit animation", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(requirement).toHaveCount(0);
+  expect(runs).toBe(0);
+});
+
+test("History keeps version names readable and opens earlier and later versions with mouse and keyboard", async ({ page }) => {
+  await rigged(page);
+  await page.goto("/#/asset/m71_rig?version=030_anim");
+  await page.getByRole("button", { name: /^History/ }).click();
+  for (const width of [1280, 900]) {
+    await page.setViewportSize({ width, height: 720 });
+    const rows = page.locator("#versions li");
+    await expect(rows).toHaveCount(3);
+    for (const row of await rows.all()) {
+      expect(await row.locator(".vlabel").evaluate((e) => e.getBoundingClientRect().width)).toBeGreaterThan(90);
+    }
+    await rows.nth(1).locator("button").first().click();
+    await expect(page).toHaveURL(/version=020_rig_skin$/);
+    await expect(rows.nth(1).locator("button").first()).toHaveAttribute("aria-current", "true");
+    await expect(page.getByRole("tab", { name: "Ready-made clips", exact: true })).toHaveAttribute("aria-selected", "true");
+    await rows.first().locator("button").first().click();
+    await expect(page).toHaveURL(/version=010_upload$/);
+    await rows.last().locator("button").first().focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/version=030_anim$/);
+    await expect(rows.last().locator("button").first()).toHaveAttribute("aria-current", "true");
+    await expect(page.getByRole("tab", { name: "Edit animation", exact: true })).toHaveAttribute("aria-selected", "true");
+  }
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/history-readable.png` });
 });
 
 test("Run any step is a developer option: hidden until Setup turns it on", async ({ page, request }) => {

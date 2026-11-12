@@ -149,7 +149,7 @@ button:hover:not(:disabled),
 button:disabled,
 button[aria-disabled="true"] {
   opacity: 0.45;
-  cursor: not-allowed;
+  cursor: default;
 }
 /* a task's reason it is not reachable: out of sight, shown under the button while it has the keyboard's focus */
 .stages li {
@@ -688,6 +688,28 @@ header.top button.small {
   border-radius: 50%;
   background: var(--accent);
   vertical-align: middle;
+}
+.toolstrip button[data-unavailable="true"] {
+  color: var(--text-2);
+  border-style: dashed;
+  cursor: pointer;
+}
+.requirement-mark {
+  color: var(--accent);
+  margin-left: 4px;
+}
+.toolstrip-help {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.tool-requirements {
+  display: grid;
+  gap: 12px;
+}
+.tool-requirements p {
+  margin: 0;
 }
 /* for screen readers and the keyboard: out of sight until needed (UX-13) */
 .sr-only {
@@ -1652,7 +1674,7 @@ button.danger:hover {
 }
 #versions .vlabel {
   flex: 1 1 0;
-  min-width: 0;
+  min-width: 96px; /* the name stays readable: the date beside it shrinks first */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

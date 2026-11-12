@@ -445,3 +445,21 @@ export function recommended(c: ToolCtx): string {
 
 /** The tab (index into `tasks`) a tool lives in. */
 export const tabOfTool = (tasks: Task[], id: string) => tasks.findIndex((t) => t.id === TOOLS.find((x) => x.id === id)?.task);
+
+/** How to get the input for a tool; shown when its tab is opened on an unsuitable version. */
+export function toolHelp(tool: Tool): string {
+  if (["editanim", "connect"].includes(tool.id)) return "Add an animation in Character using Ready-made clips, From a sentence, From a video or From a file. You can also open an animated version in History.";
+  if (["clips", "text", "video", "file"].includes(tool.id)) return "Choose a skinned model in History. To make one, use Fit skeleton, then Attach to skeleton in Character. To add more clips to an animated model, return to its skinned version first.";
+  if (["skeleton", "attach"].includes(tool.id)) return "Use Fit skeleton in Character first, then open its Skeleton version in History.";
+  if (tool.id === "fit") return "Choose a prepared model without a skeleton in History. On a raw generated model, use Prepare model first.";
+  if (tool.id === "face" || tool.id === "detail") return "Bake the model's textures in Prepare, then open the textured model in History. Face from image also needs the original generated reference.";
+  if (tool.id === "bake") return "Choose a generated model or an imported model with materials in History, before rigging or animation. Use Unwrap in Prepare to create its UVs first.";
+  if (tool.task === "prepare") return "Choose a model version from before rigging or animation in History. If you have only a picture, generate or import a 3D model first.";
+  if (tool.task === "reference" || tool.id === "pictures" || tool.id === "tile") return "Choose the original picture or description in History. You can start a new asset from a picture or a description if this asset has neither.";
+  if (tool.task === "generate") return "Choose a cut-out reference in History. To make one, select a concept picture or upload your own, then use Remove background in Reference.";
+  if (tool.id === "sprites") return "Choose an animated character or a prepared still model in History, then render its sprites.";
+  if (tool.id === "editor" || tool.id === "recolour") return "Use Pixelize to make pixel art, or render Sprites from a model, then open that version in History.";
+  if (tool.id === "redraw" || tool.id === "pixelize" || tool.id === "layers" || tool.id === "animate") return "Choose the original picture in History. A sprite sheet, tile, depth map or layered result may need its earlier picture instead.";
+  if (tool.id === "finish2d") return "Create pixel art, a sprite sheet, a seamless tile or parallax layers first, then select that version in History.";
+  return "Use Prepare model to finish the model, then choose its prepared version in History to check and export it.";
+}

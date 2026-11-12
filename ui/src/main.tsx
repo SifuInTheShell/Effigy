@@ -45,6 +45,7 @@ import {
   recommended,
   tabOfTool,
   taskOf,
+  toolHelp,
   type Task,
   type Tool,
 } from "./workflow";
@@ -1733,8 +1734,11 @@ function Workspace(props: {
   const strip = inTab(tab);
   const chosen = cur.tool;
   const toolId =
-    chosen === "runstep" && props.dev ? chosen : strip.find((t) => t.id === chosen && fits(t))?.id ?? strip.find((t) => t.id === rec && fits(t))?.id ?? strip.find(fits)?.id ?? "";
+    chosen === "runstep" && props.dev ? chosen : strip.find((t) => t.id === chosen)?.id ?? strip.find((t) => t.id === rec && fits(t))?.id ?? strip.find(fits)?.id ?? strip[0]?.id ?? "";
   const tool = strip.find((t) => t.id === toolId);
+  const available = !tool || fits(tool);
+  // Offer a suitable checkpoint on this lineage; inspecting a requirement never starts a job.
+  const suitable = tool && !available ? versions.filter((x) => onBranch(x) && tool.ok({ versions, v: x, f2d: is2 ? tools2D(versions, x, isSheet(x), kind) : undefined })).at(-1) : undefined;
   const choose = (tool: string) => {
     setUi({ v: v.version, tab, tool });
     if (panel.current) panel.current.scrollTop = 0;
@@ -1779,7 +1783,7 @@ function Workspace(props: {
     <RigPanel
       key={`${id}/${src!.version}`}
       asset={id}
-      tool={toolId}
+      tool={available ? toolId : ""}
       version={src!}
       motions={versions.filter((x) => x.step === "motion" || x.step === "mocap" || x.step === "import_motion")}
       onView={setRigView}
@@ -1799,7 +1803,14 @@ function Workspace(props: {
   const running = active && RECIPE.some(([s]) => s === active.step) ? active.input : undefined;
   const mesh = (x: Meta) => ancestors(versions, x).some(hasGlb); // what Blender can open: a version with a 3D model in its chain
   const why = (x: Meta) => (!mesh(x) ? "this version has no 3D model" : !bl.can ? "Blender is not connected: see Setup" : undefined);
-  const body = !toolId ? null : toolId === "runstep" ? (
+  const body = !available && tool ? (
+    <section className="tool-requirements note" role="region" aria-label="Tool requirements">
+      <p><strong>Needs {tool.needs}.</strong></p>
+      <p>{toolHelp(tool)}</p>
+      {suitable && <button className="primary" onClick={() => { setUi({ v: suitable.version, tab, tool: tool.id }); props.pick(suitable.version); }}>Open {label(suitable)} {suitable.version.slice(0, 3)}</button>}
+      <button onClick={() => setSide("history")}>Choose a version in History</button>
+    </section>
+  ) : !toolId ? null : toolId === "runstep" ? (
     <RunStep
       steps={props.steps}
       parent={v.version}
@@ -1861,6 +1872,8 @@ function Workspace(props: {
     return (
       <li key={x.version}>
         <button
+          aria-label={`View ${label(x)} ${x.version.slice(0, 3)}`}
+          title="View this version. New work starts from the version you choose."
           aria-current={x.version === v.version ? "true" : undefined}
           style={{
             paddingLeft: 12 + 6 * Math.min(ancestors(versions, x).length - 1, 4), // deep chains must not squeeze the label
@@ -1993,15 +2006,13 @@ function Workspace(props: {
             return (
               <li key={t.id}>
                 {/* switches the strip to its tools, or opens the newest checkpoint of that task on this branch; never runs a step */}
-                {/* not reachable yet: still focusable, so the keyboard and a screen reader get the reason a pointer gets
-                    from the title (UX-15: guidance without relying on hover) */}
+                {/* Every task can be inspected; an unavailable task opens its requirements without running it. */}
                 <button
-                  aria-disabled={open ? undefined : true}
                   aria-describedby={open ? undefined : `needs-${t.id}`}
                   aria-current={i === tab ? "step" : undefined}
                   className={i < tab && to ? "done" : ""}
                   title={open ? undefined : `Needs ${t.needs}`}
-                  onClick={open ?? undefined}
+                  onClick={open ?? (() => goTab(i))}
                 >
                   {i < tab && to && "✓ "}
                   {t.label}
@@ -2037,12 +2048,14 @@ function Workspace(props: {
               {t.sep && <span className="sep" aria-hidden />}
               <button
                 role="tab"
+                aria-controls="workspace-tool"
                 aria-selected={t.id === toolId}
-                disabled={!fits(t)}
+                data-unavailable={fits(t) ? undefined : "true"}
                 title={fits(t) ? `${t.what}${t.id === rec ? " (the next step)" : ""}` : `needs ${t.needs}`}
                 onClick={() => choose(t.id)}
               >
                 {t.label}
+                {!fits(t) && <span className="requirement-mark" aria-hidden="true">ⓘ</span>}
                 {t.id === rec && fits(t) && <i className="dot" aria-hidden />}
               </button>
             </Fragment>
@@ -2052,6 +2065,7 @@ function Workspace(props: {
               ⋯ Run any step
             </button>
           )}
+          {strip.some((t) => !fits(t)) && <span className="toolstrip-help">ⓘ Select a marked tool to see its requirements</span>}
         </div>
       </nav>
       <div className={`ws-body${side ? " with-side" : ""}`}>
@@ -2172,12 +2186,13 @@ function Workspace(props: {
               {v.step === "import_model" && <ImportInfo asset={id} version={v} chain={props.chain} />}
               {v.step !== "validate" && RECIPE.some(([s]) => s === v.step) && <Preparation version={v} versions={versions} running={running} pick={props.pick} />}
               {(tool || toolId === "runstep") && (
-                <section className="tool">
+                <section id="workspace-tool" className="tool" role="tabpanel" aria-label={tool?.label ?? "Run any step"}>
                   <h3>{tool?.label ?? "Run any step"}</h3>
                   <p className="muted">{tool?.what ?? "Use this when the normal buttons are not enough. Run one step on the model you are viewing, with your own settings. The result is a new version in History. Nothing is overwritten."}</p>
                   {body}
                 </section>
               )}
+              {!toolId && <section className="tool-requirements note" role="region" aria-label="Tool requirements"><h3>{tasks[tab].label}</h3><p>Needs {tasks[tab].needs}.</p><p>Choose a model version in History to open this workspace.</p><button onClick={() => setSide("history")}>Choose a version in History</button></section>}
               {rig}
             </>
           )}

@@ -3927,6 +3927,23 @@ then the three failed cases rechecked after correcting the texture navigation te
 Screenshots from the isolated layout tests are in `scratch/ui-preview/screenshots/`; owner acceptance of
 the live app is still pending.
 
+### Workspace preview feedback (2026-11-09)
+
+The local UI follow-up makes every tool inspectable, including unavailable tools. A dashed outline and an
+information mark lead to a requirements panel with concrete preparation guidance, a suitable version on the
+current lineage when present, and a History shortcut. Only a tool whose input fits renders its run controls.
+Task tabs without an input can also be inspected. `toolHelp()` documents how to obtain the required input.
+History's row actions had reduced version labels to zero width at laptop sizes: the version selector now
+occupies its own full-width row, with auxiliary actions below. Browser regressions select earlier and later
+versions at 1280 and 900 px with mouse and keyboard, and verify the selected tool and displayed version.
+Texture History uses the central navigation guard once, rather than prompting a second time after accepting
+discarded paint. No backend, job, library schema or GPU behavior changes are included in this follow-up.
+Validation: `npm run build` succeeds; all 15 layout/texture browser checks pass, including the new History
+and requirements regressions. The broader run passed 111 of 112 cases; its painter save exceeded the
+5-second polling assertion and passed in the focused rerun. The focused run also includes the new texture
+History guard check added after the broader run. Screenshots are in `scratch/ui-preview/screenshots/`.
+
+
 ## 5. Bench procedure (reference laptop)
 
 1. Plugged in, "max" power profile, hybrid graphics (iGPU drives the display), browser set to
