@@ -836,11 +836,16 @@ function Library(props: {
           <a className="button small" href={into(parentOf(folder))}>
             ↑ Up
           </a>
-          <a href={into(null)}>Library</a>
+          <a className="button small" href={into(null)}>
+            Library
+          </a>
           {folder.split("/").map((name, i, s) => (
             <Fragment key={i}>
               <span aria-hidden="true">›</span>
-              {i === s.length - 1 ? <strong>{name}</strong> : <a href={into(s.slice(0, i + 1).join("/"))}>{name}</a>}
+              {/* the open folder: the shared highlight, as a picked button's */}
+              <a className="button small" href={into(s.slice(0, i + 1).join("/"))} aria-current={i === s.length - 1 ? "true" : undefined}>
+                {name}
+              </a>
             </Fragment>
           ))}
           {flat && <span className="muted">(searching every folder)</span>}

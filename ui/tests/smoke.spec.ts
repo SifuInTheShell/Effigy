@@ -2054,7 +2054,13 @@ test("Library folders: a folder inside a folder, and Remove folder moves its con
   await page.getByRole("button", { name: "Move", exact: true }).click();
   await expect.poll(() => assets.find((a) => a.name === "beta").folder).toBe("Props/Crates/Small");
   await page.getByRole("link", { name: "Folder Small, 1 asset" }).click();
-  await expect(page.getByRole("navigation", { name: "Folder" })).toContainText("Library›Props›Crates›Small");
+  const crumbs = page.getByRole("navigation", { name: "Folder" });
+  await expect(crumbs).toContainText("Library›Props›Crates›Small");
+  // every crumb is a button like the rest, the open folder highlighted (no bare text links)
+  await expect(crumbs.locator("a:not(.button)")).toHaveCount(0);
+  await expect(crumbs.getByRole("link", { name: "Small" })).toHaveAttribute("aria-current", "true");
+  await expect(crumbs.getByRole("link", { name: "Crates" })).not.toHaveAttribute("aria-current", "true");
+  await crumbs.screenshot({ path: test.info().outputPath("crumbs.png") });
   // Remove Crates from inside it: Small moves up into Props, nothing is deleted
   await page.getByRole("navigation", { name: "Folder" }).getByRole("link", { name: "Crates" }).click();
   page.once("dialog", (d) => d.accept());
