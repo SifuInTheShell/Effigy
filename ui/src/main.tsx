@@ -4,7 +4,7 @@ import { NewTexture, TextureWorkspace } from "./textures/Workspace";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { api, fileUrl, waitJob, type Asset, type BlenderSetup, type PortInfo, type TrashEntry, type CopyResult, type Check, type Drive, type Env, type FitQuality, type Folder, type HfStatus, type JobStatus, type Licence, type Meta, type Model, type AgentSetup, type Preset, type Presets, type Storage, type StorageItem } from "./api";
+import { api, fileUrl, waitJob, type Asset, type BlenderSetup, type PortInfo, type TrashEntry, type CopyResult, type Check, type Drive, type Env, type FitQuality, type Folder, type HfStatus, type Libraries, type JobStatus, type Licence, type Meta, type Model, type AgentSetup, type Preset, type Presets, type Storage, type StorageItem } from "./api";
 import { AnimEditor } from "./anim/Editor";
 import { Actions2D, PictureForm, SpritesForm, animatable, tools2D } from "./pixel/Panels";
 import { EditorCanvas, EditorPanel, usePixelEditor } from "./pixel/Editor";
@@ -355,6 +355,11 @@ function App() {
         refresh();
         if (selRef.current.asset === d.asset_id) navigate("#/");
       }
+      if (name === "library") {
+        // another library folder is open: its assets, and an open asset page is no longer there
+        refresh();
+        if (selRef.current.asset) navigate("#/");
+      }
       if (name === "versions_deleted") dropVersions(d.asset_id, d.versions);
       if (name === "version_created")
         setSel((s) =>
@@ -570,6 +575,7 @@ function App() {
             }}
             onRestored={refresh}
             onMove={(ids, folder) => guard(Promise.all(ids.map((id) => api.setFolder(id, folder))).finally(refresh))}
+            guard={guard}
           />
         )}
         {route.page === "setup" && <Setup models={models} reload={loadModels} jobs={jobs} track={track} guard={guard} cap={route.cap} dev={dev} onDev={setDev} />}
@@ -660,6 +666,7 @@ function Library(props: {
   onTags: (a: Asset) => void;
   onRestored: () => void;
   onMove: (ids: string[], folder: string) => Promise<unknown>;
+  guard: (p: Promise<unknown>) => Promise<void>;
 }) {
   const [start] = useState(() => ({ ...libView, ...libFromHash(location.hash) }));
   const [q, setQ] = useState(start.q);
@@ -738,6 +745,7 @@ function Library(props: {
     <div className="page" ref={page} onScroll={(e) => (libView.top = e.currentTarget.scrollTop)}>
       <div className="head">
         <h1>Library</h1>
+        <LibrarySwitch guard={props.guard} />
         {total.length > 0 && (
           <a className="button primary" href="#/new">
             New asset
@@ -5885,6 +5893,60 @@ function ModelsFolder(props: {
   );
 }
 
+// several library folders, one open at a time: open one (new, empty or a library already), forget one (its files stay)
+function LibraryFolders(props: { guard: (p: Promise<unknown>) => Promise<void> }) {
+  const [l, setL] = useState<Libraries | null>(null);
+  const [path, setPath] = useState("");
+  useEffect(() => {
+    api.libraries().then(setL, () => undefined);
+  }, []);
+  if (!l) return <p className="muted">Checking…</p>;
+  if (l.source === "env") return <p className="muted">The library is in {l.path} (set by EFFIGY_LIBRARY).</p>;
+  const open = (p: string) => props.guard(api.openLibrary(p).then((x) => (setL(x), setPath(""))));
+  return (
+    <div className="folder">
+      <div className="folder-list" role="radiogroup" aria-label="Library folder">
+        {l.folders.map((f) => (
+          <label key={f.path} className="folder-option">
+            <input type="radio" name="library-folder" checked={f.path === l.path} disabled={!f.exists} onChange={() => open(f.path)} />
+            <code>{f.path}</code>
+            <span className="muted">{f.path === l.path ? "open · " : ""}{f.exists ? `${f.assets} asset${f.assets === 1 ? "" : "s"}` : "not found"}</span>
+            {f.path !== l.path && (
+              <button onClick={(e) => (e.preventDefault(), props.guard(api.forgetLibrary(f.path).then(setL)))} title="Take it off the list; its files stay">
+                Forget
+              </button>
+            )}
+          </label>
+        ))}
+      </div>
+      <div className="row">
+        <input aria-label="Another library folder" placeholder="Another folder, e.g. E:\Effigy-library" value={path} onChange={(e) => setPath(e.target.value)} />
+        <button disabled={!path.trim()} onClick={() => open(path)}>
+          Open this library
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// the Library page's switcher: shown once there is more than one library folder
+function LibrarySwitch(props: { guard: (p: Promise<unknown>) => Promise<void> }) {
+  const [l, setL] = useState<Libraries | null>(null);
+  useEffect(() => {
+    api.libraries().then(setL, () => undefined);
+  }, []);
+  if (!l || l.folders.length < 2) return null;
+  return (
+    <select aria-label="Library folder" value={l.path} onChange={(e) => props.guard(api.openLibrary(e.target.value).then((x) => (setL(x), (location.hash = "#/library"))))}>
+      {l.folders.map((f) => (
+        <option key={f.path} value={f.path} disabled={!f.exists}>
+          {f.path} ({f.exists ? f.assets : "not found"})
+        </option>
+      ))}
+    </select>
+  );
+}
+
 // M35c: the guided first run: the computer, the models folder, what you want to make, the Hugging Face login, one install queue
 const LEVEL_DOT = { ok: "ok", warn: "busy", bad: "bad" };
 const took = (bytes: number, mbit: number) => {
@@ -6282,6 +6344,9 @@ function Setup(props: {
       {busy && <p className="muted">You can follow the install in the activity bar below. Other installs you start wait their turn.</p>}
       <h2>Where the models are</h2>
       <ModelsFolder jobs={props.jobs} track={props.track} guard={props.guard} />
+      <h2>Library folders</h2>
+      <p className="muted">Keep assets in several folders and open one at a time. Thumbnails and turntables are saved with each library.</p>
+      <LibraryFolders guard={props.guard} />
       <Space reload={props.reload} />
       <h2>Tools</h2>
       <p className="muted">Other programs the app can work with.</p>

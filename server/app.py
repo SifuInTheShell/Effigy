@@ -26,6 +26,7 @@ from server import (
     hf,
     install,
     jobs,
+    libraries,
     library,
     look,
     machine,
@@ -414,6 +415,24 @@ def models_folder():
 @app.post("/api/setup/folder")
 def choose_models_folder(body: Folder):
     return machine.choose_folder(body.path)
+
+
+@app.get("/api/libraries")
+def library_folders():
+    """The open library folder and every one on the list (several libraries, one open at a time)."""
+    return libraries.folders()
+
+
+@app.post("/api/libraries")
+def open_library(body: Folder):
+    """Open a folder as the library (new, empty or a library already); added to the list."""
+    return libraries.open_folder(body.path)
+
+
+@app.post("/api/libraries/forget")
+def forget_library(body: Folder):
+    """Take a folder off the list; its files stay."""
+    return libraries.forget(body.path)
 
 
 class Port(BaseModel):
