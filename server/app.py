@@ -360,7 +360,7 @@ def clips(template: str = "mixamo52"):
 
     if template != HUMAN and template not in TEMPLATES:
         raise ApiError(404, "not_found", f"no skeleton template {template!r}")
-    return catalogue(template)
+    return catalogue(template, settings.models_root() / "clips" / "mesh2motion")
 
 
 @app.get("/api/steps")
