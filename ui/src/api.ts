@@ -28,6 +28,7 @@ export type Asset = {
   licenses?: string[];
   restricted?: boolean;
   imported?: boolean;
+  origin?: { library?: string; source_key?: string; license?: string; restricted?: boolean; license_set?: string }; // a batch import's
   folder?: string; // the library folder it is filed in (one at most)
   kind?: string; // "2d" for a 2D asset (research 15, the 2D contract); absent = a 3D asset
 };

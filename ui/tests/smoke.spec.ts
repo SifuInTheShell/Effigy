@@ -2413,6 +2413,53 @@ test("Unsaved edits are guarded: Close, a link and a version switch ask first; a
   expect(dialogs).toHaveLength(4);
 });
 
+test("Licences: a batch-imported asset's licence is set from its open page, Other licence… with the owner's terms", async ({ page }) => {
+  await mockAsset(page, "mock_lic", [{ version: "010_upload", step: "upload", parent: null, outputs: { mesh: "mesh.glb" } }], {
+    origin: { library: "kit", source_key: "hero.glb", license: "", restricted: true },
+    restricted: true,
+  });
+  let sent: any = null;
+  await page.route("**/api/assets/license", (r) => ((sent = r.request().postDataJSON()), r.fulfill({ json: { changed: ["mock_lic"], refused: [] } })));
+  await page.goto("/#/asset/mock_lic?version=010_upload");
+  await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
+  await page.getByRole("button", { name: "Licences" }).click();
+  const lic = page.getByRole("region", { name: "Licences" });
+  await expect(lic).toContainText("Imported from kit: licence unknown.");
+  const set = lic.getByRole("button", { name: "Set licence" });
+  await expect(set).toBeDisabled(); // nothing changed yet
+  await lic.getByLabel("Licence of this asset", { exact: true }).selectOption("*");
+  await lic.getByLabel("Licence of this asset: other licence").fill("Bought from the artist, commercial use");
+  await set.click();
+  await expect(lic).toContainText("Licence set: no longer restricted.");
+  expect(sent).toEqual({ ids: ["mock_lic"], license: "Bought from the artist, commercial use" });
+  await lic.screenshot({ path: test.info().outputPath("licence-panel.png") });
+});
+
+test("Licences: a licence the owner set shows on the card and the open page, not 'does not know'", async ({ page }) => {
+  await mockAsset(page, "mock_own", [{ version: "010_upload", step: "upload", parent: null, outputs: { mesh: "mesh.glb" } }], {
+    origin: { library: "parkour", license: "own", restricted: false, license_set: "2026-11-13T10:41:22Z" },
+    imported: true,
+  });
+  await page.goto("/#/library");
+  await expect(page.locator(".card", { hasText: "lantern" }).locator(".chip", { hasText: "My own work" })).toBeVisible();
+  await page.goto("/#/asset/mock_own?version=010_upload");
+  await page.getByRole("button", { name: "Licences" }).click();
+  const lic = page.getByRole("region", { name: "Licences" });
+  await expect(lic).toContainText("Imported from parkour: My own work (set by you).");
+  await expect(lic).not.toContainText("does not know");
+});
+
+test("Licences: an animation made with a restricted clip pack points to Setup's clearance", async ({ page }) => {
+  await mockAsset(page, "mock_packlic", [
+    { version: "010_anim", step: "anim", parent: null, outputs: { rigged: "rigged_anim.glb", clips: "clips.json" }, metrics: { clip_packs: [{ name: "clip-pack/ref", commercial: false }] } },
+  ]);
+  await page.goto("/#/asset/mock_packlic?version=010_anim");
+  await page.getByRole("button", { name: "Licences" }).click();
+  const lic = page.getByRole("region", { name: "Licences" });
+  await expect(lic.getByRole("link", { name: "Setup → Clip packs" })).toHaveAttribute("href", "#/setup");
+  await expect(lic.getByRole("button", { name: "Set licence" })).toHaveCount(0); // not an import: nothing to set here
+});
+
 test("Licences has its own column; History is docked beside the view, Escape closes it from anywhere, focus returns (UX-03, UX-08)", async ({ page }) => {
   await mockAsset(page, "mock_side", [
     { version: "010_upload", step: "upload", parent: null, outputs: { mesh: "mesh.glb" } },

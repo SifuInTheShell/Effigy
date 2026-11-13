@@ -116,7 +116,7 @@ The **Library** page shows every asset as a card: its picture (a hover plays a t
 versions it has and when it last changed. Chips on a card:
 
 - **Restricted**: a part of it is not cleared for commercial use, so it cannot be exported.
-- **Your file**: you imported it; Effigy does not know its licence.
+- **Your file**: you imported it; Effigy does not know its licence. Once you set one, the card shows it instead.
 - **Credit**: a model it used asks for a line in your game's credits (hover to read it).
 
 ### Finding assets
@@ -250,7 +250,11 @@ the History.
 
 **Licences** lists every component the shown version was made with, its licence and any credit line it asks for.
 **Your file** means Effigy does not know an imported file's licence: it is yours to check. **Restricted** means a
-component is not cleared for commercial use, so the version cannot be exported.
+component is not cleared for commercial use, so the version cannot be exported. For a batch-imported asset,
+**Licence of this asset** shows its licence and changes it: **My own work**, CC0, MIT, Apache-2.0, **Other licence…**
+with your own words, or **Unknown (restricted)**, then **Set licence** (as **Set licence…** on the Library page does for
+several at once). The card then shows that licence instead of **Your file**. An animation made with a restricted clip
+pack points to **Setup → Clip packs**, where the pack is cleared.
 
 ### Run any step (developer option)
 
