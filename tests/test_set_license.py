@@ -15,9 +15,11 @@ def test_set_license(client, tmp_path):  # noqa: F811
     manifest = src / "manifest.json"
     doc = {"schema": "effigy-import/1", "items": [{"file": "hero.glb"}]}
     manifest.write_text(json.dumps(doc), encoding="utf-8")
-    finish(client, client.post("/api/import/batch", json={"source": str(manifest)}).json()["batch_id"])
+    finish(
+        client, client.post("/api/import/batch", json={"source": str(manifest)}).json()["batch_id"]
+    )
     hero = client.get("/api/assets").json()[0]["id"]
-    flags = lambda: [m["restricted"] for m in client.get(f"/api/assets/{hero}").json()["versions"]]  # noqa: E731
+    flags = lambda: [m["restricted"] for m in client.get(f"/api/assets/{hero}").json()["versions"]]
     assert flags() == [True, True]
 
     plain = library.create_asset("plain")["id"]
@@ -29,11 +31,20 @@ def test_set_license(client, tmp_path):  # noqa: F811
 
     # a changed file re-imports with the licence the user set (the manifest names none)
     (src / "hero.glb").write_bytes(GLB.read_bytes() + b"\0\0\0\0")
-    finish(client, client.post("/api/import/batch", json={"source": str(manifest)}).json()["batch_id"])
+    finish(
+        client, client.post("/api/import/batch", json={"source": str(manifest)}).json()["batch_id"]
+    )
     assert flags() == [False, False, False, False]
 
-    assert client.post("/api/assets/license", json={"ids": [hero], "license": "GPL"}).json()["refused"]
+    # an unknown licence again, then the owner's own words for one they got
     client.post("/api/assets/license", json={"ids": [hero], "license": ""})
+    assert all(flags())
+    terms = "  Bought from the artist, commercial use  "
+    r = client.post("/api/assets/license", json={"ids": [hero], "license": terms}).json()
+    assert r["changed"] == [hero]
+    assert not any(flags())
+    assert client.get(f"/api/assets/{hero}").json()["asset"]["origin"]["license"] == terms.strip()
+    client.post("/api/assets/license", json={"ids": [hero], "license": " "})  # blank: unknown
     assert all(flags())
 
     # a Hunyuan version keeps the asset restricted

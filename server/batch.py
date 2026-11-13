@@ -156,7 +156,8 @@ def _import(it: dict, b: dict) -> None:
         asset = library.get_asset(asset_id)["asset"]
         kept = asset.get("tags", [])
         was = asset.get("origin", {})
-        if not it["license"] and was.get("license_set"):  # the licence the user set, unless the item names one
+        # the licence the user set, unless the item names one
+        if not it["license"] and was.get("license_set"):
             origin |= {k: was[k] for k in ("license", "restricted", "license_set")}
             it["restricted"] = was["restricted"]
     else:
@@ -298,7 +299,9 @@ def _mixed(asset_id: str, m: dict) -> str | None:
     p = m.get("params", {})
     if m["step"] == "textures" and p.get("source_asset") not in (None, "", asset_id):
         try:
-            other = library._read(library.version_dir(p["source_asset"], str(p.get("source_version"))) / "meta.json")
+            other = library._read(
+                library.version_dir(p["source_asset"], str(p.get("source_version"))) / "meta.json"
+            )
         except ApiError:
             return f"{m['version']} took a material from {p['source_asset']}, which is gone"
         if other.get("restricted"):
@@ -309,20 +312,29 @@ def _mixed(asset_id: str, m: dict) -> str | None:
 
 
 def set_license(asset_id: str, license: str) -> dict:
-    """The user states an imported asset's licence: one of CLEAN lifts its restriction from every version, "" (unknown)
-    puts it back on every version. Refused for an asset that holds a restricted source of another kind (`_mixed`):
-    Hunyuan outputs stay restricted (PLAN §6, IMPLEMENTATION MX1)."""
-    if license and license not in CLEAN:
-        raise ApiError(400, "bad_params", f"license: one of {sorted(CLEAN)} or \"\" (unknown, restricted)")
+    """The user states an imported asset's licence: one of CLEAN, or their own words for another (bought, a written
+    permission, a custom licence), lifts its restriction from every version; "" (unknown) puts it back on every
+    version. Refused for an asset that holds a restricted source of another kind (`_mixed`): Hunyuan outputs stay
+    restricted (PLAN §6, IMPLEMENTATION MX1)."""
+    license = license.strip()[:300]
     origin = library.get_asset(asset_id)["asset"].get("origin")
     if not origin:
-        raise ApiError(400, "not_imported", f"{asset_id} was not batch-imported: it has no licence to set")
-    restricted = license not in CLEAN
+        raise ApiError(
+            400, "not_imported", f"{asset_id} was not batch-imported: it has no licence to set"
+        )
+    restricted = not license
     versions = library.versions(asset_id)
-    if not restricted and (why := next(filter(None, (_mixed(asset_id, m) for m in versions)), None)):
+    if not restricted and (
+        why := next(filter(None, (_mixed(asset_id, m) for m in versions)), None)
+    ):
         raise ApiError(409, "restricted", f"{asset_id} stays restricted: {why}")
-    if any(j.asset_id == asset_id and j.status in ("queued", "running") for j in list(jobs.JOBS.values())):
-        raise ApiError(409, "busy", f"a job is running on {asset_id}; set the licence after it ends")
+    if any(
+        j.asset_id == asset_id and j.status in ("queued", "running")
+        for j in list(jobs.JOBS.values())
+    ):
+        raise ApiError(
+            409, "busy", f"a job is running on {asset_id}; set the licence after it ends"
+        )
     with library._meta:
         for m in versions:
             path = library.version_dir(asset_id, m["version"]) / "meta.json"
@@ -331,5 +343,6 @@ def set_license(asset_id: str, license: str) -> dict:
                 library._write(path, meta | {"restricted": restricted})
     set_at = library._now()
     return library.update_asset(
-        asset_id, origin=origin | {"license": license, "restricted": restricted, "license_set": set_at}
+        asset_id,
+        origin=origin | {"license": license, "restricted": restricted, "license_set": set_at},
     )

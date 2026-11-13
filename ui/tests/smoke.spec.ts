@@ -2014,11 +2014,16 @@ test("Library: Set licence on picked imports lifts their Restricted chip and say
   await page.getByRole("button", { name: "Select assets" }).click();
   for (const n of ["hero", "monster"]) await page.getByLabel(`Select ${n}`).check();
   await page.getByRole("button", { name: "Set licence… (2)" }).click();
-  await page.getByLabel("Licence").selectOption("CC0-1.0");
+  await page.getByLabel("Licence", { exact: true }).selectOption("CC0-1.0");
   await page.getByRole("button", { name: "Set licence", exact: true }).click();
   await expect(page.getByText("1 changed. 1 not: monster stays restricted")).toBeVisible();
   expect(sent).toEqual({ ids: ["hero", "monster"], license: "CC0-1.0" });
-  await page.screenshot({ path: test.info().outputPath("licence.png") });
+  // a licence of the owner's own: Other licence… and its terms
+  for (const n of ["hero", "monster"]) await page.getByLabel(`Select ${n}`).check();
+  await page.getByLabel("Licence", { exact: true }).selectOption("*");
+  await page.getByLabel("Licence: other licence").fill("Bought from the artist, commercial use");
+  await page.getByRole("button", { name: "Set licence", exact: true }).click();
+  await expect.poll(() => sent).toEqual({ ids: ["hero", "monster"], license: "Bought from the artist, commercial use" });
 });
 
 test("Library folders: a folder inside a folder, and Remove folder moves its contents up", async ({ page }) => {

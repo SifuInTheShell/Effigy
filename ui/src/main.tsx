@@ -14,6 +14,7 @@ import { Compare } from "./Compare";
 import { ANIM_TYPES, ImportInfo, ImportPage, OriginalFile } from "./Import";
 import { Transport, useTransportKeys } from "./anim/Transport";
 import { onEvent } from "./events";
+import { LicencePicker } from "./licence";
 import { leave, unsaved, useBusy, useHistory, useUnsaved } from "./hooks";
 import { VIEW_MODES, Viewer, type Joint, type Moved, type SkeletonEdit, type Stats, type Vec3, type ViewMode } from "./viewer/Viewer";
 import {
@@ -864,16 +865,10 @@ function Library(props: {
             );
           }}
         >
-          <label>
-            Licence of {chosen.length} imported {chosen.length === 1 ? "asset" : "assets"}{" "}
-            <select aria-label="Licence" value={licence} onChange={(e) => setLicence(e.target.value)}>
-              <option value="own">My own work</option>
-              <option value="CC0-1.0">CC0</option>
-              <option value="MIT">MIT</option>
-              <option value="Apache-2.0">Apache-2.0</option>
-              <option value="">Unknown (restricted)</option>
-            </select>
-          </label>
+          <span>
+            Licence of {chosen.length} imported {chosen.length === 1 ? "asset" : "assets"}
+          </span>
+          <LicencePicker label="Licence" none="Unknown (restricted)" value={licence} onChange={setLicence} />
           <button className="primary" type="submit" disabled={!chosen.length}>
             Set licence
           </button>
@@ -881,7 +876,7 @@ function Library(props: {
             Close
           </button>
           {licenceNote && <span className="muted">{licenceNote}</span>}
-          <span className="muted">A known licence lifts the restriction from every version; Hunyuan outputs stay restricted.</span>
+          <span className="muted">A licence, yours or one you got, lifts the restriction from every version; Hunyuan outputs stay restricted.</span>
         </form>
       )}
       {moving && picking && (
