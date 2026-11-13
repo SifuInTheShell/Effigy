@@ -20,11 +20,11 @@ const upload = async (request: any, name: string) => {
 const meta = (version: string, step: string, parent: string | null, outputs: Record<string, string>) => ({
   version, step, parent, outputs, params: {}, created: "", metrics: {}, provenance: "step", restricted: false,
 });
-// a skinned column (version 020) and the animated one (030) made from it
-async function rigged(page: Page) {
+// a skinned column (version 020) and the animated one (030) made from it; skin "import_model": a rig that came with the file
+async function rigged(page: Page, skin = "rig_skin") {
   const versions = [
     meta("010_upload", "upload", null, { mesh: "mesh.glb" }),
-    meta("020_rig_skin", "rig_skin", "010_upload", { rigged: "rigged.glb", skeleton: "skeleton.json", qa: "qa.json" }),
+    meta("020_rig_skin", skin, "010_upload", { rigged: "rigged.glb", skeleton: "skeleton.json", qa: "qa.json" }),
     meta("030_anim", "anim", "020_rig_skin", { rigged_anim: "rigged_anim.glb", clips: "clips.json", skeleton: "skeleton.json" }),
   ];
   await page.route("**/api/assets/m71_rig", (r) => r.fulfill({ json: { asset: { id: "m71_rig", name: "column", created: "" }, versions } }));
@@ -86,6 +86,17 @@ test("Unavailable tools explain their requirements and open an existing suitable
   await expect(page.getByRole("tab", { name: "Edit animation", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(requirement).toHaveCount(0);
   expect(runs).toBe(0);
+});
+
+test("An imported rig: the skeleton tools say the file brought the skeleton, never to fit one", async ({ page }) => {
+  await rigged(page, "import_model");
+  await page.goto("/#/asset/m71_rig?version=030_anim");
+  const requirement = page.getByRole("region", { name: "Tool requirements" });
+  for (const name of ["Fit skeleton", "Edit skeleton", "Attach to skeleton"]) {
+    await page.getByRole("tab", { name }).click();
+    await expect(requirement).toContainText("already has its skeleton and skin weights, from the imported file");
+    await expect(requirement).not.toContainText("Use Fit skeleton");
+  }
 });
 
 test("History keeps version names readable and opens earlier and later versions with mouse and keyboard", async ({ page }) => {

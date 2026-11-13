@@ -431,7 +431,10 @@ export function recommended(c: ToolCtx): string {
 export const tabOfTool = (tasks: Task[], id: string) => tasks.findIndex((t) => t.id === TOOLS.find((x) => x.id === id)?.task);
 
 /** How to get the input for a tool; shown when its tab is opened on an unsuitable version. */
-export function toolHelp(tool: Tool, has?: Meta): string {
+export function toolHelp(tool: Tool, has?: Meta, imported?: boolean): string {
+  // a skeleton that came with the file: the skeleton tools are for the ones Effigy fits, nothing is missing
+  if (imported && ["fit", "skeleton", "attach"].includes(tool.id))
+    return `This model already has its skeleton and skin weights, from the imported file; you can animate it as it is. Fit skeleton, Edit skeleton and Attach to skeleton are for a skeleton Effigy fits itself. To change the imported bones, change them where the model was made and import it again${has ? `, or open "${label(has)}" below to fit a new skeleton in place of this one` : ""}.`;
   // the asset already has a version this tool takes (an imported rig is a skinned model): point there, not at making one
   if (has && ["clips", "text", "video", "file"].includes(tool.id))
     return `Animations are added to the skinned model: "${label(has)}" (${has.version.slice(0, 3)}) is one, so no skeleton needs fitting. Open it with the button below and add them there.`;

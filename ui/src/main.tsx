@@ -1890,7 +1890,7 @@ function Workspace(props: {
   const body = !available && tool ? (
     <section className="tool-requirements note" role="region" aria-label="Tool requirements">
       <p><strong>Needs {tool.needs}.</strong></p>
-      <p>{toolHelp(tool, suitable)}</p>
+      <p>{toolHelp(tool, suitable, ancestors(versions, v).some((a) => a.step === "import_model" && !!a.outputs.rigged))}</p>
       {suitable && <button className="primary" onClick={() => { setUi({ v: suitable.version, tab, tool: tool.id }); props.pick(suitable.version); }}>Open {label(suitable)} {suitable.version.slice(0, 3)}</button>}
       <button onClick={() => setSide("history")}>Choose a version in History</button>
     </section>
