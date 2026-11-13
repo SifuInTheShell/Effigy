@@ -60,6 +60,11 @@ test("The strip follows the opened version: a skinned model lands on Ready-made 
   await expect(page.locator(".stages [aria-current=step]")).toContainText("Character");
   await expect(page.getByRole("tab", { name: "Edit animation" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("tab", { name: "Ready-made clips" })).toHaveAttribute("data-unavailable", "true");
+  // the asset has a skinned model already: the hint points there, never at fitting a skeleton
+  await page.getByRole("tab", { name: "Ready-made clips" }).click();
+  const requirement = page.getByRole("region", { name: "Tool requirements" });
+  await expect(requirement).toContainText("is one, so no skeleton needs fitting");
+  await expect(requirement).not.toContainText("use Fit skeleton");
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/animated.png` });
 });
 

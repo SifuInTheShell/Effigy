@@ -1890,7 +1890,7 @@ function Workspace(props: {
   const body = !available && tool ? (
     <section className="tool-requirements note" role="region" aria-label="Tool requirements">
       <p><strong>Needs {tool.needs}.</strong></p>
-      <p>{toolHelp(tool)}</p>
+      <p>{toolHelp(tool, suitable)}</p>
       {suitable && <button className="primary" onClick={() => { setUi({ v: suitable.version, tab, tool: tool.id }); props.pick(suitable.version); }}>Open {label(suitable)} {suitable.version.slice(0, 3)}</button>}
       <button onClick={() => setSide("history")}>Choose a version in History</button>
     </section>

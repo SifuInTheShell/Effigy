@@ -431,7 +431,10 @@ export function recommended(c: ToolCtx): string {
 export const tabOfTool = (tasks: Task[], id: string) => tasks.findIndex((t) => t.id === TOOLS.find((x) => x.id === id)?.task);
 
 /** How to get the input for a tool; shown when its tab is opened on an unsuitable version. */
-export function toolHelp(tool: Tool): string {
+export function toolHelp(tool: Tool, has?: Meta): string {
+  // the asset already has a version this tool takes (an imported rig is a skinned model): point there, not at making one
+  if (has && ["clips", "text", "video", "file"].includes(tool.id))
+    return `Animations are added to the skinned model: "${label(has)}" (${has.version.slice(0, 3)}) is one, so no skeleton needs fitting. Open it with the button below and add them there.`;
   if (["editanim", "connect"].includes(tool.id)) return "Add an animation in Character using Ready-made clips, From a sentence, From a video or From a file. You can also open an animated version in History.";
   if (["clips", "text", "video", "file"].includes(tool.id)) return "Choose a skinned model in History. To make one, use Fit skeleton, then Attach to skeleton in Character. To add more clips to an animated model, return to its skinned version first.";
   if (["skeleton", "attach"].includes(tool.id)) return "Use Fit skeleton in Character first, then open its Skeleton version in History.";
