@@ -364,6 +364,25 @@ def clips(template: str = "mixamo52"):
     return catalogue(template, settings.models_root() / "clips" / "mesh2motion")
 
 
+class Licence(BaseModel):
+    ids: list[str]
+    license: str  # one of batch.CLEAN, or "" (unknown: restricted)
+
+
+@app.post("/api/assets/license")
+def set_license(body: Licence):
+    """State the licence of batch-imported assets: a clean one lifts their restriction, "" puts it back. Each asset
+    on its own: `changed` ids, `refused` [{id, message}] (Hunyuan outputs and other restricted sources stay)."""
+    changed, refused = [], []
+    for asset_id in body.ids:
+        try:
+            batch.set_license(asset_id, body.license)
+            changed.append(asset_id)
+        except ApiError as e:
+            refused.append({"id": asset_id, "message": str(e)})
+    return {"changed": changed, "refused": refused}
+
+
 @app.get("/api/steps")
 def steps():
     """Runnable steps (steps/*.py, test steps excluded) with their named presets."""

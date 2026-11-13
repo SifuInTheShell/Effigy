@@ -259,7 +259,7 @@ numbers went in tens). `asset.json` may carry `archived`, (M42) `tags` (a list o
 picks its stage list by it, `POST /api/assets` and the MCP `create_asset`/`import_file` set it, steps never read
 it), (batch import, research 18) `origin` `{"library", "source_key", "sha256"?, "license", "restricted"}` (where a
 batch-imported asset came from; `sha256` of the file once its import_model is done; a rerun matches on library and
-source_key), (library folders, 2026-11-10) `folder` (the one library folder it is filed in, a path: up to 8 names joined by `/`, each 1-64 printable
+source_key; (2026-11-13) `license_set`, when the user stated the licence afterwards: a rerun keeps it unless the item names one), (library folders, 2026-11-10) `folder` (the one library folder it is filed in, a path: up to 8 names joined by `/`, each 1-64 printable
 characters; absent = none; a folder exists while an asset is in it); `meta.json` may carry `starred` and `label` (M28, the user's marks; steps
 never read them)
 (steps write outputs; the backend writes `meta.json` from the step's `RESULT`). Version numbers are
@@ -298,6 +298,9 @@ All under `http://127.0.0.1:8000` (the port: Setup, App address, or EFFIGY_PORT;
 | GET | `/api/assets` | → `[asset.json…]`, each with `versions` (count) and `updated` (M28) and (M42) `licenses` (the union of its versions' `meta.licenses`), `restricted` (any version restricted), `imported` (any `import_model`, or an `upload` with a `mesh`) |
 | POST | `/api/assets` | `{"name", "brief"?}` → `asset.json` |
 | GET | `/api/assets/{id}` | → `{"asset", "versions": [meta.json…]}` |
+| POST | `/api/assets/license` | (2026-11-13) `{"ids", "license"}`: the licence of batch-imported assets (picked: `own`, `CC0-1.0`, `MIT`, `Apache-2.0`; or the owner's own text for another, a bought or custom licence, up to 300 characters; `""` unknown) sets `meta.restricted` on every version (false for any licence given) and `origin.license`/`restricted`/`license_set` → `{"changed": [ids], "refused": [{"id", "message"}]}`; refused: not imported, a job running on it, and, to lift it, a Hunyuan version, a restricted material from another asset or a Blender pull of several versions |
+| GET/POST | `/api/libraries` | (2026-11-13) the open library folder, `source` (env/settings/default) and the list `[{path, exists, assets}]`; POST `{"path"}` opens one (new, empty or a library already; 409 `busy` while a job is queued or running, `not_empty`, `env`), sends a `library` event |
+| POST | `/api/libraries/forget` | `{"path"}`: off the list, its files stay; 409 for the open one |
 | PUT | `/api/assets/{id}/upload/{name}` | raw file body (`.png/.jpg/.jpeg/.webp/.glb`; `.mp4/.mov/.webm` since M34; `.gltf/.fbx/.obj/.stl/.ply/.usd/.usda/.usdc/.usdz/.zip` since M39), at most 1 GB counted while streaming to disk → `meta.json` of a new root `NNN_upload`; 400 `bad_request` (extension), `bad_zip` (unreadable, encrypted, unsafe or over a limit; M39), `no_model` (a zip without a model file); 413 `too_large` |
 | GET | `/api/steps` | → `{step: {preset_name: params}}` for every `steps/<name>.py` (presets from `server/presets.py`) |
 | PATCH | `/api/assets/{id}` | `{"name"?, "archived"?, "tags"?, "folder"?}` → the asset (M28; `tags` M42: replaces the list; each trimmed, 1–32 characters, no comma, at most 20, repeats (ignoring case) dropped, else 400 `bad_params`; `folder` (2026-11-10; a path since 2026-11-12): up to 8 `/`-separated names, each trimmed, 1-64 printable characters, `""` takes the asset out of its folder) |

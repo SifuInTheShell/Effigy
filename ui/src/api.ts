@@ -165,6 +165,8 @@ export const api = {
   machine: () => call<Check[]>("GET", "/api/setup/machine"),
   folder: () => call<Folder>("GET", "/api/setup/folder"),
   libraries: () => call<Libraries>("GET", "/api/libraries"),
+  setLicense: (ids: string[], license: string) =>
+    call<{ changed: string[]; refused: { id: string; message: string }[] }>("POST", "/api/assets/license", { ids, license }),
   openLibrary: (path: string) => call<Libraries>("POST", "/api/libraries", { path }),
   forgetLibrary: (path: string) => call<Libraries>("POST", "/api/libraries/forget", { path }),
   port: () => call<PortInfo>("GET", "/api/setup/port"),

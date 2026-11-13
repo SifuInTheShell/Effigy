@@ -1999,6 +1999,33 @@ test("Library folders: New folder takes the picked assets in, Move out takes the
   await expect(page.getByLabel("Select gamma")).toBeVisible(); // the folder is gone: back at the top level
 });
 
+test("Library: Set licence on picked imports lifts their Restricted chip and says which were refused", async ({ page }) => {
+  await mockLibrary(page);
+  const at = "2026-10-09T10:00:00Z";
+  let assets: any[] = ["hero", "monster"].map((name) => ({ id: name, name, created: at, updated: at, versions: 2, tags: [], licenses: [], restricted: true, origin: {} }));
+  await page.route("**/api/assets", (r) => r.fulfill({ json: assets }));
+  let sent: any = null;
+  await page.route("**/api/assets/license", (r) => {
+    sent = r.request().postDataJSON();
+    assets = assets.map((a) => (a.id === "hero" ? { ...a, restricted: false } : a));
+    return r.fulfill({ json: { changed: ["hero"], refused: [{ id: "monster", message: "monster stays restricted: 002_hunyuan came from hunyuan (experimental engine)" }] } });
+  });
+  await page.goto("/#/library");
+  await page.getByRole("button", { name: "Select assets" }).click();
+  for (const n of ["hero", "monster"]) await page.getByLabel(`Select ${n}`).check();
+  await page.getByRole("button", { name: "Set licence… (2)" }).click();
+  await page.getByLabel("Licence", { exact: true }).selectOption("CC0-1.0");
+  await page.getByRole("button", { name: "Set licence", exact: true }).click();
+  await expect(page.getByText("1 changed. 1 not: monster stays restricted")).toBeVisible();
+  expect(sent).toEqual({ ids: ["hero", "monster"], license: "CC0-1.0" });
+  // a licence of the owner's own: Other licence… and its terms
+  for (const n of ["hero", "monster"]) await page.getByLabel(`Select ${n}`).check();
+  await page.getByLabel("Licence", { exact: true }).selectOption("*");
+  await page.getByLabel("Licence: other licence").fill("Bought from the artist, commercial use");
+  await page.getByRole("button", { name: "Set licence", exact: true }).click();
+  await expect.poll(() => sent).toEqual({ ids: ["hero", "monster"], license: "Bought from the artist, commercial use" });
+});
+
 test("Library folders: a folder inside a folder, and Remove folder moves its contents up", async ({ page }) => {
   await mockLibrary(page);
   const at = "2026-10-09T10:00:00Z";
