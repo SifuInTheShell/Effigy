@@ -223,7 +223,10 @@ def test_anim_takes_a_motion_version_of_the_asset_as_a_clip(tmp_path, monkeypatc
     (mo / "meta.json").write_text(
         json.dumps({"licenses": ["kimodo", "meta-llama/Meta-Llama-3-8B-Instruct"]})
     )
-    monkeypatch.setattr(anim, "catalogue", lambda: [{"name": "Walk", "file": "pack.glb"}])
+    clip = {"name": "Walk", "file": "mesh2motion/pack.glb", "pack": "mesh2motion"}
+    monkeypatch.setattr(
+        anim, "packs", lambda: [{"id": "mesh2motion", "restricted": False, "clips": [clip]}]
+    )
     seen = {}
 
     def fake_blender(op, inputs, outdir, params, timeout=None):

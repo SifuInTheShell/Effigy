@@ -3114,18 +3114,74 @@ test("2D Finish: check the sprites, export them for Godot 2D or Paper2D, the che
 test("Move sets: a fighter's ready-made set picks the pack's names it has; the fighting sentences fill the prompt", async ({ page }) => {
   await animMock(page, "mock_moves");
   await page.route("**/api/clips*", (r) =>
-    r.fulfill({ json: ["Idle_A", "Walk", "Jog", "Fighting Idle", "Punch_Cross", "Kick_Breach", "Death_A", "Sword_Regular_A", "Idle_Sword"].map((name) => ({ name, frames: 24, seconds: 1 })) }),
+    r.fulfill({ json: ["Idle_A", "Walk", "Jog", "Fighting Idle", "Punch_Cross", "Kick_Breach", "Death_A", "Sword_Regular_A", "Idle_Sword"].map((name) => ({ name, file: "mesh2motion/a.glb", pack: "mesh2motion" })) }),
+  );
+  const brawler = ["Fighting Idle", "Walk", "Jog", "Fighting Left Jab", "Punch_Cross", "Kick_Breach", "Death_A", "Victory"];
+  await page.route("**/api/clip-packs", (r) =>
+    r.fulfill({ json: [{ id: "mesh2motion", title: "Mesh2Motion", license: "CC0-1.0", restricted: false, credit: "", problems: [], move_sets: [{ id: "brawler", title: "Brawler (Double Dragon)", clips: brawler }] }] }),
   );
   await page.goto("/#/asset/mock_moves?version=020_rig_skin");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
   const set = page.getByLabel("Move set");
-  await expect(set.locator("option", { hasText: "Brawler (Double Dragon)" })).toContainText("6 animations"); // of its 20, the 6 this pack has
-  await set.selectOption("brawler");
+  await expect(set.locator("option", { hasText: "Brawler (Double Dragon)" })).toContainText("6 animations"); // the 6 this pack has
+  await set.selectOption("mesh2motion/brawler");
   await expect(page.getByRole("button", { name: "Add 6 animations" })).toBeVisible();
   await tool(page, "From a sentence");
   await page.getByRole("group", { name: "Fighting moves" }).getByRole("button", { name: "Roundhouse kick" }).click();
   await expect(page.getByLabel("Motion prompt")).toHaveValue(/roundhouse kick/);
   await expect(page.getByRole("spinbutton", { name: "Seconds" })).toHaveValue("2.5");
+});
+
+test("Clip packs: a restricted pack's move set is marked, fills the clip list and warns before Add", async ({ page }) => {
+  await animMock(page, "mock_packs");
+  const ours = ["Idle_A", "Walk", "Jog"].map((name) => ({ name, file: "mesh2motion/a.glb", pack: "mesh2motion" }));
+  const cop = ["Cop · Idle", "Cop · Walk"].map((name) => ({ name, file: "ref/cop.glb", pack: "ref" }));
+  await page.route("**/api/clips*", (r) => r.fulfill({ json: [...ours, ...cop] }));
+  await page.route("**/api/clip-packs", (r) =>
+    r.fulfill({
+      json: [
+        { id: "mesh2motion", title: "Mesh2Motion", license: "CC0-1.0", restricted: false, credit: "", problems: [], move_sets: [{ id: "basic", title: "Basic (idle, walk, jog)", clips: ["Idle_A", "Walk", "Jog"] }] },
+        { id: "ref", title: "Reference", license: "", restricted: true, credit: "personal reference use only", problems: [], move_sets: [{ id: "cop", title: "Patrol cop", clips: ["Cop · Idle", "Cop · Walk"] }] },
+      ],
+    }),
+  );
+  await page.goto("/#/asset/mock_packs?version=020_rig_skin");
+  await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
+  const set = page.getByLabel("Move set");
+  await expect(set.locator("optgroup[label='Reference (restricted)'] option")).toHaveText("Patrol cop: 2 animations");
+  await set.selectOption("ref/cop");
+  await expect(page.getByRole("button", { name: "Add 2 animations" })).toBeVisible();
+  await expect(page.getByLabel("Clips").locator("optgroup[label='Reference (restricted)'] option")).toHaveText(["✓ Cop · Idle", "✓ Cop · Walk"]);
+  await expect(page.locator(".note.warn", { hasText: "Reference is a restricted clip pack" })).toContainText("export refuses it");
+  await set.selectOption("mesh2motion/basic");
+  await expect(page.locator(".note.warn", { hasText: "restricted clip pack" })).toHaveCount(0);
+});
+
+test("Clip packs in Setup: a clearance lifts a restricted pack and says which versions stay restricted", async ({ page }) => {
+  const ref = { id: "ref", title: "Reference", license: "", restricted: true, credit: "", cleared: "", problems: [], move_sets: [] };
+  await page.route("**/api/clip-packs", (r) => r.fulfill({ json: [{ ...ref, id: "mesh2motion", title: "Mesh2Motion", license: "CC0-1.0", restricted: false }, ref] }));
+  let sent: any = null;
+  await page.route("**/api/clip-packs/ref/clearance", (r) => {
+    sent = r.request().postDataJSON();
+    return r.fulfill({
+      json: { pack: { ...ref, restricted: false, cleared: sent.license, license: sent.license }, lifted: ["hero/021_anim", "hero/022_anim_edit"], restricted: [], kept: [{ version: "hero/023_export", reason: "its files were written restricted: export it again" }] },
+    });
+  });
+  await page.goto("/#/setup");
+  const card = page.locator(".card", { hasText: "Reference" });
+  await expect(card).toContainText("Restricted: what you animate with it does not export");
+  await expect(page.getByLabel("Clearance for Mesh2Motion")).toHaveCount(0); // the built-in pack has nothing to clear
+  await page.getByLabel("Clearance for Reference", { exact: true }).selectOption("*"); // Other licence…
+  await page.getByLabel("Clearance for Reference: other licence").fill("Written permission from the studio");
+  await card.getByRole("button", { name: "Save clearance" }).click();
+  await expect(card).toContainText("Cleared: 2 versions in this library lifted. 1 stay restricted: hero/023_export (its files were written restricted");
+  await expect(card).toContainText("cleared: Written permission from the studio");
+  expect(sent).toEqual({ license: "Written permission from the studio" });
+  await expect(page.getByLabel("Clearance for Reference: other licence")).toHaveValue("Written permission from the studio");
+  await page.getByLabel("Clearance for Reference", { exact: true }).selectOption("MIT"); // a known one: no text field
+  await expect(page.getByLabel("Clearance for Reference: other licence")).toHaveCount(0);
+  await card.getByRole("button", { name: "Save clearance" }).click();
+  await expect.poll(() => sent).toEqual({ license: "MIT" });
 });
 
 test("A clip that never moves after the retarget is named on the animated model's panel", async ({ page }) => {

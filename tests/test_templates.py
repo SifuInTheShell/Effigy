@@ -13,7 +13,7 @@ from steps import _templates, anim, rig_fit, rig_skin
 from steps._print import _faces
 
 BLENDER = blender_exe()
-CLIPS = anim.PACK / "creatures" / "fox-animations.glb"
+CLIPS = anim.CLIPS / anim.BUILTIN / "creatures" / "fox-animations.glb"
 
 
 def animal(turn: float = 0, tail_up: bool = False, ears: float | None = None) -> trimesh.Trimesh:
@@ -106,7 +106,7 @@ def test_a_tail_held_up_higher_than_the_head_is_not_taken_for_the_head(turn):
 
 @pytest.mark.parametrize("turn", [30, 135, 323.5])
 def test_the_fit_turns_with_an_animal_standing_at_an_angle(turn):
-    """A three-quarter picture makes an animal that stands at an angle (the cat: 323.5Â°): the fit's yaw is that
+    """A three-quarter picture makes an animal that stands at an angle (the cat: 323.5Ã‚Â°): the fit's yaw is that
     turn, the head in front along it, the spine in the body."""
     m = animal(turn)
     bones, yaw = _templates.fit("fox", m.vertices, f=m.faces)
@@ -144,7 +144,7 @@ def test_the_limb_tracer_climbs_a_tail_held_up():
 
 
 def test_the_face_turns_with_the_ears():
-    """A head turned 30Â° off the body (the cat looks at the camera): the face turns with the ear posts' line,
+    """A head turned 30Ã‚Â° off the body (the cat looks at the camera): the face turns with the ear posts' line,
     the ear chains end on the post tops; a head without ears stays straight."""
     heading = lambda d: np.degrees(np.arctan2(d[0], d[2]))
     face = {}
@@ -183,7 +183,7 @@ def test_the_fit_puts_the_spine_in_the_body_and_the_tail_in_the_tail():
     bones, yaw = _templates.fit("fox", m.vertices, f=m.faces)
     assert yaw == 90
     at = {n: np.asarray(b["position"]) for n, b in bones.items()}
-    for n in ("Hips", "Spine_1", "Spine_2", "Spine_3"):  # the body: y 0.45â€“0.75
+    for n in ("Hips", "Spine_1", "Spine_2", "Spine_3"):  # the body: y 0.45Ã¢â‚¬â€œ0.75
         assert 0.45 < at[n][1] < 0.75, (n, at[n])
     assert (
         0.55 < at["Tail_Mid"][1] < 0.72 and at["Tail_Tip"][0] < -0.5
@@ -610,7 +610,7 @@ def test_the_bench_measures_a_fit():
     "name, clips", [("kaiju", 9), ("shark", 6), ("dragon", 4), ("spider", 9), ("snake", 7)]
 )
 def test_the_new_creatures_have_their_clips(name, clips):
-    if not (anim.PACK / "creatures" / f"{name}-animations.glb").is_file():
+    if not (anim.CLIPS / anim.BUILTIN / "creatures" / f"{name}-animations.glb").is_file():
         pytest.skip("no creature clips (python -m tools.download_models clips)")
     names = [c["name"] for c in anim.catalogue(name)]
     assert len(names) == clips and not any("rest" in n.lower() for n in names)
@@ -618,7 +618,7 @@ def test_the_new_creatures_have_their_clips(name, clips):
 
 @pytest.mark.skipif(not BLENDER.is_file(), reason="no Blender (EFFIGY_BLENDER / blender_install)")
 def test_a_kaiju_bakes_with_the_travel_scaled_from_its_lowest_joint(tmp_path, monkeypatch):
-    if not (anim.PACK / "creatures" / "kaiju-animations.glb").is_file():
+    if not (anim.CLIPS / anim.BUILTIN / "creatures" / "kaiju-animations.glb").is_file():
         pytest.skip("no creature clips")
     monkeypatch.setenv("EFFIGY_BLENDER", str(BLENDER))
     src = version(tmp_path, kaiju(0))
@@ -641,7 +641,7 @@ def test_a_kaiju_bakes_with_the_travel_scaled_from_its_lowest_joint(tmp_path, mo
 
 
 def snake(turn: float = 0) -> trimesh.Trimesh:
-    """A tube snake 2 m long lying on the floor in an S along +Z (x = 0.15 cos 2πz, straight at both ends), 10 cm
+    """A tube snake 2 m long lying on the floor in an S along +Z (x = 0.15 cos 2Ï€z, straight at both ends), 10 cm
     thick, its head (the last 15 cm, 16 cm thick) at +Z, turned `turn` degrees about Y."""
     pitch, lo = 0.01, np.array([-0.3, 0.0, -1.1])
     grid = np.zeros(np.ceil((np.array([0.3, 0.2, 1.1]) - lo) / pitch).astype(int), bool)

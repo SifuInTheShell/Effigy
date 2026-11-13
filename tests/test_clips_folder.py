@@ -16,6 +16,6 @@ def test_clips_come_from_the_chosen_models_folder(tmp_path, monkeypatch):
     monkeypatch.delenv("EFFIGY_MODELS", raising=False)
     settings.write(models=str(tmp_path / "F-models"))
     seen = []
-    monkeypatch.setattr(anim, "catalogue", lambda t, pack: seen.append(pack) or [])
+    monkeypatch.setattr(anim, "catalogue", lambda t, root: seen.append(root) or [])
     TestClient(app).get("/api/clips")
-    assert seen == [tmp_path / "F-models" / "clips" / "mesh2motion"]
+    assert seen == [tmp_path / "F-models" / "clips"]

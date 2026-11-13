@@ -23,6 +23,7 @@ from server import (
     agent,
     batch,
     blender_client,
+    clip_packs,
     hf,
     install,
     jobs,
@@ -354,14 +355,36 @@ def fit_check(asset_id: str, version: str, body: FitCheck):
 
 @app.get("/api/clips")
 def clips(template: str = "mixamo52"):
-    """The bundled animation clips (M21): names the anim step accepts, by pack file; a creature
-    template's own clips with ?template=fox (M36)."""
+    """The animation clips the anim step accepts (M21): {name, file, pack}, every clip pack's (models/clips/<pack>/);
+    a creature template's own clips with ?template=fox (M36)."""
     from steps._templates import HUMAN, TEMPLATES
     from steps.anim import catalogue
 
     if template != HUMAN and template not in TEMPLATES:
         raise ApiError(404, "not_found", f"no skeleton template {template!r}")
-    return catalogue(template, settings.models_root() / "clips" / "mesh2motion")
+    return catalogue(template, settings.models_root() / "clips")
+
+
+@app.get("/api/clip-packs")
+def list_clip_packs():
+    """The clip packs: {id, title, license, restricted, credit, move_sets: [{id, title, clips}], problems}; Mesh2Motion
+    first with its built-in move sets, a folder without a valid pack.json listed with its problem."""
+    from steps.anim import packs
+
+    return [
+        {k: v for k, v in p.items() if k != "clips"}
+        for p in packs(settings.models_root() / "clips")
+    ]
+
+
+class Clearance(BaseModel):
+    license: str  # the licence or permission the owner got, free text; "" puts the restriction back
+
+
+@app.post("/api/clip-packs/{pack}/clearance")
+def clip_pack_clearance(pack: str, body: Clearance):
+    """The owner's clearance for a restricted clip pack, applied to the open library's versions made with it."""
+    return clip_packs.set_clearance(pack, body.license)
 
 
 @app.get("/api/steps")

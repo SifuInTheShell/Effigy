@@ -4,7 +4,7 @@ import { NewTexture, TextureWorkspace } from "./textures/Workspace";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { api, fileUrl, waitJob, type Asset, type BlenderSetup, type PortInfo, type TrashEntry, type CopyResult, type Check, type Drive, type Env, type FitQuality, type Folder, type HfStatus, type Libraries, type JobStatus, type Licence, type Meta, type Model, type AgentSetup, type Preset, type Presets, type Storage, type StorageItem } from "./api";
+import { api, fileUrl, waitJob, type Asset, type BlenderSetup, type ClipPack, type PortInfo, type TrashEntry, type CopyResult, type Check, type Drive, type Env, type FitQuality, type Folder, type HfStatus, type Libraries, type JobStatus, type Licence, type Meta, type Model, type AgentSetup, type Preset, type Presets, type Storage, type StorageItem } from "./api";
 import { AnimEditor } from "./anim/Editor";
 import { Actions2D, PictureForm, SpritesForm, animatable, tools2D } from "./pixel/Panels";
 import { EditorCanvas, EditorPanel, usePixelEditor } from "./pixel/Editor";
@@ -14,6 +14,7 @@ import { Compare } from "./Compare";
 import { ANIM_TYPES, ImportInfo, ImportPage, OriginalFile } from "./Import";
 import { Transport, useTransportKeys } from "./anim/Transport";
 import { onEvent } from "./events";
+import { LicencePicker } from "./licence";
 import { leave, unsaved, useBusy, useHistory, useUnsaved } from "./hooks";
 import { VIEW_MODES, Viewer, type Joint, type Moved, type SkeletonEdit, type Stats, type Vec3, type ViewMode } from "./viewer/Viewer";
 import {
@@ -24,7 +25,6 @@ import {
   EXPORTS_2D,
   FIGHT_PROMPTS,
   GATES,
-  MOVE_SETS,
   RECIPE,
   TASKS_2D,
   TASKS_3D,
@@ -3898,11 +3898,14 @@ function ClipPicker(props: {
   const [seed, setSeed] = useState(0);
   const [picked, setPicked] = useState<"clips" | "text" | "video" | "file" | null>(null); // UX-05: the animation's source; one form shown
   const [clearance, setClearance] = useState(true); // M67: a person's arms kept out of the body
+  const [packOf, setPackOf] = useState<Record<string, string>>({}); // clip name -> its pack (models/clips/<pack>)
+  const [packs, setPacks] = useState<ClipPack[]>([]); // their titles, restriction and move sets (people only)
   useEffect(() => {
     api
       .clips(template)
-      .then((c) => setClips([...new Set(c.map((x) => x.name))].sort()))
+      .then((c) => (setClips([...new Set(c.map((x) => x.name))].sort()), setPackOf(Object.fromEntries(c.map((x) => [x.name, x.pack])))))
       .catch(() => setClips([]));
+    if (!animal) api.clipPacks().then(setPacks, () => setPacks([]));
   }, [template]);
   if (clips === null) return <p className="muted">Loading the clip list…</p>;
   const toggle = (n: string) =>
@@ -4011,16 +4014,23 @@ function ClipPicker(props: {
               <select
                 value=""
                 onChange={(e) => {
-                  const set = MOVE_SETS.find(([id]) => id === e.target.value);
-                  if (set) setChosen(new Set(set[2].filter((n) => clips.includes(n))));
+                  const [pack, id] = e.target.value.split("/");
+                  const set = packs.find((p) => p.id === pack)?.move_sets.find((s) => s.id === id);
+                  if (set) setChosen(new Set(set.clips.filter((n) => clips.includes(n))));
                 }}
               >
                 <option value="">Choose a set…</option>
-                {MOVE_SETS.map(([id, name, names]) => (
-                  <option key={id} value={id}>
-                    {name}: {names.filter((n) => clips.includes(n)).length} animations
-                  </option>
-                ))}
+                {packs
+                  .filter((p) => p.move_sets.length)
+                  .map((p) => (
+                    <optgroup key={p.id} label={`${p.title}${p.restricted ? " (restricted)" : ""}`}>
+                      {p.move_sets.map((s) => (
+                        <option key={s.id} value={`${p.id}/${s.id}`}>
+                          {s.title}: {s.clips.filter((n) => clips.includes(n)).length} animations
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
               </select>
             </label>
           )}
@@ -4031,7 +4041,16 @@ function ClipPicker(props: {
             value={[...chosen]}
             onChange={(e) => setChosen(new Set([...e.target.selectedOptions].map((o) => o.value)))} // the keyboard's path (UI-006)
           >
-            {clips.map((n) => option(n))}
+            {packs.filter((p) => clips.some((n) => packOf[n] === p.id)).length > 1
+              ? packs.map((p) => {
+                  const own = clips.filter((n) => packOf[n] === p.id);
+                  return own.length ? (
+                    <optgroup key={p.id} label={`${p.title}${p.restricted ? " (restricted)" : ""}`}>
+                      {own.map((n) => option(n))}
+                    </optgroup>
+                  ) : null;
+                })
+              : clips.map((n) => option(n))}
             {motions.length > 0 && (
               <optgroup label="Your motions">
                 {motions.map((m) =>
@@ -4043,6 +4062,13 @@ function ClipPicker(props: {
               </optgroup>
             )}
           </select>
+          {packs
+            .filter((p) => p.restricted && [...chosen].some((n) => packOf[n] === p.id))
+            .map((p) => (
+              <p key={p.id} className="note warn">
+                {p.title} is a restricted clip pack{p.credit ? ` (${p.credit})` : ""}: the animated version is restricted and export refuses it.
+              </p>
+            ))}
           {!animal && (
             <label title="Where a clip swings the forearms or hands through the body (a stout character), the arms open just enough">
               <input type="checkbox" checked={clearance} onChange={(e) => setClearance(e.target.checked)} /> Keep the arms out of the body
@@ -5929,6 +5955,58 @@ function LibraryFolders(props: { guard: (p: Promise<unknown>) => Promise<void> }
   );
 }
 
+// the clip packs (models/clips/<pack>/): licence, problems, and the owner's clearance for a restricted one, which
+// lifts it (or, emptied, restores it) on the open library's versions made with it
+function ClipPacks(props: { guard: (p: Promise<unknown>) => Promise<void> }) {
+  const [packs, setPacks] = useState<ClipPack[] | null>(null);
+  const [text, setText] = useState<Record<string, string>>({});
+  const [note, setNote] = useState<Record<string, string>>({});
+  useEffect(() => {
+    api.clipPacks().then(setPacks, () => setPacks([]));
+  }, []);
+  if (!packs) return <p className="muted">Checking…</p>;
+  const save = (p: ClipPack) =>
+    props.guard(
+      api.clearPack(p.id, text[p.id] ?? p.cleared).then((r) => {
+        setPacks((all) => all!.map((x) => (x.id === p.id ? r.pack : x)));
+        const n = r.pack.restricted ? r.restricted.length : r.lifted.length;
+        const kept = r.kept.length ? ` ${r.kept.length} stay restricted: ${r.kept.slice(0, 3).map((k) => `${k.version} (${k.reason})`).join("; ")}${r.kept.length > 3 ? "; …" : ""}` : "";
+        setNote((m) => ({ ...m, [p.id]: `${r.pack.restricted ? "Restricted again" : "Cleared"}: ${n} version${n === 1 ? "" : "s"} in this library ${r.pack.restricted ? "restricted" : "lifted"}.${kept}` }));
+      }),
+    );
+  return (
+    <div className="cards caps">
+      {packs.map((p) => (
+        <div key={p.id} className="card">
+          <strong>{p.title}</strong>
+          <span className="muted">
+            {p.id} · {p.cleared ? `cleared: ${p.cleared}` : p.license || "no licence"}
+          </span>
+          <span className="status">
+            <i className={`dot ${p.restricted ? "bad" : "ok"}`} />
+            {p.restricted ? "Restricted: what you animate with it does not export" : "Clean"}
+          </span>
+          {p.problems.length > 0 && <span className="muted">{p.problems.slice(0, 3).join("; ")}{p.problems.length > 3 ? "; …" : ""}</span>}
+          {p.id !== "mesh2motion" && !p.problems.includes("no pack.json") && (
+            <form className="row" onSubmit={(e) => (e.preventDefault(), save(p))}>
+              <LicencePicker
+                label={`Clearance for ${p.title}`}
+                none="None (restricted)"
+                value={text[p.id] ?? p.cleared}
+                onChange={(v) => setText((m) => ({ ...m, [p.id]: v }))}
+              />
+              <button type="submit" disabled={(text[p.id] ?? p.cleared).trim() === p.cleared}>
+                {p.cleared && !(text[p.id] ?? p.cleared).trim() ? "Restrict again" : "Save clearance"}
+              </button>
+            </form>
+          )}
+          {note[p.id] && <span className="muted">{note[p.id]}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // the Library page's switcher: shown once there is more than one library folder
 function LibrarySwitch(props: { guard: (p: Promise<unknown>) => Promise<void> }) {
   const [l, setL] = useState<Libraries | null>(null);
@@ -6347,6 +6425,12 @@ function Setup(props: {
       <h2>Library folders</h2>
       <p className="muted">Keep assets in several folders and open one at a time. Thumbnails and turntables are saved with each library.</p>
       <LibraryFolders guard={props.guard} />
+      <h2>Clip packs</h2>
+      <p className="muted">
+        Animation packs in the models folder's clips folder. A pack without a known clean licence is restricted. Once you have the licence or permission,
+        write it here: the pack, and the versions in the open library animated with it, are no longer restricted. Clear the text to restrict them again.
+      </p>
+      <ClipPacks guard={props.guard} />
       <Space reload={props.reload} />
       <h2>Tools</h2>
       <p className="muted">Other programs the app can work with.</p>

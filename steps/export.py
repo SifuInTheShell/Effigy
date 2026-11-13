@@ -80,6 +80,19 @@ def credits(names: list[str], rows: list[dict]) -> tuple[str, list[dict]]:
     return "".join(f"{line}\n" for line in lines), used
 
 
+def pack_rows(version: Path) -> list[dict]:
+    """The licence rows of the clip packs this version's chain used: an anim keeps them in `metrics.clip_packs`
+    (a user's pack has no licenses.yaml row, its pack.json is its record, and the pack may be gone by now)."""
+    rows, d = [], version
+    while (d / "meta.json").is_file():
+        meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+        rows += meta.get("metrics", {}).get("clip_packs", [])
+        if not meta.get("parent"):
+            break
+        d = d.parent / meta["parent"]
+    return rows
+
+
 def gltfpack(src: Path, dst: Path, *args: str) -> Path:
     exe = os.environ.get("EFFIGY_GLTFPACK") or shutil.which("gltfpack")
     if not exe or not Path(exe).is_file():
@@ -350,7 +363,9 @@ def run(op, in_dir, out_dir, params):
     meta = json.loads((Path(in_dir) / "meta.json").read_text(encoding="utf-8"))
     if meta.get("restricted") and not params.get("allow_restricted"):
         raise StepError(
-            "restricted", "restricted version (experimental engine); see IMPLEMENTATION MX1"
+            "restricted",
+            "restricted version (an experimental engine, a third-party import or a restricted clip pack);"
+            " see IMPLEMENTATION MX1",
         )
     outs = meta["outputs"]
     note = ""
@@ -384,9 +399,12 @@ def run(op, in_dir, out_dir, params):
             files, note = trimesh_profile(src, out, name, profile, parts, params)
 
     rows = yaml.safe_load((ROOT / "licenses.yaml").read_text(encoding="utf-8"))
-    text, used = credits(meta["licenses"], rows)
+    text, used = credits(meta["licenses"], rows + pack_rows(Path(in_dir)))
     if meta.get("restricted"):
-        text += "RESTRICTED: made with an experimental engine whose licence limits use/territory.\n"
+        text += (
+            "RESTRICTED: made with an experimental engine, third-party material or a clip pack whose licence"
+            " limits use (see LICENSES.json).\n"
+        )
     (out / "CREDITS.txt").write_text(text, encoding="utf-8")
     licenses = {"restricted": bool(meta.get("restricted")), "components": used}
     (out / "LICENSES.json").write_text(json.dumps(licenses, indent=2), encoding="utf-8")
