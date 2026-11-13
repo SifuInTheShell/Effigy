@@ -12,6 +12,8 @@ from pathlib import Path
 
 import yaml
 
+from server import settings
+
 ASSET_ID = re.compile(r"^[a-z0-9_]{1,40}$")
 VERSION = re.compile(r"^(\d{3})_([a-z0-9_]+)$")
 RESTRICTED_STEPS = {"hunyuan"}  # experimental engines with output restrictions (MX1)
@@ -26,7 +28,8 @@ class ApiError(Exception):
 
 
 def root() -> Path:
-    return Path(os.environ.get("EFFIGY_LIBRARY", "library"))
+    """The open library: EFFIGY_LIBRARY, else the folder chosen in Setup (server/libraries), else library/."""
+    return Path(os.environ.get("EFFIGY_LIBRARY") or settings.read().get("library") or "library")
 
 
 def _now() -> str:

@@ -75,6 +75,11 @@ export type Folder = {
   bytes: number;
   choices: { path: string; drive: string; free: number; total: number }[];
 };
+export type Libraries = {
+  path: string;
+  source: "env" | "settings" | "default";
+  folders: { path: string; exists: boolean; assets: number }[];
+};
 export type Preset = { id: string; name: string; what: string; groups: string[]; bytes: number; missing: number };
 export type HfStatus = { token: boolean; user: string | null; access: Record<string, boolean | null>; gated: Record<string, string[]> };
 export type Env = { name: string; state: "ok" | "missing" | "outdated" | "installing" | "unknown"; groups: string[] };
@@ -159,6 +164,9 @@ export const api = {
   environments: () => call<Env[]>("GET", "/api/environments"),
   machine: () => call<Check[]>("GET", "/api/setup/machine"),
   folder: () => call<Folder>("GET", "/api/setup/folder"),
+  libraries: () => call<Libraries>("GET", "/api/libraries"),
+  openLibrary: (path: string) => call<Libraries>("POST", "/api/libraries", { path }),
+  forgetLibrary: (path: string) => call<Libraries>("POST", "/api/libraries/forget", { path }),
   port: () => call<PortInfo>("GET", "/api/setup/port"),
   trash: () => call<TrashEntry[]>("GET", "/api/trash"),
   restoreTrash: (name: string) => call<{ asset_id: string; versions: string[] }>("POST", `/api/trash/${encodeURIComponent(name)}/restore`),
