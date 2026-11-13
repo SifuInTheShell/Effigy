@@ -9,6 +9,9 @@ export const LICENCES: [string, string][] = [
   ["Apache-2.0", "Apache-2.0"],
 ];
 
+// a licence as the app shows it: a known one by its name, the owner's own words as they wrote them
+export const licenceName = (v: string) => LICENCES.find(([k]) => k === v)?.[1] ?? v;
+
 export function LicencePicker(props: { label: string; none: string; value: string; onChange: (v: string) => void }) {
   const [other, setOther] = useState(props.value !== "" && !LICENCES.some(([v]) => v === props.value));
   return (

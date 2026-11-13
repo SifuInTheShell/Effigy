@@ -14,7 +14,7 @@ import { Compare } from "./Compare";
 import { ANIM_TYPES, ImportInfo, ImportPage, OriginalFile } from "./Import";
 import { Transport, useTransportKeys } from "./anim/Transport";
 import { onEvent } from "./events";
-import { LicencePicker } from "./licence";
+import { LicencePicker, licenceName } from "./licence";
 import { leave, unsaved, useBusy, useHistory, useUnsaved } from "./hooks";
 import { VIEW_MODES, Viewer, type Joint, type Moved, type SkeletonEdit, type Stats, type Vec3, type ViewMode } from "./viewer/Viewer";
 import {
@@ -576,7 +576,7 @@ function App() {
             onRestored={refresh}
             onMove={(ids, folder) => guard(Promise.all(ids.map((id) => api.setFolder(id, folder))).finally(refresh))}
             guard={guard}
-            reload={refresh}
+            reload={reconcile} // a licence set here: the list, and the asset page opened before, read again
           />
         )}
         {route.page === "setup" && <Setup models={models} reload={loadModels} jobs={jobs} track={track} guard={guard} cap={route.cap} dev={dev} onDev={setDev} />}
@@ -594,6 +594,7 @@ function App() {
             pick={pick}
             guard={guard}
             onRenamed={refresh}
+            onReload={reconcile}
             onVersion={(id, version, body) =>
               guard(
                 api
@@ -1108,10 +1109,16 @@ function Card(props: { a: Asset; where?: string; dup: boolean; credit: string; p
           {props.where && <span className="chip">In {props.where}</span>}
           {a.kind === "texture" && <span className="chip">Texture / Material</span>}
           {a.restricted && <span className="chip bad">Restricted</span>}
-          {a.imported && (
-            <span className="chip" title="Imported: Effigy does not know this file's licence">
-              Your file
+          {a.origin?.license ? (
+            <span className="chip" title={`Licence: ${a.origin.license}${a.origin.license_set ? " (set by you)" : ""}`}>
+              {licenceName(a.origin.license).length > 24 ? `${licenceName(a.origin.license).slice(0, 23)}…` : licenceName(a.origin.license)}
             </span>
+          ) : (
+            a.imported && (
+              <span className="chip" title="Imported: Effigy does not know this file's licence">
+                Your file
+              </span>
+            )
           )}
           {props.credit && (
             <span className="chip warn" title={props.credit}>
@@ -1673,6 +1680,7 @@ function Workspace(props: {
   pick: (version: string) => void;
   guard: (p: Promise<unknown>) => Promise<void>;
   onRenamed: () => void;
+  onReload: () => void; // the asset and its versions read again (a licence set from the Licences panel)
   onVersion: (asset: string, version: string, body: { starred?: boolean; label?: string }) => Promise<void>;
   onDeleted: (asset: string, versions: string[]) => void;
   assetName: (id?: string) => string;
@@ -1703,6 +1711,9 @@ function Workspace(props: {
   const [starredOnly, setStarredOnly] = useState(false);
   const [compare, setCompare] = useState<string | null>(null); // M42: the version compared with the shown one
   const [licences, setLicences] = useState<Licence[] | null>(null); // M42: the Licences panel (open once loaded)
+  const [lic, setLic] = useState<string | null>(null); // the Licences panel's licence of a batch-imported asset, while changed
+  const [licNote, setLicNote] = useState("");
+  useEffect(() => (setLic(null), setLicNote("")), [props.asset?.id]);
   const [unfolded, setUnfolded] = useState<Set<string>>(new Set()); // History: the folded runs the user opened (first version of the run)
   const [ui, setUi] = useState<{ v: string; tab?: number; tool?: string }>({ v: "" }); // M71: the tab and tool picked on one version
   const bl = useBlender(props.sel.asset ?? "");
@@ -2163,8 +2174,49 @@ function Workspace(props: {
               {!v.licenses?.length && <li className="muted">No component of this version asks for a credit or a licence note.</li>}
             </ul>
           )}
-            {imported && <p className="muted">Your file: Effigy does not know this file's licence. It is yours to check.</p>}
+            {imported && !props.asset?.origin?.license && <p className="muted">Your file: Effigy does not know this file's licence. It is yours to check.</p>}
             {v.restricted && <p className="error">Restricted: a component of this version is not cleared for commercial use, so it cannot be exported.</p>}
+            {(v.metrics?.clip_packs as { name: string; commercial: boolean }[] | undefined)?.some((r) => !r.commercial) && (
+              <p className="muted">
+                Made with a restricted clip pack: once you have its licence, clear it in <a href="#/setup">Setup → Clip packs</a>.
+              </p>
+            )}
+            {props.asset?.origin && (
+              <form
+                className="stack"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const id = props.asset!.id;
+                  props.guard(
+                    api.setLicense([id], lic ?? "").then((r) => {
+                      setLic(null);
+                      setLicNote(r.refused.length ? r.refused[0].message : (lic ?? "").trim() ? "Licence set: no longer restricted." : "Licence unknown: restricted again.");
+                      props.onReload();
+                    }),
+                  );
+                }}
+              >
+                <h3>Licence of this asset</h3>
+                <p className="muted">
+                  Imported{props.asset.origin.library ? ` from ${props.asset.origin.library}` : ""}:{" "}
+                  {props.asset.origin.license ? <strong>{licenceName(props.asset.origin.license)}</strong> : "licence unknown"}
+                  {props.asset.origin.license_set ? " (set by you)" : ""}.
+                </p>
+                <div className="row">
+                  <LicencePicker
+                    key={`${props.asset.id}:${props.asset.origin.license ?? ""}`} // anew once the stored licence changes
+                    label="Licence of this asset"
+                    none="Unknown (restricted)"
+                    value={lic ?? props.asset.origin.license ?? ""}
+                    onChange={setLic}
+                  />
+                  <button type="submit" disabled={lic === null || lic.trim() === (props.asset.origin.license ?? "")}>
+                    Set licence
+                  </button>
+                </div>
+                {licNote && <p className="muted">{licNote}</p>}
+              </form>
+            )}
           </aside>
         )}
         {side === "history" && (
