@@ -576,6 +576,7 @@ function App() {
             onRestored={refresh}
             onMove={(ids, folder) => guard(Promise.all(ids.map((id) => api.setFolder(id, folder))).finally(refresh))}
             guard={guard}
+            reload={refresh}
           />
         )}
         {route.page === "setup" && <Setup models={models} reload={loadModels} jobs={jobs} track={track} guard={guard} cap={route.cap} dev={dev} onDev={setDev} />}
@@ -667,7 +668,11 @@ function Library(props: {
   onRestored: () => void;
   onMove: (ids: string[], folder: string) => Promise<unknown>;
   guard: (p: Promise<unknown>) => Promise<void>;
+  reload: () => void;
 }) {
+  const [licensing, setLicensing] = useState(false); // the licence form for the picked (batch-imported) assets
+  const [licence, setLicence] = useState("own");
+  const [licenceNote, setLicenceNote] = useState("");
   const [start] = useState(() => ({ ...libView, ...libFromHash(location.hash) }));
   const [q, setQ] = useState(start.q);
   const [tagSel, setTag] = useState(start.tag);
@@ -807,6 +812,9 @@ function Library(props: {
                   Move out of {leafOf(folder)} ({chosen.length})
                 </button>
               )}
+              <button disabled={!chosen.length} onClick={() => (setLicensing(true), setLicenceNote(""))}>
+                Set licence… ({chosen.length})
+              </button>
               <button className="primary" disabled={!chosen.length} onClick={() => setBatch(true)}>
                 Export selected ({chosen.length})
               </button>
@@ -839,6 +847,42 @@ function Library(props: {
             Remove folder
           </button>
         </nav>
+      )}
+      {licensing && picking && (
+        <form
+          className="note row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            props.guard(
+              api.setLicense(chosen.map((a) => a.id), licence).then((r) => {
+                props.reload();
+                setPicked(new Set());
+                setLicenceNote(
+                  `${r.changed.length} changed.` + (r.refused.length ? ` ${r.refused.length} not: ${r.refused.slice(0, 3).map((x) => x.message).join("; ")}${r.refused.length > 3 ? "; …" : ""}` : ""),
+                );
+              }),
+            );
+          }}
+        >
+          <label>
+            Licence of {chosen.length} imported {chosen.length === 1 ? "asset" : "assets"}{" "}
+            <select aria-label="Licence" value={licence} onChange={(e) => setLicence(e.target.value)}>
+              <option value="own">My own work</option>
+              <option value="CC0-1.0">CC0</option>
+              <option value="MIT">MIT</option>
+              <option value="Apache-2.0">Apache-2.0</option>
+              <option value="">Unknown (restricted)</option>
+            </select>
+          </label>
+          <button className="primary" type="submit" disabled={!chosen.length}>
+            Set licence
+          </button>
+          <button type="button" onClick={() => setLicensing(false)}>
+            Close
+          </button>
+          {licenceNote && <span className="muted">{licenceNote}</span>}
+          <span className="muted">A known licence lifts the restriction from every version; Hunyuan outputs stay restricted.</span>
+        </form>
       )}
       {moving && picking && (
         <form
