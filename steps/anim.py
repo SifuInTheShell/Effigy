@@ -40,17 +40,17 @@ def clip_names(glb: Path) -> list[str]:
     return [a.get("name", f"clip_{i}") for i, a in enumerate(doc.get("animations", []))]
 
 
-def catalogue(template: str = _templates.HUMAN) -> list[dict]:
+def catalogue(template: str = _templates.HUMAN, pack: Path = PACK) -> list[dict]:
     """Every clip for a skeleton: {"name", "file"} (the human pack, or a creature template's own clips,
-    its rest pose left out)."""
+    its rest pose left out). The server passes `pack` from the folder chosen in Setup (no EFFIGY_MODELS there)."""
     if template != _templates.HUMAN:
-        glb = PACK / "creatures" / f"{template}-animations.glb"
+        glb = pack / "creatures" / f"{template}-animations.glb"
         names = clip_names(glb) if glb.is_file() else []
         return [
             {"name": n, "file": f"creatures/{glb.name}"} for n in names if "rest" not in n.lower()
         ]
     return [
-        {"name": n, "file": glb.name} for glb in sorted(PACK.glob("*.glb")) for n in clip_names(glb)
+        {"name": n, "file": glb.name} for glb in sorted(pack.glob("*.glb")) for n in clip_names(glb)
     ]
 
 
