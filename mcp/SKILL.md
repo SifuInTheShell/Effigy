@@ -297,6 +297,12 @@ owner remove it). The result lists the absolute paths. Export the **checked** ve
   "Sword_Regular_C", "Sword_Regular_Combo", "Sword_Attack", "Sword_Attack_Air_Vertical", "Sword_Block", "Jump_Start",
   "Jump_air", "Jump_Land", "Hit_Chest", "Hit_Knockback", "LayToIdle", "Death_B", "Spell_Simple_Shoot", "Victory");
   Basic ("Idle_A", "Walk", "Jog"). Names the installed pack lacks are refused: check `GET /api/clips`.
+- Clip packs: besides Mesh2Motion, the owner may add folders `<models>/clips/<pack>/` (GLBs + `pack.json`, schema
+  `effigy-clip-pack/1`: title, license, credit, move_sets). `GET /api/clips` lists every pack's clips with their
+  `pack`; `GET /api/clip-packs` gives each pack's licence, `restricted` and move sets (the same sets as the app's
+  picker, Mesh2Motion's three above included). A clip from a restricted pack makes the `anim` version restricted:
+  export refuses it, so pick those only when the owner asks for them, and say so. Only the owner clears a pack
+  (Setup → Clip packs, the licence they got): never set a clearance yourself.
 - The fighting moves the pack lacks, as `motion` sentences (`"seconds": 2.5`, one each): "A person does a high
   roundhouse kick with the right leg, then returns to a fighting stance." · "A person jumps forward and does a flying
   kick with the right leg, then lands in a fighting stance." · "A person throws a rising uppercut with the right fist,

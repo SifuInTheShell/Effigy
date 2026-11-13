@@ -337,7 +337,9 @@ All under `http://127.0.0.1:8000` (the port: Setup, App address, or EFFIGY_PORT;
 | GET | `/api/hf` | → `{"token", "user", "access": {repo: true\|false\|null}, "gated": {repo: [groups]}}` (M35c): the Hugging Face login and the gated licences, asked through `.venv-ml`'s huggingface_hub |
 | POST | `/api/hf/login` | `{"token"}` → `{"user"}` (M35c): checked with Hugging Face, then saved by huggingface_hub's `login()` in its own store (stdin, never argv, logs, the library or a job); 400 `bad_token`, 503 `offline` |
 | POST | `/api/hf/logout` | → `{"ok": true}` (M35c) |
-| GET | `/api/clips` | `?template=` (default `mixamo52`; M36: `fox`, `horse`, `bird`) → `[{"name", "file"}]`: the clips `anim` accepts for that skeleton (M21: the human pack; a creature's own clips, its rest pose left out); 404 unknown template |
+| GET | `/api/clips` | `?template=` (default `mixamo52`; M36: `fox`, `horse`, `bird`) → `[{"name", "file"}]`: the clips `anim` accepts for that skeleton (M21: the human pack; a creature's own clips, its rest pose left out); 404 unknown template. (Clip packs, 2026-11-13) every pack's clips, each with `pack`, `file` relative to `<models>/clips` |
+| GET | `/api/clip-packs` | (2026-11-13) `[{"id", "title", "license", "restricted", "credit", "move_sets": [{"id", "title", "clips"}], "problems"}]`: Mesh2Motion first with its built-in move sets, then `<models>/clips/<pack>/pack.json` folders; a set keeps only its own pack's clips; `cleared`: the owner's clearance |
+| POST | `/api/clip-packs/{id}/clearance` | (2026-11-13) `{"license"}` free text, the licence or permission the owner got (`""` removes it) → `{"pack", "lifted", "restricted", "kept": [{"version", "reason"}]}` (the open library's versions made with the pack); 404 for mesh2motion or a folder without `pack.json`, 409 `busy` |
 | GET | `/api/environments` | → `[{"name", "state", "groups"}]` (M35b): each feature environment (`.venv-ml`, `-skin`, `-kimodo`, `-parts`, `-gemx`; `-hunyuan` only when present), `state` ok / missing / outdated (`uv sync --frozen --check` differs) / installing / unknown, and the model groups whose steps run in it |
 | POST | `/api/models/install` | `{"group", "repair"?: false}` → `{"job_id"}` (202): a job (step `install`, M35b) that sets up the group's environment if it is missing or out of date (`uv sync --frozen`), runs `tools.download_models <group>` in `.venv-ml` and checks every file against `tools/models_manifest.json`; `repair` also test-imports the environment (reinstalling its packages if that fails) and deletes files of the wrong size or SHA-256 first; installs queue, one at a time; progress events `{"p", "text"}` (bytes on disk of the expected); a gated repo fails the job with `error.code = "gated"`; 409 `busy` (that group already queued), 507 `no_space` |
 | DELETE | `/api/models/{id}` | → `{"ok": true}`: deletes that row's files only; 404 unknown id; 409 `busy` while a step or a download runs |
@@ -2777,6 +2779,46 @@ trigger yet, PLAN §7), generic rigs (M59, dropped 2026-10-13 by the owner (Skin
 - MCP (2026-11-12): `update_asset` and `move_folder` (rename, move or remove a folder), `list_assets(folder=)` (§3.7).
 - Skipped (ponytail): renaming a folder in the UI (select all in it, move to the new name), empty folders, a folder in
   batch import → add when asked.
+
+### Clip packs as data (owner 2026-11-13, `clip-packs`; spec `docs/clip_packs_spec.md`)
+
+- A clip pack is a folder `<models>/clips/<pack>/` (`[a-z0-9_-]+`) of GLBs, each with animations on one skeleton the
+  retarget reads (UE5, SOMA or Mixamo names). `mesh2motion` is built in: no `pack.json`, CC0, its `creatures/`, the
+  Brawler / Sword fighter / Basic move sets (moved from `ui/src/workflow.ts` to `steps/anim.BUILTIN_SETS`). Any other
+  needs `pack.json` `{"schema": "effigy-clip-pack/1", "title", "license", "restricted"?, "credit", "move_sets": [{"id",
+  "title", "clips"}]}`; a folder without a valid one is listed with its problem and contributes nothing.
+- `steps/anim.packs(root)` reads them (mesh2motion first, then by folder name); a clip name another pack had first is
+  skipped, a move set keeps only its own pack's clips; both reported in `problems`. `catalogue()` is every pack's clips
+  `{"name", "file", "pack"}`, `file` relative to `<models>/clips` (creature clips: `mesh2motion/creatures/...`).
+- Licence: `restricted = license not in CLEAN or pack.restricted` (`"restricted": false` never lifts an unknown
+  licence; `CLEAN` mirrors `server/batch.CLEAN`, a test keeps them equal). `anim` returns `"restricted": true` when a used
+  pack is, `licenses` `clip-pack/<id>` (Mesh2Motion keeps `Mesh2Motion/mesh2motion-app`) and the pack's licence row in
+  `metrics.clip_packs`; `export` adds the rows found along the version's chain (`pack_rows`) to `licenses.yaml`'s, so a
+  user pack needs no `licenses.yaml` row and its credit survives the pack folder being removed. Export's restricted
+  message and CREDITS line now name all three sources (an experimental engine, third-party material, a clip pack).
+- **Clearance (owner 2026-11-13)**: once the owner has the licence or permission for a restricted pack, Setup → Clip packs
+  takes it (`POST /api/clip-packs/{id}/clearance`, `server/clip_packs.py`): picked from CC0 / MIT / Apache-2.0 / My own
+  work, or Other licence… with the owner's own text (any non-empty text clears). It is saved as
+  `<pack>/clearance.json` `{"license", "set"}`, written only by the app: a producer's own `license` never lifts a
+  restriction. A cleared pack is clean (`cleared` in the listing, its row's `license` the owner's text,
+  `commercial: true`). The open library is updated: every `anim` version with the pack's row gets the new row, and is
+  lifted with the versions made from it, parents first, unless the parent is still restricted, the anim also used
+  another restricted pack, or the step may hold a source of its own (`blender_pull`, `textures`, an experimental
+  engine) or wrote its files restricted (`export`: export again); those keep their flag and are listed in `kept`. An
+  empty clearance removes the file and restricts those versions and their descendants again. Refused while a job is
+  queued or running. Other library folders: open each and save the clearance again.
+- Root motion: the retarget reads hip travel from the source Hips' posed position, which includes a root bone above it
+  (a pack whose `root` carries the travel works); checked on a real pack on the laptop (manual acceptance).
+- API: `GET /api/clips` adds `pack` (§3.5); `GET /api/clip-packs` (new). Restricted packs are listed, marked, not hidden.
+- UI: the Move set picker groups the sets by pack (`Reference (restricted)`), the clip list groups by pack when there is
+  more than one, and a note warns before Add when a chosen clip's pack is restricted.
+- Files: `steps/anim.py`, `steps/export.py`, `server/app.py`, `server/clip_packs.py`, `ui/src/api.ts`, `ui/src/main.tsx`, `ui/src/workflow.ts`,
+  `mcp/SKILL.md`, `MANUAL.md`, `tests/test_clip_packs.py` (+ `test_clear.py`, `test_motion.py`, `test_templates.py`,
+  `test_clips_folder.py` for the new names), `ui/tests/smoke.spec.ts` ("Move sets", "Clip packs").
+- Acceptance: `tests/test_clip_packs.py` (catalogue with a duplicate and a folder without `pack.json`; a restricted pack
+  restricts and credits the anim, export refuses it; Mesh2Motion alone unchanged; the API); smoke "Clip packs";
+  manual on the laptop: a restricted test pack's move set on a rigged character, its version restricted, export
+  refused; with `"license": "own"` it exports.
 
 ### Mesh gates (2026-10-12, `mesh-gates`)
 

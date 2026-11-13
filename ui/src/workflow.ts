@@ -222,24 +222,8 @@ export const EXPORTS: { id: string; name: string; what: string; next: string; lo
     next: "Open the 3MF in your slicer: every part arrives as its own object; the STLs are the same parts, one file each.",
   },
 ];
-// a side-scrolling fighter's moves from the ready-made pack (Mesh2Motion, CC0; research 15 §2's brawler list):
-// only the names the installed pack has are picked
-export const MOVE_SETS: [string, string, string[]][] = [
-  [
-    "brawler",
-    "Brawler (Double Dragon)",
-    ["Fighting Idle", "Walk", "Jog", "Fighting Left Jab", "Fighting Right Jab", "Punch_Cross", "Melee_Hook", "Kick_Breach", "Jump_Start", "Jump_air",
-      "Jump_Land", "Hit_Head", "Hit_Chest", "Hit_Knockback", "LayToIdle", "Death_A", "Defend", "PickUp_Table", "Throw Object", "Victory"],
-  ],
-  [
-    "sword",
-    "Sword fighter (Golden Axe)",
-    ["Idle_Sword", "Walk", "Jog", "Sword_Regular_A", "Sword_Regular_B", "Sword_Regular_C", "Sword_Regular_Combo", "Sword_Attack",
-      "Sword_Attack_Air_Vertical", "Sword_Block", "Jump_Start", "Jump_air", "Jump_Land", "Hit_Chest", "Hit_Knockback", "LayToIdle", "Death_B",
-      "Spell_Simple_Shoot", "Victory"],
-  ],
-  ["basic", "Basic (idle, walk, jog)", ["Idle_A", "Walk", "Jog"]],
-];
+// the move sets (a side-scrolling fighter's, research 15 §2) come from GET /api/clip-packs: Mesh2Motion's built-in ones
+// (steps/anim.BUILTIN_SETS) and each clip pack's own
 // the moves a fighter needs that the pack lacks: a sentence each for text-to-motion (one-shots, about 2.5 s)
 export const FIGHT_PROMPTS: [string, string][] = [
   ["Roundhouse kick", "A person does a high roundhouse kick with the right leg, then returns to a fighting stance."],

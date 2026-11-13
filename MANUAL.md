@@ -477,6 +477,16 @@ On the skinned model, **Animation source** has four ways:
 - **Ready-made**: tick clips from the list (idle, walk, run and dozens more for people; each animal has its own),
   or pick a **Move set**: **Brawler (Double Dragon)**, **Sword fighter (Golden Axe)** or **Basic (idle, walk,
   jog)**. **Add animations** (about 10 seconds each). Needs the Setup card **Ready-made animations**.
+  **Your own clip packs**: put a folder of animation GLBs into `<models folder>\clips\<name>\` (lower case, digits,
+  `_` or `-`) with a `pack.json`: `{"schema": "effigy-clip-pack/1", "title": "…", "license": "own", "credit": "…",
+  "move_sets": [{"id": "cop", "title": "Patrol cop", "clips": ["Cop · Idle", "Cop · Walk"]}]}`. Its clips join the
+  list, its move sets join **Move set**. Start each clip name with the pack's own word (*Cop · Walk*): a name another
+  pack already has is skipped. A pack whose `license` is empty or not CC0, MIT, Apache-2.0 or `own` is marked
+  **(restricted)**: what you animate with it is restricted, and export refuses it. Once you have the licence or
+  permission, pick it under **Setup → Clip packs** (CC0, MIT, Apache-2.0, **My own work**, or **Other licence…** with its
+name and terms, *Bought from …, commercial use*) and **Save clearance**: the pack
+  is no longer restricted, and neither are the characters you already animated with it in the open library (an export
+  made before stays restricted: export again). Empty the text and **Restrict again** to undo it.
 - **From a sentence**: describe the motion (*A person waves with the right hand.*), its **Seconds** (0.5 to 10)
   and a **Seed**, then **Generate motion** (about 30 seconds the first time, a few seconds after that). Buttons for
   fighting moves the packs lack (**Roundhouse kick**, **Flying kick**, **Uppercut**, **Grab and knee**, **Throw**,

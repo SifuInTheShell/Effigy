@@ -80,6 +80,16 @@ export type Libraries = {
   source: "env" | "settings" | "default";
   folders: { path: string; exists: boolean; assets: number }[];
 };
+export type ClipPack = {
+  id: string;
+  title: string;
+  license: string;
+  restricted: boolean;
+  credit: string;
+  cleared: string; // the licence or permission the owner got (clearance.json), "" if none
+  move_sets: { id: string; title: string; clips: string[] }[];
+  problems: string[];
+};
 export type Preset = { id: string; name: string; what: string; groups: string[]; bytes: number; missing: number };
 export type HfStatus = { token: boolean; user: string | null; access: Record<string, boolean | null>; gated: Record<string, string[]> };
 export type Env = { name: string; state: "ok" | "missing" | "outdated" | "installing" | "unknown"; groups: string[] };
@@ -144,7 +154,14 @@ export const api = {
   deleteVersion: (id: string, version: string) => call<{ deleted: string[] }>("DELETE", `/api/assets/${id}/versions/${version}`),
   fitCheck: (id: string, version: string, joints: Record<string, number[]> = {}) =>
     call<FitQuality>("POST", `/api/assets/${id}/versions/${version}/fit-check`, { joints }),
-  clips: (template = "mixamo52") => call<{ name: string; file: string }[]>("GET", `/api/clips?template=${encodeURIComponent(template)}`),
+  clips: (template = "mixamo52") => call<{ name: string; file: string; pack: string }[]>("GET", `/api/clips?template=${encodeURIComponent(template)}`),
+  clipPacks: () => call<ClipPack[]>("GET", "/api/clip-packs"),
+  clearPack: (id: string, license: string) =>
+    call<{ pack: ClipPack; lifted: string[]; restricted: string[]; kept: { version: string; reason: string }[] }>(
+      "POST",
+      `/api/clip-packs/${encodeURIComponent(id)}/clearance`,
+      { license },
+    ),
   agentSetup: () => call<AgentSetup>("GET", "/api/agent/setup"),
   agentTest: () => call<{ ok: boolean; tools?: string[]; error?: string }>("POST", "/api/agent/test"),
   upload: (id: string, file: File) => call<Meta>("PUT", `/api/assets/${id}/upload/${encodeURIComponent(file.name)}`, file),

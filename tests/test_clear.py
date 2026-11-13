@@ -191,7 +191,10 @@ def test_the_anim_step_clears_the_arms_unless_told_not_to(tmp_path, monkeypatch)
     # a held pose would be a clip that never moves (the gate before this pass); this one swings
     swing = _arms([0, -45, 0], [0, 45, 0], times=(0, 0.5, 1))
     made = {"glb": skinned({"Swing": swing})}
-    monkeypatch.setattr(anim, "catalogue", lambda: [{"name": "Swing", "file": "pack.glb"}])
+    clip = {"name": "Swing", "file": "mesh2motion/pack.glb", "pack": "mesh2motion"}
+    monkeypatch.setattr(
+        anim, "packs", lambda: [{"id": "mesh2motion", "restricted": False, "clips": [clip]}]
+    )
 
     def fake_blender(op, inputs, outdir, params, timeout=None):
         Path(outdir).mkdir(parents=True, exist_ok=True)
