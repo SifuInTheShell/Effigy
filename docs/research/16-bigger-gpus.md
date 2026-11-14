@@ -112,15 +112,34 @@ Gaps for bigger cards:
 
 | Budget (`budget_gb`, idle desktop) | Cards | Our wheels |
 |---|---|---|
-| ~14.6 GB (today's tier) | 4060 Ti 16G, 4070 Ti Super, 4080, 5060 Ti 16G, 5070 Ti, 5080 | ✔ sm_89, sm_120 |
+| ~14.6 GB (today's tier) | 4060 Ti 16G, 4070 Ti Super, 4080, 5060 Ti 16G, 5070 Ti, 5080; 3080 Laptop 16G (sm_86, measured) | ✔ sm_86, sm_89, sm_120 |
 | ~22.7 GB | **4090** (sm_89) | ✔ |
-| ~22.7 GB | **3090, 3090 Ti, A5000** (sm_86) | **✘: TRELLIS's kernels are not built for 8.6** |
+| ~22.7 GB | **3090, 3090 Ti, A5000** (sm_86) | ✔ since issue #16 |
 | ~30.5 GB | **5090** (sm_120) | ✔ |
-| 46+ GB | RTX 6000 Ada (sm_89), RTX PRO 6000 Blackwell (sm_120) ✔; A6000 (sm_86) ✘ | as listed |
+| 46+ GB | RTX 6000 Ada (sm_89), RTX PRO 6000 Blackwell (sm_120), A6000 (sm_86) | ✔ |
 
-The 3090 is probably the most common 24 GB card among hobbyists. Covering it means building the wheels with
-`8.6;8.9;12.0`: one `wheels.yml` run, the owner's call (build minutes). Either way, `machine.check` should read the
-compute capability and say so, instead of passing the card and failing in the first generation.
+**Update (issue #16):** the wheels are built for `8.6;8.9;12.0` (`wheels.yml` run 42491610866); `MIN_SM` is 8.6.
+A user's RTX 3080 Laptop (16 GB, sm_86, driver 617.14, budget 14.7 GB) passed `tools.smoke_m1` and sent a
+`gpu_report` (2026-11-12):
+
+| Probe | Seconds | Whole-card peak (GB) |
+|---|---|---|
+| prep | 29 | 4.74 |
+| Fast 1024, 12 steps, 2K | 363 | 11.27 |
+| clean · remesh · uv | 28 · 13 · 10 | 5.24 · 2.92 · 2.92 |
+| bake 2K | 63 | 7.83 |
+| refine (Tile lite) | 358 | 15.18 |
+| canon, offload | 88 | 11.71 |
+
+- The 1536 probes and canon without the offload were skipped by the budget, as on the laptop.
+- Both Faithful probes were refused before they started, because other programs held 2.3 GB, so Faithful on an
+  RTX 30 is still unmeasured.
+- Refine (Tile lite) peaked at 15.18 GB, near the card's limit. It finished, but it is the step to watch on 16 GB
+  RTX 30 cards.
+
+The 3090 is probably the most common 24 GB card among hobbyists. Covering it took one `wheels.yml` run with
+`8.6;8.9;12.0` (issue #16). `machine.check` reads the compute capability and refuses an older card (`MIN_SM`), so it
+doesn't pass the card and then fail in the first generation.
 
 Bigger cards usually sit in machines with 64 GB of RAM. The RAM check stays per step (`RAM_GB`), and a new variant
 gets its own row once measured.

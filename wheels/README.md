@@ -1,7 +1,7 @@
-# sm_120 CUDA wheels
+# CUDA wheels (sm_86, sm_89, sm_120)
 
 Built and committed by `.github/workflows/wheels.yml` (windows-2022, CUDA 12.8.1, MSVC 2022, Python 3.12,
-torch 2.8.0+cu128, `TORCH_CUDA_ARCH_LIST="8.9;12.0"`). Do not edit by hand: to rebuild, change a pin in
+torch 2.8.0+cu128, `TORCH_CUDA_ARCH_LIST="8.6;8.9;12.0"`, no PTX; the workflow checks every module carries all three). Do not edit by hand: to rebuild, change a pin in
 the workflow, run it from the Actions tab (manual only) and pull the commit it pushes.
 
 | Wheel | Source | Pinned commit | Patches | Licence |

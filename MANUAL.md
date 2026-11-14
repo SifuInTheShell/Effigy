@@ -949,8 +949,8 @@ Windows and the display. It picks settings that fit:
 | 24 GB and up | **Faithful HD** | **Texture detail, full**; the standing pose and the motion text model stay whole on the card, which is faster |
 
 The numbers for 24 and 32 GB cards are first estimates. Measuring your card and sending the report helps: see
-SETUP.md, "What's not ready yet". The 3D model steps need an **RTX 40 or 50 series** card; on an older card (an RTX
-3090, say) they are refused, while pictures, pixel art and motion still run.
+SETUP.md, "What's not ready yet". The 3D model steps need an **RTX 30 series** card or newer; on an older card (an RTX
+2080, say) they are refused, while pictures, pixel art and motion still run.
 
 ### When the app says no
 
@@ -1012,7 +1012,7 @@ Keys do nothing while you type in a field.
 | **This model needs access approval first: see Setup** | Accept the model's licence on Hugging Face and log in (Setup, Hugging Face) |
 | **… files weren't found** with **Set up …** | Install that feature's card in Setup; what you typed stays |
 | **Needs repair** on a Setup card | **Repair**: it fetches what is missing or damaged |
-| **not supported: the 3D models need an RTX 40 or 50 series card** | The 3D model steps cannot run on this card; 2D and motion still work |
+| **not supported: the 3D models need an RTX 30 series card or newer** | The 3D model steps cannot run on this card; 2D and motion still work |
 | **… is still running on …: wait or cancel it first** | A job is working on that asset; let it finish or cancel it |
 | **the app was restarted while it ran** | The job stopped with the app; run it again. Finished versions are in the library |
 | A generated model with a whole area missing | Generate again with **Background: Grey** |

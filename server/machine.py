@@ -23,19 +23,19 @@ LONG_PATHS = (
 )
 
 
-# M46b: our CUDA wheels (cumesh, flex_gemm, o_voxel; .github/workflows/wheels.yml) are built for 8.9 and 12.0 with no
-# PTX, so an RTX 30 card (8.6: the 3090, A5000, A6000) cannot run the steps that load them. The owner, 2026-10-13: no
-# 8.6 build; say so instead of failing in the first generation.
-MIN_SM = 8.9
-# not `depth`: its FlexGEMM is the pure-Triton build in .venv-moge, which runs on 8.6
+# M46b: our CUDA wheels (cumesh, flex_gemm, o_voxel; .github/workflows/wheels.yml) are built for 8.6, 8.9 and 12.0
+# with no PTX (8.6 since issue #16), so an older card (an RTX 20 is 7.5) cannot run the steps that load them; say so
+# instead of failing in the first generation.
+MIN_SM = 8.6
+# not `depth`: its FlexGEMM is the pure-Triton build in .venv-moge, which needs no wheel of ours
 SM_STEPS = ("trellis2", "clean", "remesh", "uv", "bake")
-UNSUPPORTED = "not supported: the 3D models need an RTX 40 or 50 series card"
+UNSUPPORTED = "not supported: the 3D models need an RTX 30 series card or newer"
 
 
 @functools.cache  # ponytail: read once per app run; a card swapped in needs a restart of the app
 def sm() -> float | None:
-    """The compute capability (8.9 an RTX 40, 12.0 an RTX 50) of the GPU the steps run on, None if unknown (an old
-    driver without the field: no check)."""
+    """The compute capability (8.6 an RTX 30, 8.9 an RTX 40, 12.0 an RTX 50) of the GPU the steps run on, None if
+    unknown (an old driver without the field: no check)."""
     try:
         out = subprocess.run(
             ["nvidia-smi", "--query-gpu=memory.total,compute_cap", "--format=csv,noheader,nounits"],
@@ -142,7 +142,7 @@ def check() -> list[dict]:
                 "warn",
                 label,
                 f"No 3D model can be made on this card: the 3D model steps are {UNSUPPORTED} (compute "
-                f"capability 8.9 or newer; this card has {cap:g}). Pictures, pixel art, motion and the rest run.",
+                f"capability 8.6 or newer; this card has {cap:g}). Pictures, pixel art, motion and the rest run.",
             )
             big = [b for b in big if b["step"] != "trellis2"] + [
                 {
