@@ -195,7 +195,7 @@ Details: [research 08](research/08-blender-integration.md).
   CUDA wheels ourselves and the only reusable sm_120 natten wheels are cp312.
 - **Torch 2.8.0** from an explicit `[[tool.uv.index]]` (cu128; Blackwell needs ≥ cu128). **Our CUDA
   wheels** (cumesh from main ≥ 2026-05-09, flex_gemm, o_voxel; natten only if no verified community
-  cp312/cu128 build) are built in GitHub Actions with `TORCH_CUDA_ARCH_LIST="8.9;12.0"` and, because the
+  cp312/cu128 build) are built in GitHub Actions with `TORCH_CUDA_ARCH_LIST="8.6;8.9;12.0"` and, because the
   repo is private (uv can't fetch private Release assets), **committed to `wheels/`** by the workflow.
   `tool.uv.sources` references them as `{ path = "wheels/<wheel>", marker = "sys_platform == 'win32'" }`,
   so `uv.lock` pins them. (If the repo goes public: move them to Release assets and `url =` sources.)

@@ -129,7 +129,7 @@ therefore become independent, repeatable steps instead of one fragile chain.
 | D7 | **Template-first humanoid rigging with Mixamo-compatible names** + export naming profiles | Matches Meshy/Tripo; makes animation libraries and engines work out of the box |
 | D8 | **Canonicalize characters before 3D** (A-pose re-posing, optional turnaround) | Pose is the #1 cause of rigging failure; TRELLIS.2 keeps the input pose |
 | D9 | **Own UI: Vite + React + TypeScript + plain three.js** (three addons for GLTF/HDRI/skeleton/animation), FastAPI backend, SSE for progress | Owner decision: one interface for the whole workflow; plain three.js keeps the dependency count low (r3f only if needed) |
-| D10 | **`trellis2.c` native backend is deferred** | Only if the Python path's sm_120 Windows wheels can't be made to work. **We build the three CUDA wheels ourselves** (cumesh from main ≥ 2026-05-09 so the Blackwell stream fix is in, flex_gemm, o_voxel; cp312, torch 2.8 cu128, arch `8.9;12.0`); natten from a verified community cp312/cu128 build or our own |
+| D10 | **`trellis2.c` native backend is deferred** | Only if the Python path's sm_120 Windows wheels can't be made to work. **We build the three CUDA wheels ourselves** (cumesh from main ≥ 2026-05-09 so the Blackwell stream fix is in, flex_gemm, o_voxel; cp312, torch 2.8 cu128, arch `8.6;8.9;12.0`: RTX 30/40/50, 8.6 since issue #16); natten from a verified community cp312/cu128 build or our own |
 | D11 | **`licenses.yaml` + one test** asserting defaults are commercial-OK; licence tags copied into each step's `meta.json` | Users must know when an asset touched NC or region-restricted components |
 | D12 | **Agents via MCP, driven by the user** (M40 replaced the in-app "Ask Claude"): the app is an MCP server (`effigy`: library, steps, previews, import, export; stdio) that the user's own agent connects to: Claude Code or Desktop, Codex, Cursor, VS Code, Gemini (Setup "Connect an agent" gives each its config). The owner's Blender MCP Pro stays a second server for the live scene. Every step writes a new version, so nothing an agent does overwrites | Owner decision. Credentials are never handled by us. Exact CLI flags, auth and policy confirmed in research 10 |
 
@@ -301,7 +301,7 @@ golden set (ARCHITECTURE §8).
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Windows sm_120 builds of CUDA extensions (cumesh, flex_gemm, o_voxel, natten) and FlexGEMM's Triton half (triton-windows) | install failures, silent kernel errors | our own CI-built wheels (cp312, torch 2.8 cu128, arch 8.9;12.0), hash-locked in `uv.lock`; SDPA shim; `EXPLICIT_GEMM` fallback; native trellis2.c backend (D10) as last resort |
+| Windows sm_120 builds of CUDA extensions (cumesh, flex_gemm, o_voxel, natten) and FlexGEMM's Triton half (triton-windows) | install failures, silent kernel errors | our own CI-built wheels (cp312, torch 2.8 cu128, arch 8.6;8.9;12.0), hash-locked in `uv.lock`; SDPA shim; `EXPLICIT_GEMM` fallback; native trellis2.c backend (D10) as last resort |
 | 16 GB budget exceeded by a single stage (Pixal3D at 16 steps/4K, 1536 runs) | slow/OOM | sequential residency, low-VRAM patches, FP8/GGUF, automatic downgrade on OOM |
 | Generated characters in action poses, fused limbs, mitten hands | rigging fails | A-pose canonicalization before 3D, proxy-based weights, marker UI, hand fallback, QA heatmap |
 | Licence drift (gates, territory clauses, provenance) | legal exposure | manifest + CI policy check, per-asset licence stamp, opt-in profiles, quarterly review |

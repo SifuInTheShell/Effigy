@@ -1,4 +1,4 @@
-# sm_120 CUDA wheels for .venv-ml (IMPLEMENTATION.md M1). The repo is private, so uv can't fetch
+# sm_86/89/120 CUDA wheels for .venv-ml (IMPLEMENTATION.md M1). The repo is private, so uv can't fetch
 # Release assets: the wheels are committed to wheels/ on the triggering branch instead.
 name: wheels
 # manual only: build minutes are limited; run from the Actions tab, or ask Claude to (CLAUDE.md)
@@ -7,10 +7,10 @@ on: workflow_dispatch
 concurrency: { group: "wheels-${{ github.ref }}", cancel-in-progress: true } # newest pins win
 
 env:
-  TORCH_CUDA_ARCH_LIST: "8.9;12.0"
+  TORCH_CUDA_ARCH_LIST: "8.6;8.9;12.0" # RTX 30 (issue #16), 40, 50; no PTX
   BUILD_TARGET: cuda
   DISTUTILS_USE_SDK: "1" # torch refuses to build inside an activated VS env without it
-  MAX_JOBS: "2" # nvcc with two archs runs out of RAM on a 2-core runner otherwise
+  MAX_JOBS: "2" # nvcc with several archs runs out of RAM on a 2-core runner otherwise
 
 jobs:
   build:
@@ -52,6 +52,19 @@ jobs:
         run: |
           uv pip install -p bv dist/*.whl --no-deps
           ./bv/Scripts/python -c "import torch, glob, os, importlib.util as u; fs = glob.glob('bv/Lib/site-packages/${{ matrix.pkg }}/**/*.pyd', recursive=True); assert fs; [u.module_from_spec(u.spec_from_file_location(os.path.basename(f).split('.')[0], f)) for f in fs]; print(fs)"
+      - name: every module with device code has every arch (a missing one is "no kernel image" on that card)
+        run: |
+          command -v cuobjdump # without it every module would read as host-only
+          n=0
+          for f in $(find bv/Lib/site-packages/${{ matrix.pkg }} -name '*.pyd'); do
+            elf=$(cuobjdump --list-elf "$f" 2>/dev/null | grep 'sm_[0-9]' || true) # cubins only, not its info lines
+            [ -n "$elf" ] || { echo "$f: host only"; continue; } # e.g. cumesh's xatlas
+            for a in $(echo "$TORCH_CUDA_ARCH_LIST" | tr -d . | tr ';' ' '); do
+              grep -q "sm_$a" <<< "$elf" || { echo "$f has no sm_$a"; exit 1; }
+            done
+            echo "$f: $(grep -o 'sm_[0-9]*' <<< "$elf" | sort -u | tr -d '\r' | tr '\n' ' ')"; n=$((n + 1))
+          done
+          [ "$n" -gt 0 ] # a package with no device code at all is a broken build
       - uses: actions/upload-artifact@v4
         with: { name: "${{ matrix.pkg }}", path: dist/*.whl }
 
@@ -67,7 +80,11 @@ jobs:
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add wheels/*.whl
-          git commit -m "wheels: sm_120 cumesh, flex_gemm, o_voxel (run ${{ github.run_id }})" || exit 0
+          for w in wheels/*.whl; do # uv.lock pins each wheel's sha256: a stale one fails every install
+            f=$(basename "$w"); h=$(sha256sum "$w" | cut -d' ' -f1)
+            sed -i "s|filename = \"$f\", hash = \"sha256:[0-9a-f]*\"|filename = \"$f\", hash = \"sha256:$h\"|" uv.lock
+          done
+          git add wheels/*.whl uv.lock
+          git commit -m "wheels: sm_86/89/120 cumesh, flex_gemm, o_voxel (run ${{ github.run_id }})" || exit 0
           git pull --rebase origin "${{ github.ref_name }}"
           git push origin "HEAD:${{ github.ref_name }}"
