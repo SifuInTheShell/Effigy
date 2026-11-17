@@ -1496,13 +1496,13 @@ test("Acceptance walk at 1280×720: a checked prop reaches Export before the cre
   await page.goto("/#/asset/mock_walk3?version=020_rig_skin");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
   await expect(page.getByRole("tab", { name: "Ready-made clips" })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByLabel("Clips")).toBeVisible();
+  await expect(page.getByRole("listbox", { name: "Clips" })).toBeVisible();
   await expect(page.getByRole("button", { name: /^Add \d+ animations?$/ })).toBeVisible();
   await expect(page.getByLabel("Motion prompt")).toHaveCount(0);
   await expect(page.getByLabel("Video file")).toHaveCount(0);
   await tool(page, "From a video");
   await expect(page.getByLabel("Video file")).toBeVisible();
-  await expect(page.getByLabel("Clips")).toHaveCount(0);
+  await expect(page.getByRole("listbox", { name: "Clips" })).toHaveCount(0);
   await page.screenshot({ path: "test-results/walk-skinned-1280.png", animations: "disabled" });
 });
 
@@ -2201,7 +2201,7 @@ test("Clip picker: a keyboard selection is what gets added (UI-006)", async ({ p
   await page.route("**/files/mock_clips/*/qa.json", (r) => r.fulfill({ json: { picked: "blender", engines: {}, items: {} } }));
   await page.goto("/#/asset/mock_clips?version=020_rig_skin");
   await page.waitForFunction(() => (window as any).__viewer?.loaded === true); // the rig panel needs the model
-  const clips = page.getByLabel("Clips");
+  const clips = page.getByRole("listbox", { name: "Clips" });
   await expect(clips).toBeVisible();
   await clips.selectOption(["Idle_A", "Wave"]); // the native change event, as the keyboard fires it
   await page.getByRole("button", { name: "Add 2 animations" }).click();
@@ -2503,7 +2503,7 @@ test("The motion panel never scrolls sideways; the editor fits a laptop and a co
     await page.setViewportSize({ width, height: 720 });
     await page.goto("/#/asset/mock_fit?version=020_rig_skin");
     await page.waitForFunction(() => (window as any).__viewer?.loaded === true);
-    await expect(page.getByLabel("Clips")).toBeVisible();
+    await expect(page.getByRole("listbox", { name: "Clips" })).toBeVisible();
     expect(await page.locator("aside.panel").evaluate((p) => p.scrollWidth - p.clientWidth), `${width} px wide`).toBeLessThanOrEqual(1);
   }
   await page.setViewportSize({ width: 1280, height: 720 });
@@ -3231,7 +3231,7 @@ test("Clip packs: a restricted pack's move set is marked, fills the clip list an
   await expect(set.locator("optgroup[label='Reference (restricted)'] option")).toHaveText("Patrol cop: 2 animations");
   await set.selectOption("ref/cop");
   await expect(page.getByRole("button", { name: "Add 2 animations" })).toBeVisible();
-  await expect(page.getByLabel("Clips").locator("optgroup[label='Reference (restricted)'] option")).toHaveText(["✓ Cop · Idle", "✓ Cop · Walk"]);
+  await expect(page.getByRole("listbox", { name: "Clips" }).locator("optgroup[label='Reference (restricted)'] option")).toHaveText(["✓ Cop · Idle", "✓ Cop · Walk"]);
   await expect(page.locator(".note.warn", { hasText: "Reference is a restricted clip pack" })).toContainText("export refuses it");
   await set.selectOption("mesh2motion/basic");
   await expect(page.locator(".note.warn", { hasText: "restricted clip pack" })).toHaveCount(0);
@@ -3427,7 +3427,7 @@ test("2D workspace: a background becomes parallax layers (depth, then layers); t
   await page.goto("/#/asset/mock_stage?version=020_concepts");
   const panel = page.locator("aside.panel");
   await expect(page.getByRole("tab", { name: "Layers" })).toHaveAttribute("aria-selected", "true"); // a stage: layers first
-  await panel.getByLabel("Layers").selectOption("3");
+  await panel.getByRole("combobox", { name: "Layers" }).selectOption("3");
   await panel.getByRole("button", { name: "Make parallax layers" }).click();
   await expect.poll(() => posted.length).toBe(2);
   expect(posted).toEqual([
