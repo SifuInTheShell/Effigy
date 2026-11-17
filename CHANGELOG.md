@@ -4,9 +4,9 @@ What changed for people who use Effigy, newest first. Each release's download an
 [releases page](https://github.com/SifuInTheShell/Effigy/releases); what was built and measured, milestone by
 milestone, is in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) §4.
 
-## Unreleased (on `main` since 0.4.0)
+## 0.5.0 (2026-11-17)
 
-Not in a release yet. Still open on the reference laptop: the finger and animation editor checks (M70 and M69,
+Still open on the reference laptop: the finger and animation editor checks (M70 and M69,
 [docs/LAPTOP.md](docs/LAPTOP.md) parts 6 and 7).
 
 ### Library
