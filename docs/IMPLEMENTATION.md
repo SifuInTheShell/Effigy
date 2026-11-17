@@ -313,7 +313,7 @@ All under `http://127.0.0.1:8000` (the port: Setup, App address, or EFFIGY_PORT;
 | GET | `/api/assets/{id}/versions/{v}/turntable` | → animated WebP (M42): the model turning once, 24 frames of 256², 67 ms each, looping; cached as `_turn.webp` in the version folder; a `validate` or `export` version shows the version it was made from; 400 `nothing_to_show` (no model) |
 | GET | `/api/assets/{id}/turntable` | → the same for the version the asset's thumbnail shows when that is a model (M42), `Cache-Control: no-cache`; 404 `not_found` (no model) |
 | POST | `/api/export/copy` | `{"folder", "items": [{"asset_id", "version"}]}` (each an `export` version) → `{"copied": [{"asset_id", "version", "dir", "files"}], "skipped": [{"asset_id", "version", "reason"}]}` (M42): each export's files into a new `<folder>/<asset_id>_<profile>/`; an existing one is skipped (`exists`), never overwritten; a failed copy leaves no folder (`failed: …`); 400 `bad_path` (not an existing absolute folder), 400 `bad_params` (no items, or not an export version), 404 unknown asset or version |
-| POST | `/api/import/batch` | `{"source", "only"?, "limit"?, "license"?, "dry_run"?}` → `{"batch_id", "items": n}`, or with `dry_run` `{"items": [{"file", "name", "tags", "library", "source_key", "license", "restricted", "action": "new"\|"update"\|"skip", "reason"?, "asset_id"?}]}` (research 18): `source` the absolute path of a folder (every model file under it but a `.gltf` and anything hidden: name = the file's stem, tags = its subfolders, `library` = the folder's name, `source_key` = its relative path) or of an `effigy-import/1` (`{"schema", "defaults"?, "items": [{"file" (relative to it), "name"?, "tags"?, "category"?, "source"?, "license"?, "restricted"?, "library"?}]}`) or `parkour-asset-library/1` file; `license` the licence of items that name none (a folder's: all); `only` keeps items whose name or source key contains one of the words, `limit` the first n; each item: an asset (new, or for `update` the one its `origin` names), the file copied in as an `upload` (restricted unless its licence is `CC0-1.0`, `MIT`, `Apache-2.0` or `own` (the user's own work), or `restricted: false`), tags (category + tags fitted to M42's rule), then `import_model` `{"rig": false}`, one item at a time and one batch at a time; `skip` `reason`: `exists` (same library, source key and SHA-256) or `missing`; 400 `bad_path`, `bad_manifest`; 409 `missing_env` (not for `dry_run`) when `.venv-ml` or Blender is missing, before anything is created |
+| POST | `/api/import/batch` | `{"source", "only"?, "limit"?, "license"?, "dry_run"?}` → `{"batch_id", "items": n}`, or with `dry_run` `{"items": [{"file", "name", "tags", "library", "source_key", "license", "restricted", "action": "new"\|"update"\|"skip", "reason"?, "asset_id"?}]}` (research 18): `source` the absolute path of a folder (every model file under it but a `.gltf` and anything hidden: name = the file's stem, tags = its subfolders, `library` = the folder's name, `source_key` = its relative path) or of an `effigy-import/1` (`{"schema", "defaults"?, "items": [{"file" (relative to it), "name"?, "tags"?, "category"?, "source"?, "license"?, "restricted"?, "library"?, "rig"? (2026-11-12: true keeps a known skeleton)}]}`) or `parkour-asset-library/1` file; `license` the licence of items that name none (a folder's: all); `only` keeps items whose name or source key contains one of the words, `limit` the first n; each item: an asset (new, or for `update` the one its `origin` names), the file copied in as an `upload` (restricted unless its licence is `CC0-1.0`, `MIT`, `Apache-2.0` or `own` (the user's own work), or `restricted: false`), tags (category + tags fitted to M42's rule), then `import_model` `{"rig": false}` (`true` for an item with `"rig": true`), one item at a time and one batch at a time; `skip` `reason`: `exists` (same library, source key and SHA-256) or `missing`; 400 `bad_path`, `bad_manifest`; 409 `missing_env` (not for `dry_run`) when `.venv-ml` or Blender is missing, before anything is created |
 | GET | `/api/import/batch/{id}` | → `{"batch_id", "source", "status": "running"\|"done"\|"cancelled", "counts": {status: n}, "items": [… "status": "queued"\|"running"\|"done"\|"skipped"\|"failed"\|"cancelled", "job_id"?, "version"?, "error"?]}`; in memory: gone after a restart; SSE `batch` carries the same on each item's start and at the end |
 | POST | `/api/import/batch/{id}/cancel` | → `{"ok": true}`: the running item's job cancelled, the rest not started |
 | POST | `/api/import/pick` | `{"kind": "folder"\|"file"}` → `{"path": str\|null}`: the system's folder or file dialog (tkinter, in its own process; the browser can't give a path), null when cancelled or after 10 minutes; 409 `no_dialog` where none can open (no display) |
@@ -2740,6 +2740,16 @@ trigger yet, PLAN §7), generic rigs (M59, dropped 2026-10-13 by the owner (Skin
   Apache 2.0), Check (the dry run's list: name, tags, licence, what will
   happen), Import, then each item's status and Cancel import (confirmed; the running model's job is cancelled
   too); a running batch's id is kept in the browser, so the page follows it again after a reload.
+- **An item may keep its rig; a re-import keeps the tags (2026-11-12, `batch-rig-and-tags`)**: an `effigy-import/1`
+  item with `"rig": true` runs `import_model` with `rig` on, so a character comes in with its known skeleton (and
+  still restricted when its licence is not clean: `import_file` has no restricted flag); every other item stays a
+  still model. A re-import of a changed file keeps the asset's tags (the user's own, or a script's) and adds the
+  catalogue's after them, where it used to replace them.
+- **Open pipes (2026-11-12)**: `JOBS` keeps every Job and its Popen, and a one-shot step's stdout and stderr stayed
+  open for the life of the server: a batch of about 2,800 models failed every later item with "[Errno 24] Too many
+  open files". `server/jobs.py` closes stdout once the process has exited and the stderr pump closes its stream at
+  EOF.
+- **The licence afterwards (2026-11-13)**: "The licence of an imported asset" below.
 - Files: `server/batch.py`, `server/library.py`, `server/app.py`, `mcp/effigy_server.py`, `mcp/SKILL.md`,
   `ui/src/Import.tsx`, `ui/src/api.ts`, `tests/test_batch_import.py`, `tests/test_mcp_server.py`.
 - Acceptance: a dry run lists every item and its tags and creates nothing; the items import, a rerun skips them all,
@@ -2763,7 +2773,7 @@ trigger yet, PLAN §7), generic rigs (M59, dropped 2026-10-13 by the owner (Skin
   under "↑ Up · Library › <name>". A search, a tag or Archived looks in every folder, each card saying "In <folder>". Select
   assets adds Select all and Move to folder…: a new or existing folder's name (empty: out of their folders), one PATCH per
   asset. New folder (2026-11-11) asks a name, then opens that move with the name filled in for the user to pick what goes
-  in; inside a folder, Move out of <name> (the selection, or one card's More) takes assets out. The search matches each typed word anywhere in the name, id, folder or tags, in any order, spaces, `_`, `.` and `-`
+  in; inside a folder, Move out of <name> (the selection, or the button under one card: the card's actions are always in view since 2026-11-11, where UX-14 had them in a More disclosure) takes assets out. The search matches each typed word anywhere in the name, id, folder or tags, in any order, spaces, `_`, `.` and `-`
   left out of both ("air vent" finds `s_airvent_01`).
 - **Folders in folders, Remove folder (owner 2026-11-12)**: `folder` is a path, `Props/Crates` is Crates inside Props
   (up to 8 names, each trimmed, 1-64 printable characters; an empty name is refused). A folder and each one above it
@@ -2771,6 +2781,8 @@ trigger yet, PLAN §7), generic rigs (M59, dropped 2026-10-13 by the owner (Skin
   under them) before its assets; the crumbs link every level, Up goes one level up, New folder makes it inside the open
   one, Move out of <name> moves one level up. Remove folder (in the crumbs) moves its assets and subfolders up one level
   after a confirm, archived ones too; nothing is deleted. An emptied folder opens the nearest one left above it.
+  The crumbs ("Library" and each folder's name) are small buttons like ↑ Up and Remove folder (2026-11-13; the same
+  links, so Back still steps out); the open folder carries the shared highlight (`aria-current`).
 - Files: `server/library.py`, `server/app.py`, `ui/src/api.ts`, `ui/src/main.tsx`, `tests/test_library_folders.py`.
 - Acceptance: an asset goes into a folder and out again, its other fields kept, a bad name refused, a path normalised
   (`tests/test_library_folders.py`); in the browser, two assets moved into a new folder show under it, a folder opens
@@ -2779,6 +2791,60 @@ trigger yet, PLAN §7), generic rigs (M59, dropped 2026-10-13 by the owner (Skin
 - MCP (2026-11-12): `update_asset` and `move_folder` (rename, move or remove a folder), `list_assets(folder=)` (§3.7).
 - Skipped (ponytail): renaming a folder in the UI (select all in it, move to the new name), empty folders, a folder in
   batch import → add when asked.
+
+### Several libraries (owner 2026-11-13, `library-folders`)
+
+- Several library folders, one open at a time (`server/libraries.py`; §3.5 `/api/libraries`, `/api/libraries/forget`).
+  `settings.json` keeps `libraries` (every folder the user added) and `library` (the open one); `library.root()`
+  reads it. `EFFIGY_LIBRARY`, when set, is the only library (the list is then just that folder, and a switch answers
+  409 `env`). The app's own `library/` always stays on the list. Nothing here moves or deletes a file.
+- Open: a full path to a new or empty folder, or to a library already (one with assets or a `_trash`). Refused: a
+  drive's root, a folder that overlaps the models folder (400 `bad_params`), one with other files (409 `not_empty`),
+  one that cannot be written (400 `not_writable`), and any switch while a job is queued or running (409 `busy`).
+- A switch stops the resident worker (started with the old `EFFIGY_LIBRARY`), clears the failed-render memory (keyed
+  by asset id, which another library may share) and sends a `library` event: the app reloads its assets and leaves an
+  asset page. Thumbnails and turntables live in each version folder, so they travel with their library.
+- Forget takes a folder off the list; its files stay. The open one answers 409 `open`.
+- UI: Setup → Library folders (each folder's asset count, "open", "not found" for a missing drive, Forget, Another
+  folder + Open this library); the Library page gets a switcher beside its heading once there are two.
+- Files: `server/libraries.py`, `server/library.py`, `server/app.py`, `ui/src/api.ts`, `ui/src/events.ts`,
+  `ui/src/main.tsx`, `tests/test_libraries.py`.
+- Acceptance: `tests/test_libraries.py` (a switch between two libraries; the refusals).
+- Not done: moving assets between libraries; a clip pack's clearance reaches the open library only ("Clip packs as
+  data" below).
+
+### The licence of an imported asset (owner 2026-11-13, `set-license`, `licence-panel`)
+
+- A batch import without a clean licence marks the upload and everything made from it restricted, with no way back.
+  `POST /api/assets/license` (§3.5; `server/batch.set_license`) states it afterwards: one of `own`, `CC0-1.0`, `MIT`,
+  `Apache-2.0`, or the owner's own words for a bought, permitted or custom licence (up to 300 characters). Any licence
+  given sets `meta.restricted` false on every version; `""` (unknown) sets it true again. `asset.json.origin` records
+  `license`, `restricted` and `license_set` (§3.2), and a batch rerun keeps the licence the user set unless the item
+  names one.
+- Refused, each asset on its own (`refused: [{id, message}]`): one that was not batch-imported (400 `not_imported`),
+  one with a job queued or running (409 `busy`) and, to lift it, one that holds another restricted source (409
+  `restricted`: a Hunyuan version, a restricted material from another asset, a Blender pull of several versions).
+- UI: the Library's selection mode has Set licence… (N); an asset page's Licences panel has Licence of this asset for a
+  batch-imported asset, and the page reads the asset again after a change. The picker is shared with the clip packs'
+  clearance (`ui/src/licence.tsx`: My own work, CC0, MIT, Apache-2.0, Other licence… with a text field, and the
+  caller's "none" choice). A licence the owner set shows on the card (instead of "Your file") and in the panel
+  (instead of "Effigy does not know this file's licence"). An animation made with a restricted clip pack points to
+  Setup → Clip packs.
+- Not on the MCP tools: the licence is the owner's to state.
+- Files: `server/batch.py`, `server/app.py`, `ui/src/licence.tsx`, `ui/src/api.ts`, `ui/src/main.tsx`,
+  `tests/test_set_license.py`, `ui/tests/smoke.spec.ts` ("Library: Set licence …", the three "Licences: …" tests).
+
+### An imported rig in the Character task (2026-11-13, `rig-hint-imported`)
+
+- UI text only (`ui/src/workflow.ts` `toolHelp`, `ui/src/main.tsx`). On an animated version the four clip sources
+  (Ready-made clips, From a sentence, From a video, From a file) are unavailable; when the asset already has a skinned
+  model, such as an imported rig, their hint names it, says no skeleton needs fitting and points at its Open button
+  (it used to say "use Fit skeleton, then Attach to skeleton"). Fit skeleton, Edit skeleton and Attach to skeleton work
+  on a skeleton Effigy fits itself, so on a version from an import that brought its own rig they stay unavailable and
+  say that the file brought the skeleton and skin weights, the model animates as it is, and the bones are changed where
+  the model was made (or a new skeleton fitted on the upload).
+- Acceptance: `ui/tests/layout.spec.ts` "An imported rig: the skeleton tools say the file brought the skeleton, never
+  to fit one".
 
 ### Clip packs as data (owner 2026-11-13, `clip-packs`; spec `docs/clip_packs_spec.md`)
 

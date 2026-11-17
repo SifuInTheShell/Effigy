@@ -119,7 +119,9 @@
   int64 `svox2vert` fix, and the SPZ fork's chunked-decode commits + `EXPLICIT_GEMM` fallback.
   **No nvdiffrast, no nvdiffrec, no xformers, no flash-attn.**
 - **Library = folders + `meta.json`** (step, parent, params, seed, model ids, timings, peak VRAM,
-  licence tags). Branch = new folder whose `parent` points back.
+  licence tags). Branch = new folder whose `parent` points back. The root is `library/`, or `EFFIGY_LIBRARY`,
+  or one of several library folders the user keeps in Setup, one open at a time (`server/libraries.py`). The
+  folders shown on the Library page are a `folder` path in each `asset.json`, not folders on disk.
 - **Writing GLB**: trimesh (MIT) writes static meshes only (its exporter has no skins/animations).
   **Skinned/animated GLBs are written by Blender's bundled glTF exporter** (headless op) or, for the
   rig step, by a ~100-line **pygltflib** helper (the MIT SkinTokens-NoBlender port has one to copy
@@ -150,6 +152,8 @@ Details: [research 08](research/08-blender-integration.md).
   the owner's licensed Pro MCP server against the same add-on:
   - **"Open in Blender"**: import version N's GLB/.blend, tag objects with `effigy_asset_id`/`effigy_version`.
   - **"Pull from Blender"**: save a `.blend` copy + export GLB → new `090_blender` version.
+  - **Two free add-ons work too**, both on `localhost:9876`: Blender's own MCP add-on (Blender Lab, Blender
+    5.1+) and blender-mcp. The client uses whichever answers, Pro first (IMPLEMENTATION §3, the Blender link).
   - **No add-on of our own in the MVP**
     (`# ponytail: own GPL bridge add-on only for live selection/material sync or an in-Blender "Send back" button`).
 - After a pull, later steps run on the edited mesh: re-bake from `ovoxel.npz`, rig QA, validate, export.
@@ -168,7 +172,8 @@ Details: [research 08](research/08-blender-integration.md).
   tool set around the workflow (list and inspect, describe the steps, `look` at a version as one image, import a
   local file, run a step, wait on or cancel a job, validate, export into a folder, Blender open/pull). Long jobs
   wait at most 45 s, then return a job id to poll; images are real image content. Contract: IMPLEMENTATION §3.7.
-- **The owner's Blender MCP Pro** (and the free blender-mcp) stay separate servers for the live Blender scene.
+- **The owner's Blender MCP Pro** (and the free ones: Blender's own MCP add-on, blender-mcp) stay separate servers
+  for the live Blender scene.
 - The user drives their own agent (Claude Code or Desktop, Codex, Cursor, VS Code, Gemini); the app runs no
   agent itself (M9's "Ask Claude" runner was removed in M40). Setup's "Connect an agent" prints each client's
   config with this install's path, and tests the bridge.

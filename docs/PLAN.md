@@ -150,7 +150,8 @@ therefore become independent, repeatable steps instead of one fragile chain.
   checker, weights heatmap, skeleton) and an animation player.
 - **Rig step**: auto-fit, then Mixamo-style **draggable markers** (chin, wrists, elbows, knees,
   groin) with symmetry, then a deformation QA heatmap from a range-of-motion clip.
-- **Library**: search, tags, thumbnails, licence badges, batch export.
+- **Library**: search, tags, folders, thumbnails, licence badges, batch import and export; several library
+  folders, one open at a time.
 - **Models & Licences page**: install/remove engines and weights, see licences and attribution
   strings, accept gated terms (DINOv3). One profile only (commercial, §6).
 

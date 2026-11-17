@@ -121,7 +121,8 @@ versions it has and when it last changed. Chips on a card:
 
 ### Finding assets
 
-- **Search by name, id or tag**.
+- **Search by name, id or tag**. Each word you type is looked for anywhere in the name, id, folder or tags, in any
+  order: *air vent* finds `s_airvent_01`.
 - Asset type: **All assets**, **Models**, **2D art**, or **Textures / Materials**. **New material** and
   **Import material** open the standalone texture workflow directly.
 - Sort: **Recently changed**, **Changed longest ago**, **Name A–Z**.
@@ -129,11 +130,30 @@ versions it has and when it last changed. Chips on a card:
 - **Tag**: one of your tags.
 - **Clear filters** resets them. The search and filters stay when you open an asset and come back.
 
-### An asset's More menu
+### Folders
 
-**Rename**, **Tags** (separated by commas), **Archive** / **Unarchive** (hides it from the usual list) and
-**Delete**. A deleted asset goes to **Recently deleted** at the end of the page, where **Restore** brings it back.
-Setup, [Space on disk](#space-on-disk), empties it for good.
+An asset can be filed in one folder; tags stay the way to give it several labels. The library browses like a file
+browser: each level shows its folders as tiles, with the number of assets under them, before its own assets. Click
+a tile to open it. The row above the cards then shows **↑ Up**, **Library** and each folder on the way as buttons,
+and the browser's Back steps out again.
+
+- **New folder** asks for a name, then lets you tick what goes in and **Move**. Inside a folder it makes the new
+  one in there. A folder exists while an asset is in it: one you empty disappears.
+- **Select assets**, tick some (or **Select all**), then **Move to folder…**: type a new or an existing folder.
+  `Props/Crates` is Crates inside Props, up to eight levels. Leave the field empty to **Take out of their
+  folders**.
+- **Move out of [folder]**, for the selection or under one card, moves assets one level up.
+- **Remove folder**, beside the folder names, asks first, then moves its assets and the folders in it one level
+  up. Nothing is deleted.
+
+A search, a tag or **Archived** looks in every folder; each card then says which folder it is in.
+
+### Managing an asset
+
+Under each card: **Rename**, **Tags** (separated by commas), **Move out of [folder]** when it is in one,
+**Archive** / **Unarchive** (hides it from the usual list) and **Delete**. A deleted asset goes to **Recently
+deleted** at the end of the page, where **Restore** brings it back. Setup, [Space on disk](#space-on-disk), empties
+it for good.
 
 ### Exporting several assets at once
 
@@ -141,6 +161,24 @@ Setup, [Space on disk](#space-on-disk), empties it for good.
 **Export and copy**. For each asset the app takes its newest starred version that is at least prepared, else its
 newest one. An export it already made is reused, a restricted asset is skipped, and a folder that is already there
 is not overwritten. The list **What will be exported** shows the choice before you start.
+
+### The licence of imported assets
+
+Models brought in [many at once](#many-models-at-once) without a clean licence are **Restricted** and cannot be
+exported. Once you know the licence (the models are your own work, or you bought them or have permission):
+**Select assets**, tick them, **Set licence…**, pick **My own work**, **CC0**, **MIT**, **Apache-2.0** or **Other
+licence…** (its name and terms in your own words) and **Set licence**. Every version of those assets may then be
+exported. **Unknown (restricted)** puts the restriction back. One asset's licence can also be set on its page,
+under [Licences](#licences).
+
+The app says how many it changed and why it left the others: an asset that was not brought in that way has no
+licence to set, one with a job running has to wait, and one that also holds something else restricted (an
+experimental engine's output, a restricted material from another asset) stays restricted.
+
+### Several libraries
+
+You can keep assets in several library folders, on other drives too, and open one at a time: Setup, [Library
+folders](#library-folders). Once there are two, a list beside the **Library** heading switches between them.
 
 ---
 
@@ -631,6 +669,30 @@ copy with its materials baked into one texture set (the Bake step is offered whe
 animation are not kept. From there it goes on like a generated one: rig, animate, export. A skeleton that is not
 one of this app's is dropped, and the model is rigged with this app's own.
 
+A character that came in with its skeleton and skin is ready to animate as it is: the Character task's **Fit
+skeleton**, **Edit skeleton** and **Attach to skeleton** work on a skeleton this app fitted, so they stay
+unavailable and say so. To change its bones, change them where the model was made, or fit a new skeleton on the
+uploaded version.
+
+### Many models at once
+
+**Import → Many models (a folder)** brings in a kit or a whole asset library.
+
+1. **Folder or manifest**: type the full path or use **Choose folder…** / **Choose manifest…**.
+   - A folder: every model file in it and its subfolders comes in as a still model, named after the file and
+     tagged with its subfolders' names. A `.gltf` is skipped: zip it with its `.bin` and textures.
+   - A manifest: an `effigy-import/1` file that lists the models with their names, tags and licences (an item with
+     `"rig": true` keeps its skeleton: a character), or a Parkour `library.json`.
+2. **Licence of the models** (where a manifest names none): **My own work**, **CC0 1.0**, **MIT**, **Apache 2.0**,
+   or **Unknown or someone else's: restricted**. A restricted model, and everything made from it, cannot be
+   exported until you [set its licence](#the-licence-of-imported-assets).
+3. **Check** lists every model with its name, tags, licence and what will happen. Nothing is created yet.
+4. **Import N models**. They come in one at a time; the list shows each one's status. **Cancel import** stops the
+   one being imported and keeps the ones already in. The page follows a running import again after a reload.
+
+Importing the same folder or manifest again skips what is already there and brings a changed file in as a new
+version of its asset, keeping the tags you gave it since.
+
 ### An animation for one of your characters
 
 **Import → An animation for a character**: pick the **Character** (it must be skinned already: Character task,
@@ -822,8 +884,9 @@ Each failure says how to fix it.
 ## 12. Editing in Blender
 
 Effigy can open a version in **your own** Blender and take the edited mesh back as a new version. It works with the
-Blender add-ons **Blender MCP Pro** or the free **blender-mcp**: open Blender, press **N**, and start the add-on's
-server. SETUP.md, step 7, has the details. Or let Effigy do it: turn on **Start Blender when it is needed** in
+Blender add-ons **Blender MCP Pro**, Blender's own free **MCP** add-on (Blender 5.1 and newer) or the free
+**blender-mcp**: open Blender and start the add-on's server (the **N** panel; for Blender's own, **Edit →
+Preferences → Add-ons → MCP**). SETUP.md, step 7, has the details. Or let Effigy do it: turn on **Start Blender when it is needed** in
 Setup ([Start Blender](#start-blender)), and **Open … in Blender** starts your Blender and its add-on's server when
 none answers.
 
@@ -889,6 +952,35 @@ The same login as in Get started: **Logged in as …** or **Not logged in**, the
 
 Shows the models folder. Pick another drive or folder and **Move the models there**: the app copies, checks and
 only then deletes; generating waits until it is done.
+
+### Library folders
+
+Keep assets in several library folders and open one at a time, for example one per game or one on an external
+drive. The list shows each folder with its number of assets, **open** for the one in use and **not found** for a
+drive that is not plugged in.
+
+- Pick a folder in the list to open it, or type **Another folder** and **Open this library**: a new folder, an
+  empty one or one that is a library already. A folder with other files in it, or one inside the models folder, is
+  refused.
+- **Forget** takes a folder off the list. Its files stay; open it again any time by its path.
+- A switch waits until no job is queued or running. The app then shows the other library's assets, with their
+  own thumbnails and turntables.
+
+Each library has its own Recently deleted. A [clip pack's clearance](#clip-packs) reaches the open library only:
+open each other one and save it again.
+
+### Clip packs
+
+The animation packs in the models folder's `clips` folder: the built-in ready-made animations and [your own
+packs](#animate). Each card shows the pack's licence and whether it is **Clean** or **Restricted: what you animate
+with it does not export**, and anything wrong with the pack (a clip name another pack already has, a folder
+without a `pack.json`).
+
+For a restricted pack whose licence or permission you now have, pick it (**CC0**, **MIT**, **Apache-2.0**, **My
+own work**, or **Other licence…** with its name and terms) and **Save clearance**. The pack is no longer
+restricted, and neither are the characters you already animated with it in the open library. The note under the
+card says how many versions were lifted and which stay restricted, with the reason (they used another restricted
+pack, or an export made before: export again). Empty the text and **Restrict again** to undo it.
 
 ### Space on disk
 
@@ -1028,7 +1120,8 @@ More, for installing and starting: SETUP.md, "Troubleshooting". When something f
 
 ## 18. Where your files are
 
-Everything stays inside the app folder (the models may be on another drive, see Setup):
+Everything stays inside the app folder, unless you chose other folders in Setup: the models may be on another
+drive ([Where the models are](#where-the-models-are)), and so may a library ([Library folders](#library-folders)).
 
 | Folder | What |
 |---|---|
@@ -1036,6 +1129,10 @@ Everything stays inside the app folder (the models may be on another drive, see 
 | `library\<asset>\NNN_export\` | an export's files, also downloadable from the app |
 | `library\_trash\` | Recently deleted |
 | `models\` | the AI models (Setup, Where the models are) |
+| `models\clips\<pack>\` | an animation pack: the built-in `mesh2motion`, and your own with their `pack.json` |
+
+The folders you see on the Library page are not folders on the disk: an asset's folder is a line in its
+`asset.json`, so moving an asset between them moves no files.
 
 Your own copies of exports go where you save them (**Save all files to the folder**). Uninstalling the app is
 deleting its folder.
@@ -1060,6 +1157,9 @@ deleting its folder.
 | **Skinning, weights** | how much each bone moves each part of the mesh |
 | **Clip** | one animation, such as a walk |
 | **Move set** | a group of clips for a kind of game, such as a brawler |
+| **Clip pack** | a folder of clips with one licence: the built-in ready-made animations, or one you added |
+| **Folder** | where an asset is filed on the Library page; folders can hold folders |
+| **Library folder** | a folder on a drive that holds a whole library; one is open at a time (Setup) |
 | **Sprite sheet** | every frame of a 2D animation in one picture, with its data |
 | **Animation (in a sheet)** | a named run of frames that loops or plays once |
 | **Palette** | the fixed set of colours pixel art uses |
