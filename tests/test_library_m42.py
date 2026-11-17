@@ -153,7 +153,10 @@ def test_turntable_renders_on_the_worker_not_in_the_request(lib, monkeypatch):
         r = lib.get(url)  # the render waits on the gate: this answered without it
         assert (r.status_code, r.json()["error"]["code"]) == (503, "rendering")
         gate.set()
-        assert events.get(timeout=5) == ("thumb", {"kind": "turn", "asset_id": a, "version": "010_clean"})
+        assert events.get(timeout=5) == (
+            "thumb",
+            {"kind": "turn", "asset_id": a, "version": "010_clean"},
+        )
         assert Image.open(io.BytesIO(lib.get(url).content)).n_frames == 24
     finally:
         jobs.unsubscribe(events)
