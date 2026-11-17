@@ -653,7 +653,9 @@ def asset_thumb(asset_id: str):
 @app.get("/api/assets/{asset_id}/versions/{version}/thumb")
 def version_thumb(asset_id: str, version: str):
     library.version_dir(asset_id, version)
-    return _thumb(thumbs.version_thumb(asset_id, version))  # revalidated (304): fixes reach the browser
+    return _thumb(
+        thumbs.version_thumb(asset_id, version)
+    )  # revalidated (304): fixes reach the browser
 
 
 @app.get("/api/assets/{asset_id}/versions/{version}/turntable")

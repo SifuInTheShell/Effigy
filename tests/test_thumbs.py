@@ -107,7 +107,9 @@ def test_a_mesh_render_runs_on_the_worker_not_in_the_request(tmp_path, monkeypat
     monkeypatch.setattr(thumbs, "_render", render)
     events = jobs.subscribe()
     try:
-        assert thumbs.asset_thumb("crate") is thumbs.PENDING  # answered while the render waits on the gate
+        assert (
+            thumbs.asset_thumb("crate") is thumbs.PENDING
+        )  # answered while the render waits on the gate
         assert thumbs.asset_thumb("crate") is thumbs.PENDING  # and queued once
         gate.set()
         done = ("thumb", {"kind": "still", "asset_id": "crate", "version": "001_upload"})

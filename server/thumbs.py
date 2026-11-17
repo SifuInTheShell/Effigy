@@ -29,13 +29,17 @@ PIXEL_STEPS = {
     "pixelize",
     "sprites",
 }  # research 15: their pictures are pixel art, shown with whole pixels
-PENDING = Path("<rendering>")  # a version_thumb answer: the render is queued, a `thumb` event follows
+PENDING = Path(
+    "<rendering>"
+)  # a version_thumb answer: the render is queued, a `thumb` event follows
 
 # ponytail: one worker, one Blender at a time (each is a CPU render beside a job's GPU work); more threads on
 # _loop if a big library's first visit drags
 _work: queue.SimpleQueue = queue.SimpleQueue()
 _queued: set[tuple] = set()
-_failed: dict[tuple, str] = {}  # renders that came to nothing (no Blender, a broken GLB), until a restart
+_failed: dict[
+    tuple, str
+] = {}  # renders that came to nothing (no Blender, a broken GLB), until a restart
 _guard = threading.Lock()
 _worker: threading.Thread | None = None
 
@@ -133,7 +137,9 @@ def _own(files: dict) -> str | None:
 
 
 def _mesh(d: Path, files: dict) -> str | None:
-    return next((v for v in files.values() if v.lower().endswith(".glb") and _has_mesh(d / v)), None)
+    return next(
+        (v for v in files.values() if v.lower().endswith(".glb") and _has_mesh(d / v)), None
+    )
 
 
 def _make(d: Path, outputs: dict, dst: Path, nearest: bool = False, render: bool = True) -> bool:

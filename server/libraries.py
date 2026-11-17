@@ -44,7 +44,8 @@ def folders() -> dict:
         "path": now,
         "source": source,
         "folders": [
-            {"path": p, "exists": os.path.isdir(p), "assets": _count(p)} for p in ([now] if env else _known())
+            {"path": p, "exists": os.path.isdir(p), "assets": _count(p)}
+            for p in ([now] if env else _known())
         ],
     }
 
@@ -66,11 +67,22 @@ def open_folder(path: str) -> dict:
         return folders()
     models = Path(_abs(settings.models_root()))
     if new.is_relative_to(models) or models.is_relative_to(new):
-        raise ApiError(400, "bad_params", f"{new} overlaps the models folder {models}: choose a folder of its own")
+        raise ApiError(
+            400,
+            "bad_params",
+            f"{new} overlaps the models folder {models}: choose a folder of its own",
+        )
     if _busy():
         raise ApiError(409, "busy", "a job is running; switch the library after it ends")
-    if new.is_dir() and any(new.iterdir()) and not _count(str(new)) and not (new / "_trash").is_dir():
-        raise ApiError(409, "not_empty", f"{new} has other files: choose an empty, a new or a library folder")
+    if (
+        new.is_dir()
+        and any(new.iterdir())
+        and not _count(str(new))
+        and not (new / "_trash").is_dir()
+    ):
+        raise ApiError(
+            409, "not_empty", f"{new} has other files: choose an empty, a new or a library folder"
+        )
     try:
         new.mkdir(parents=True, exist_ok=True)
         probe = new / ".effigy-write-test"
@@ -79,7 +91,10 @@ def open_folder(path: str) -> dict:
     except OSError as e:
         raise ApiError(400, "not_writable", f"cannot write to {new}: {e}") from e
     known = _known()
-    settings.write(library=str(new), libraries=[*known, str(new)] if not any(_same(str(new), k) for k in known) else known)
+    settings.write(
+        library=str(new),
+        libraries=[*known, str(new)] if not any(_same(str(new), k) for k in known) else known,
+    )
     jobs.evict()  # a resident worker started with the old EFFIGY_LIBRARY
     thumbs._failed.clear()  # keyed by asset id: another library may have the same ids
     jobs.publish("library", {"path": str(new)})
