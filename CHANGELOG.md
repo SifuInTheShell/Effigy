@@ -4,6 +4,94 @@ What changed for people who use Effigy, newest first. Each release's download an
 [releases page](https://github.com/SifuInTheShell/Effigy/releases); what was built and measured, milestone by
 milestone, is in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) §4.
 
+## Unreleased (on `main` since 0.4.0)
+
+Not in a release yet. Still open on the reference laptop: the finger and animation editor checks (M70 and M69,
+[docs/LAPTOP.md](docs/LAPTOP.md) parts 6 and 7).
+
+### Library
+
+- **Folders.** File an asset in a folder and browse the library like a file browser: a tile per folder, buttons
+  for each level above the cards, the browser's Back to step out. Folders hold folders (`Props/Crates`). **New
+  folder**, **Move to folder…**, **Move out of …** and **Remove folder** (its contents move up one level; nothing
+  is deleted). A search looks in every folder and in folder names.
+- **Bring in many models at once.** **Import → Many models (a folder)** takes a folder (every model file in it,
+  tagged with its subfolders) or a manifest (`effigy-import/1`, or a Parkour `library.json`). **Check** lists
+  what will happen before anything is created; the import runs one model at a time with a status per model and a
+  **Cancel import** that survives a reload. Importing again skips what is there and re-imports a changed file,
+  keeping the tags you gave it since. A manifest item with `"rig": true` keeps its skeleton.
+- **The licence of imported assets.** A batch import without a clean licence is restricted and cannot be exported.
+  **Set licence…** on a selection, or **Licence of this asset** in an asset's Licences panel, states it afterwards:
+  **My own work**, CC0, MIT, Apache-2.0 or **Other licence…** in your own words. The card shows the licence you
+  set instead of **Your file**.
+- **Several libraries.** Setup → **Library folders** keeps a list of library folders, on other drives too, and
+  opens one at a time; a list on the Library page switches between them once there are two.
+- **A card's actions are always in view**: Rename, Tags, Move out, Archive and Delete sit under each card instead
+  of in a More menu.
+
+### Animation
+
+- **Your own clip packs.** A folder of animation GLBs with a `pack.json` in the models folder's `clips` folder
+  joins the ready-made clips, with its own move sets in the **Move set** list. A pack without a clean licence is
+  marked restricted: what you animate with it cannot be exported until you state the licence or permission you
+  got under Setup → **Clip packs**, which also lifts the characters already animated with it.
+- **Duplicate mirrored** (M69): a copy of a clip with left and right swapped, a left-handed swing from a right-handed
+  one.
+- **Butterworth smoothing** (M69): beside the Gaussian; at the same setting it keeps quick moves larger and a clip's
+  ends straight.
+- **Move the hips so a locked leg never goes straight** (M69): with foot locks, the hips follow a planted foot just
+  enough to keep the knee bent.
+- **A character imported with its skeleton** is named as the model to animate. The clip tools and the skeleton
+  tools no longer tell you to fit a skeleton it already has.
+
+### Rigging
+
+- **Better fingers** (M70). Fitting a skeleton now renders each hand close up from eight sides and reads its
+  finger joints with Google's MediaPipe hand model, where before they came from one full-body picture and were
+  often off. Needs the model download in Setup (the pose models).
+
+### Interface
+
+- **A new workspace layout** (M71). Three thin rows above the view, no taller than the old two: the app bar (with the
+  Blender group), the step tabs (with the asset's name) and a **tool strip** with the tools of the chosen
+  tab. The panel on the right shows the one tool you chose, with a line on what it does; the next one is marked
+  with a dot. The **Tools** menu and the folded panel sections are gone. Clean, Simplify, Unwrap and Bake are
+  tools of their own.
+- **Every tool can be looked at.** A tool that does not fit the shown version has a dashed outline and an **ⓘ**
+  mark. Selecting it says what it needs, offers a suitable saved version when there is one, and links to History.
+  Only a tool whose input fits shows its run controls.
+- **History rows are readable at laptop widths**: the version's name and number take their own full-width row,
+  with the row's actions underneath.
+- **Blender on every asset page**, 3D or 2D: a status dot, **Open 004** and **Save back** in
+  the top bar, and a **Blender** button on each History row.
+- **More settings** replaces **Advanced** in the panels that had it.
+- **Run any step** is a developer option: turn on **Developer options** in Setup to show it.
+- The activity bar is one slim line.
+
+### Blender
+
+- **Blender's own MCP add-on** (free, Blender 5.1 and newer, from Blender Lab) works for **Open in Blender** and
+  **Save back**, beside Blender MCP Pro and blender-mcp ([SETUP.md](SETUP.md), step 7).
+
+### Graphics cards
+
+- **RTX 30 series cards run the 3D steps** (issue #16). The bundled GPU kernels are now built for the RTX 30, 40
+  and 50 series. A user's RTX 3080 Laptop (16 GB) ran the Fast chain, texture detail and the standing pose;
+  Faithful is not measured on an RTX 30 yet. Older cards (RTX 20) are still told and refused for the 3D steps.
+
+### Fixes
+
+- The Animate panel said "No ready-made animations found" when the models folder was one chosen in Setup.
+- A very large batch import (about 2,800 models) failed every later model with "Too many open files".
+
+### For agents
+
+- `update_asset` (name, folder, tags, archived) and `move_folder` (rename, move or remove a folder) organise the
+  library; `list_assets` takes `folder=` and returns each asset's folder and tags.
+- `import_batch` and `batch_status` bring in a folder or a manifest of models.
+- `GET /api/clips` names each clip's pack; `GET /api/clip-packs` gives each pack's licence, `restricted` and move
+  sets. Only the owner clears a pack. All described in [mcp/SKILL.md](mcp/SKILL.md).
+
 ## 0.4.0 (2026-11-06)
 
 ### Texture workspace
@@ -61,19 +149,6 @@ reference laptop (RTX 5080, 2026-10-30) so far: connecting clips (M65), the extr
 clearance (M67) ran on one character. The video checks (M64), painting a part (M68) and the checks in a game
 engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
 
-### Interface
-
-- **A new workspace layout** (M71). Three thin rows above the view, no taller than the old two: the app bar (with the
-  Blender group), the step tabs (with the asset's name) and a **tool strip** with the tools of the chosen
-  tab. The panel on the right shows the one tool you chose, with a line on what it does. A tool that does not fit
-  the shown version is greyed out and says why; the next one is marked with a dot. The **Tools** menu and the
-  folded panel sections are gone. Clean, Simplify, Unwrap and Bake are tools of their own.
-- **Blender on every asset page**, 3D or 2D: a status dot, **Open 004** and **Save back** in
-  the top bar, and a **Blender** button on each History row.
-- **More settings** replaces **Advanced** in the panels that had it.
-- **Run any step** is a developer option: turn on **Developer options** in Setup to show it.
-- The activity bar is one slim line.
-
 ### Animation
 
 - **Everyone in a video** (M64). A motion made from a video with more than one person says how many it found
@@ -91,12 +166,6 @@ engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
   clip would swing the forearms or hands through the body (stout and stylised characters). On by default; untick
   **Keep the arms out of the body** in the Animate panel to keep the clips as they come. The animated model's page
   names the clips that were opened and by how much.
-- **Duplicate mirrored** (M69): a copy of a clip with left and right swapped, a left-handed swing from a right-handed
-  one.
-- **Butterworth smoothing** (M69): beside the Gaussian; at the same setting it keeps quick moves larger and a clip's
-  ends straight.
-- **Move the hips so a locked leg never goes straight** (M69): with foot locks, the hips follow a planted foot just
-  enough to keep the knee bent.
 
 ### Textures
 
@@ -138,12 +207,6 @@ engine have not run yet: [docs/LAPTOP.md](docs/LAPTOP.md) lists what is left.
 ### Install
 
 - **The zip's first run no longer needs Git.** On a computer without it, `run.bat` stopped at the skinning environment. It and most optional features now download pinned archives instead. Still needed: Git for Parallax layers, CMake and a C++ compiler for text to motion ([SETUP.md](SETUP.md), Troubleshooting).
-
-### Rigging
-
-- **Better fingers** (M70). Fitting a skeleton now renders each hand close up from eight sides and reads its
-  finger joints with Google's MediaPipe hand model, where before they came from one full-body picture and were
-  often off. Needs the model download in Setup (the pose models).
 
 ### For agents
 

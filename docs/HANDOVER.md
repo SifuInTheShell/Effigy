@@ -8,12 +8,46 @@ generator, the chain, Blender, Claude and the exports have run here and their nu
 **Next session: start at section 2, "Next session".**
 
 Read first: `CLAUDE.md` (rules), this file, then `docs/IMPLEMENTATION.md` §0 (rules), §3 (frozen
-contracts), §6 (never-do) as needed. Install steps are `SETUP.md`; what changed in each release, for users, is `CHANGELOG.md`. **This round's laptop checks (M64 to M68):
+contracts), §6 (never-do) as needed. Install steps are `SETUP.md`; what changed in each release, for users, is `CHANGELOG.md`. **This round's laptop checks (M64 to M70):
 `docs/LAPTOP.md`.** The first laptop session's checklist, done, is `docs/archive/LAPTOP.md`.
 
 ---
 
-## 1. Where things stand (2026-11-06: 0.4.0 texture workspace)
+## 1. Where things stand (2026-11-14: on `main` since 0.4.0, not released)
+
+- **On `main` since 0.4.0 (2026-11-08 to 2026-11-14), not released**. For users: CHANGELOG "Unreleased" and the
+  manual (sections 3, 8, 12, 13). After pulling: rebuild the UI and restart the app (server and step code changed).
+  - **RTX 30 (issue #16, PR #31)**: the wheels are built for `8.6;8.9;12.0` (`wheels.yml` run 42491610866), `MIN_SM`
+    8.6. A user's RTX 3080 Laptop passed `tools.smoke_m1` and sent a `gpu_report`; Faithful is still unmeasured on an
+    RTX 30 (`docs/research/16-bigger-gpus.md` §4).
+  - **M69 animation editor, M70 fingers, M71 workspace layout (2026-11-09)**: mirrored clips, Butterworth smoothing
+    and hips for locked legs; finger joints from close-up renders of each hand (MediaPipe); step tabs, a tool strip
+    and one tool in the panel. IMPLEMENTATION §4, near the end. **Their laptop checks are open**: `docs/LAPTOP.md` parts 6
+    (M70) and 7 (M69). IMPLEMENTATION uses the number M69 twice: the texture workspace of 0.4.0 and this editor work.
+  - **Workspace follow-up (PR #22)**: every tool can be inspected; one that does not fit the shown version has a
+    dashed outline and says what it needs (`toolHelp` in `ui/src/workflow.ts`). History rows keep the version's
+    name readable at 900 px.
+  - **Batch import (research 18, 2026-11-10; PR #23)**: a folder or a manifest of models into the library
+    (`server/batch.py`, Import → Many models, MCP `import_batch` / `batch_status`), Cancel import, an item with
+    `"rig": true` keeps its skeleton, a re-import keeps the asset's tags. A batch of about 2,800 models ran into
+    "Too many open files": `server/jobs.py` now closes a finished step's pipes. Skipped on purpose: the import
+    options `keep_pivot`, `collision`, `keep_parts` (IMPLEMENTATION "Batch import").
+  - **Library folders (2026-11-10 to 2026-11-13; PRs #22, #29)**: `asset.json.folder` is a path (`Props/Crates`); New
+    folder, Move to folder…, Move out, Remove folder; the card's actions always in view; MCP `update_asset`,
+    `move_folder`, `list_assets(folder=)`.
+  - **Several libraries (PR #25)**: Setup → Library folders, a switcher on the Library page; `settings.json`
+    `libraries` and `library`, `server/libraries.py`. `EFFIGY_LIBRARY`, when set, is the only library.
+  - **The licence of an imported asset (PRs #26, #28)**: Set licence… on a Library selection and Licence of this asset
+    in the Licences panel lift or restore a batch import's restriction (`POST /api/assets/license`). Hunyuan outputs
+    stay restricted.
+  - **Clip packs as data (PR #27)**: `<models>/clips/<pack>/pack.json` (`effigy-clip-pack/1`) beside the built-in
+    Mesh2Motion, with their own licence and move sets; a restricted pack restricts the animated version; the owner's
+    clearance in Setup → Clip packs (`server/clip_packs.py`). The spec `docs/clip_packs_spec.md` is the owner's and
+    is not in the repo.
+  - **Blender's own MCP add-on (2026-11-11)**: the live link also speaks to Blender Lab's add-on on port 9876
+    (SETUP step 7; IMPLEMENTATION §3, the Blender link).
+  - **Small ones**: the Animate panel lists the clips from the models folder chosen in Setup (PR #24); an imported
+    rig is named as the skinned model and its skeleton tools say why they are unavailable (PR #30).
 
 - **0.4.0 (2026-11-06)**: dedicated model/standalone texture workflows, material Library/import/export,
   the map painter, AI upscaling and the complete MCP surface. Research: `docs/research/17-texture-workspace.md`;
@@ -253,11 +287,19 @@ contracts), §6 (never-do) as needed. Install steps are `SETUP.md`; what changed
 
 ## 2. What to do here, in order
 
-### Next session (after 2026-10-16)
+### Next session (after 2026-11-14)
 
 Done and recorded elsewhere: the 2D roadmap (M54–M57) and the bigger GPUs (M46a–c: IMPLEMENTATION's M46 sections,
 `docs/bench/m46.md`, research 16; what is left there is the users' GPU reports for the 24/32 GB thresholds), the
 agent's hoarding findings 1–22 (4 built as Setup's Start Blender; 5 decided: the port stays 8000).
+
+0. **Validate M70 and M69** (2026-11-09, their laptop checks open): `docs/LAPTOP.md` part 6 (fit a skeleton on the M22
+   bench characters, `hands_by` per hand, the numbers into a new `docs/bench/m70.md`) and part 7 (Duplicate mirrored,
+   Butterworth, the hips for locked legs on the viking).
+0. **Left open by the work since 0.4.0** (IMPLEMENTATION "Batch import", "Library folders", "Several libraries"):
+   the batch import options `keep_pivot`, `collision` and `keep_parts`, and `TEXCOORD_1` through import and export
+   (they need Blender); the Parkour library's import with its time per asset and peak memory recorded; Faithful on
+   an RTX 30 card; renaming a folder in the UI and a folder in batch import (add when asked).
 
 0. **Validate M68** (built in the cloud, 2026-10-30, never run on a GPU): `docs/LAPTOP.md` part 5, a painted lock
    on the chest and a belt on a character.
@@ -319,7 +361,7 @@ The notes of 2026-10-06 to 2026-10-12 (all done or superseded) are in [archive/h
 
 | Path | What |
 |---|---|
-| `server/` | FastAPI backend: `app.py` routes, `jobs.py` (subprocess jobs, GPU lock, resident worker, env for children), `library.py` (versions, `meta.json`), `models.py` (Models page), `blender_client.py` (live link), `claude_runner.py`, `presets.py` (`PRESETS`, `CHAINS`, `LOWER`), `blender_install.py` / `gltfpack_install.py` (pinned first-run downloads) |
+| `server/` | FastAPI backend: `app.py` routes, `jobs.py` (subprocess jobs, GPU lock, resident worker, env for children), `library.py` (versions, `meta.json`), `libraries.py` (several library folders, one open), `batch.py` (batch import, an imported asset's licence), `clip_packs.py` (a clip pack's clearance), `models.py` (Models page), `blender_client.py` (live link), `claude_runner.py`, `presets.py` (`PRESETS`, `CHAINS`, `LOWER`), `blender_install.py` / `gltfpack_install.py` (pinned first-run downloads) |
 | `steps/` | one process per step (§3.1 protocol in `_common.py`): `brief`, `concepts`, `prep`, `trellis2` (generate + texture), `clean`, `remesh`, `uv`, `bake`, `validate`, `export`; helpers `_bake.py` (UV raster + volume sampling, replaces nvdiffrast), `_mesh.py`, `_image.py`, `_birefnet.py`, `_blender.py` |
 | `engine/trellis2/` | vendored upstream TRELLIS.2 (unmodified) + `patches.py` (runtime patches) + `PATCHES.md` (every patch, why, test) + the two Windows wheel patches |
 | `engine/pixal3d/` | vendored Pixal3D + NAF (unmodified) + `patches.py` (na2d on torch, NAF loader, shared DINOv3) |
@@ -327,11 +369,14 @@ The notes of 2026-10-06 to 2026-10-12 (all done or superseded) are in [archive/h
 | `mcp/effigy_server.py`, `.mcp.json`, `prompts/` | the `effigy` MCP server, MCP config (effigy + Blender MCP Pro), Claude presets |
 | `ui/` | React + three.js (`src/main.tsx`, `src/viewer/Viewer.ts`), Playwright tests in `ui/tests/` |
 | `tools/` | `download_models.py` + `models_manifest.json` (pinned models; the manifest is also read by `server/install.py` and `server/models.py`), `smoke_m1.py` (GPU troubleshooting), `bench.py`, `creature_bench.py` (M41's fit table), `gpu_report.py` (M46's report from other cards), `templates.py` (writes the creature templates' bones, M36), `ui_stale.py` (is `ui/dist` older than the UI source; `run.bat` and `package.py`), `package.py` (zip) |
-| `wheels/` | our sm_120 CUDA wheels (built by `wheels.yml`) |
+| `wheels/` | our CUDA wheels for sm_86, sm_89 and sm_120 (built by `wheels.yml`) |
 | `docs/` | PLAN, ARCHITECTURE, IMPLEMENTATION (contracts + milestones), WORKFLOW, SETUP, MANUAL, this file, `bench/`, `research/`, `howto/`, `ux-review/`, `archive/` (finished plans and history) |
 
 Library on disk: `library/<asset>/<NNN>_<step>/` with `meta.json` (step, parent, params, metrics,
-licences, frame). Models: `models/` (local copies) + `models/hub/` (HF cache: BiRefNet, Z-Image).
+licences, frame); `asset.json` carries `folder` (the Library page's folder path), `tags` and, for a batch import,
+`origin`. More library folders: Setup → Library folders (`settings.json` `libraries`, `library`); `EFFIGY_LIBRARY`
+overrides them. Models: `models/` (local copies) + `models/hub/` (HF cache: BiRefNet, Z-Image) +
+`models/clips/<pack>/` (clip packs).
 
 ## 4. Dev checkout on this laptop (reuse the zip install's downloads)
 

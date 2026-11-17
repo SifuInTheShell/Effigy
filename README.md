@@ -124,7 +124,7 @@ or a GLB. [Working with textures](docs/howto/work-with-textures.md) covers the w
     <td valign="top">
       <h4>Animate</h4>
       <ul>
-        <li>178 CC0 human clips and the creatures' own, retargeted onto your rig</li>
+        <li>178 CC0 human clips and the creatures' own, retargeted onto your rig; your own clip packs beside them, each with its licence and move sets</li>
         <li>A new motion from a sentence (NVIDIA Kimodo) or from a video (NVIDIA GEM-X): every person in it, a camera that pans to follow</li>
         <li>Transitions made by Kimodo from one clip's last pose into another's first</li>
         <li>Arms kept out of the body when a clip made for a slimmer figure meets a stout one</li>
@@ -149,7 +149,7 @@ or a GLB. [Working with textures](docs/howto/work-with-textures.md) covers the w
         <li>Bring your own model: clean it, bake its textures onto the simpler mesh, rig and animate it</li>
         <li>Animations made elsewhere (FBX, GLB, BVH on a Mixamo, Unreal or Kimodo skeleton) onto your characters</li>
         <li>Out: Godot, Unreal (LODs, UCX collision), Unity (LODs), web and AR (GLB + USDZ), OBJ, print (STL, 3MF); sprite sheets for Godot 2D and Unreal Paper2D</li>
-        <li>Batch-export a whole selection into a folder</li>
+        <li>Batch-import a folder or a manifest of models, each with its tags and licence; batch-export a whole selection into a folder</li>
       </ul>
     </td>
   </tr>
@@ -166,6 +166,7 @@ or a GLB. [Working with textures](docs/howto/work-with-textures.md) covers the w
       <ul>
         <li>Versions per asset (<code>001_upload</code>, <code>002_clean</code>, …), never overwritten</li>
         <li>Thumbnails, turntables, compare two versions, tags, stars, licence badges</li>
+        <li>Folders in folders, and several libraries (one per game, or on another drive) with one open at a time</li>
         <li>Memory safeguards: a measured VRAM need per step, one GPU job at a time, refusals before an out-of-memory instead of a frozen machine</li>
       </ul>
     </td>
@@ -286,7 +287,7 @@ you can't ship) is in [docs/PLAN.md §6](docs/PLAN.md#6-licence-policy).
 
 | | |
 |---|---|
-| **GPU** | An NVIDIA card with 16 GB (the reference is an RTX 5080 Laptop; 12 GB works for the *Fast* engine, best effort). The bundled CUDA kernels are built for the RTX 30, 40 and 50 series (RTX 30: untested here, see issue #16); older cards need a rebuild (`.github/workflows/wheels.yml`). |
+| **GPU** | An NVIDIA card with 16 GB (the reference is an RTX 5080 Laptop; 12 GB works for the *Fast* engine, best effort). The bundled CUDA kernels are built for the RTX 30, 40 and 50 series (RTX 30: a user's 3080 Laptop ran the *Fast* chain, *Faithful* is not measured there yet; [numbers](docs/research/16-bigger-gpus.md#4-which-cards)); older cards need a rebuild (`.github/workflows/wheels.yml`). |
 | **AMD GPU** | An AMD Radeon RX 9070 or 9070 XT runs the *Fast* chain end to end, about as fast as the reference laptop ([bench](docs/bench/amd-rocm.md)). `run.bat` sees the card and installs the AMD (ROCm) environment by itself ([how-to](docs/howto/amd-rocm-windows.md)). Not on AMD yet: *Faithful*, the character chain, motion from text or video, and other AMD cards. |
 | **OS** | Windows 11, driver 575 or newer. Linux runs from source with the same `uv sync`, but the three kernel wheels are Windows builds: bring your own. |
 | **Disk** | 70–160 GB, mostly models; they can live on another drive. |
@@ -306,7 +307,10 @@ The `effigy` MCP server (`mcp/effigy_server.py`) gives any MCP client the whole 
 
 | Browse | Make | Finish | Blender |
 |---|---|---|---|
-| `list_assets`, `get_asset`, `get_version`, `describe_steps`, `look` (rendered previews the agent can see), `read_file`, `fit_check` | `create_asset`, `import_file`, `run_step`, `job_status`, `cancel_job` | `validate`, `export` | `open_in_blender`, `pull_from_blender`, `close_in_blender` |
+| `list_assets`, `get_asset`, `get_version`, `describe_steps`, `look` (rendered previews the agent can see), `read_file`, `fit_check` | `create_asset`, `import_file`, `import_batch`, `batch_status`, `run_step`, `job_status`, `cancel_job` | `validate`, `export` | `open_in_blender`, `pull_from_blender`, `close_in_blender` |
+
+`update_asset` (name, folder, tags, archived) and `move_folder` organise the library; nothing an agent can call
+deletes an asset.
 
 Texture/material workflows also expose `inspect_textures`, `texture_map`, `edit_texture`, `extract_material` and
 `import_texture_set`. Agents can create standalone materials, import separate or packed engine maps, edit/paint
@@ -329,7 +333,7 @@ becomes a new asset, nothing is overwritten).
 ## Status
 
 Effigy is young (started October 2026) and has been exercised on **one machine**, plus a contributor's AMD
-card for the *Fast* chain. What's in the benches under [`docs/bench/`](docs/bench/) is real and measured; what
+card and a user's RTX 3080 Laptop for the *Fast* chain. What's in the benches under [`docs/bench/`](docs/bench/) is real and measured; what
 isn't there hasn't been run. Known limits:
 
 - Windows first; Linux from source only. No macOS (no CUDA).
