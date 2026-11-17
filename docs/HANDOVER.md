@@ -13,10 +13,11 @@ contracts), §6 (never-do) as needed. Install steps are `SETUP.md`; what changed
 
 ---
 
-## 1. Where things stand (2026-11-14: on `main` since 0.4.0, not released)
+## 1. Where things stand (2026-11-17: 0.5.0 library folders, batch import, clip packs, RTX 30)
 
-- **On `main` since 0.4.0 (2026-11-08 to 2026-11-14), not released**. For users: CHANGELOG "Unreleased" and the
+- **0.5.0 (2026-11-17)**: the work on `main` from 2026-11-08 to 2026-11-14. For users: CHANGELOG "0.5.0" and the
   manual (sections 3, 8, 12, 13). After pulling: rebuild the UI and restart the app (server and step code changed).
+  The zip was built on the work machine (no GPU): no step ran on a GPU for this release.
   - **RTX 30 (issue #16, PR #31)**: the wheels are built for `8.6;8.9;12.0` (`wheels.yml` run 42491610866), `MIN_SM`
     8.6. A user's RTX 3080 Laptop passed `tools.smoke_m1` and sent a `gpu_report`; Faithful is still unmeasured on an
     RTX 30 (`docs/research/16-bigger-gpus.md` §4).

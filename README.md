@@ -7,7 +7,7 @@
 <p align="center">
   <b>Game-ready 3D assets, textures and 2D sprites from a picture or a sentence, made on your own GPU.</b><br>
   Generate, clean, retopologize, texture, rig, animate and export, offline, on one 16 GB NVIDIA card.<br>
-  New in 0.4.0: a texture workspace, standalone materials, texture painting and AI upscaling.
+  New in 0.5.0: library folders, batch import, your own animation packs, RTX 30 series cards.
 </p>
 
 <p align="center">
