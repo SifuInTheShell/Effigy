@@ -218,6 +218,19 @@ their own (step 5, part 2): delete that folder too.
 
 ## Troubleshooting
 
+If startup stops, read the failure summary in the `run.bat` window. The launcher keeps its setup output in
+`run.log` beside `run.bat` and recreates that log each time it starts. To keep the console visible while
+starting from PowerShell, use your Effigy folder:
+
+```powershell
+Set-Location "C:\Effigy"
+.\run.bat
+```
+
+Attach `run.log` to a support request if the problem continues. After fixing the reported problem, you can
+start Effigy again. Do not delete `library\`, `models\` or `settings.json` as a general troubleshooting step;
+preserve them and the existing environments unless Setup gives you a specific repair action.
+
 | Problem | Fix |
 |---|---|
 | "Windows protected your PC" | More info → Run anyway; or Unblock the zip before unpacking (step 2) |
@@ -253,6 +266,10 @@ their own (step 5, part 2): delete that folder too.
 ## Appendix: developer setup from Git (instead of the zip)
 
 Only if you want to change the code. Needs Git, uv and Node.js:
+
+Launcher integration tests and non-interactive automation can set `EFFIGY_NO_PAUSE=1` to make a startup
+failure return without waiting for keyboard input. Leave it unset for normal use so the failure summary stays
+on screen.
 
 ```powershell
 winget install --id Git.Git -e
