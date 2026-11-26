@@ -144,6 +144,12 @@ time and helps every machine, so it is on everywhere once measured.
 3. Is +12 GB of disk for the fp16 twins acceptable, or only if items 1–4 fall short?
 4. A call for 8 GB / 16 GB-RAM testers on GitHub once M74 is on a branch?
 
+**Decided (owner, 2026-11-26):**
+1. Available VRAM always goes first: M73–M75 before M76.
+2. Yes: a slower decode on the cards that need the chunked paths is acceptable.
+3. Yes: +12 GB of disk for the fp16 twins is acceptable.
+4. Open.
+
 ## Sources
 
 - andrakis/TRELLIS.2-stableprojectorz, `269b74c` (2026-11-27): README ("Lower System-RAM Use", measured table),
