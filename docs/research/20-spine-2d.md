@@ -12,8 +12,8 @@ skeletal animation of Effigy's own 2D assets is in, video-model animation stays 
   the tool is Spine 2D by Esoteric Software.
 - **What Effigy would do:** generate the art *and* the rig *and* the animations, and export Spine's own files
   (skeleton JSON + texture atlas) that the Spine editor opens and the game's Spine runtime plays.
-- **Licence shape:** Effigy writes Spine's documented file format and never ships Spine's code. The game that plays
-  the files needs a Spine Editor licence (that is the owner's, for the game). Effigy's preview is our own renderer.
+- **Format only:** Effigy writes Spine's documented file format (JSON + atlas) and never includes Spine's own code;
+  the preview is our own renderer (§4).
 - **Effigy's head start:** concepts and cut-outs for symbols, the `layers` step for backgrounds (already a depth-split,
   inpainted layer stack), and rigged, animated 3D characters, which can be turned into clean 2D part layers with a
   projected skeleton and converted clips: the hardest step of 2D rigging (splitting a picture into parts and painting
@@ -48,8 +48,7 @@ Checked against WORKFLOW.md, PLAN §1 and research 15 (2026-11-27):
 | SP7 Godot `Skeleton2D` (later Unity) | fits | Finish |
 | In-app clip/curve/weight editing | out (not a DCC) | the Spine editor |
 
-Worth building only if the game uses Spine (the owner's Spine licence); otherwise SP7 gives the same rigs to Godot
-without a licence.
+Worth building if the game plays Spine files; SP7 gives the same rigs to Godot.
 
 ## 3. What slot games animate
 
@@ -63,20 +62,15 @@ without a licence.
 Spine has no particle system of its own: slot games either fake particles with many bones or use the engine's
 particles beside Spine. Frame-by-frame pieces (flames, sparkles) live inside Spine as sequence attachments.
 
-## 4. Licence
+## 4. Boundary: Spine's format, not Spine's code
 
-- **The game:** any product that integrates the Spine Runtimes needs a valid Spine Editor licence at integration time
-  (Spine Runtimes License, 2025-04-05; Spine Editor License §2). Forum answers from Esoteric: Essential below
-  ~US$500k annual revenue, Enterprise above; the trial grants no runtime rights. This is the owner's purchase for the
-  game, not Effigy's.
-- **Effigy:** the JSON (and binary) format is publicly documented, and Spine imports data from other tools in it.
-  Writing those files is our own code (MIT). Effigy must **not** bundle or depend on spine-runtimes (spine-ts,
-  spine-core, spine-player), including as a dev or test dependency: the runtime licence ties every use to an editor
-  licence. Our preview renders our own data model (§6).
-- **Generated art:** the same models and licence profile as the rest of the 2D studio (PLAN §6; research 15): Z-Image,
-  BiRefNet, our Blender renders; credits and `LICENSES.json` carried into the export like every other export.
-- **Research 15** listed "Spine runtimes need a Spine Editor licence → no": still true for Effigy using Spine's code;
-  this plan only writes files a licensed game plays.
+- Effigy writes Spine's publicly documented JSON (and later binary) format and its atlas text format; Spine imports
+  data from other tools in this format. All of it is our own code.
+- Effigy never contains, depends on or calls Spine's own code: no spine-runtimes (spine-ts, spine-core,
+  spine-player), not as a dependency, not in tests, not in the preview. Our preview renders our own data model (§6).
+  Checking the files in the Spine editor and the game's runtime happens outside Effigy (§8).
+- Generated art follows the rest of the 2D studio (PLAN §6; research 15): Z-Image, BiRefNet, our Blender renders;
+  `CREDITS.txt` and `LICENSES.json` carried into the export like every other export.
 
 ## 5. What Effigy has today
 
@@ -126,7 +120,7 @@ player, and part splitting for flat pictures.
 ## 7. Roadmap
 
 Effort is for code and tests here; every milestone ends with a check in the Spine editor and the target runtime on
-the owner's machine (needs the owner's Spine licence).
+the owner's machine, in the Spine editor and the game's runtime.
 
 ### SP1: Spine format core (symbol with one part)
 
@@ -221,7 +215,7 @@ the owner's machine (needs the owner's Spine licence).
 
 ### SP7: Other targets from the same `rig2d.json`
 
-- Godot 4 `Skeleton2D` + `Bone2D` + `Polygon2D` scene with an `AnimationPlayer` (MIT runtime, no licence needed),
+- Godot 4 `Skeleton2D` + `Bone2D` + `Polygon2D` scene with an `AnimationPlayer` (MIT),
   then Unity 2D Animation if wanted. Only after SP1–SP3 prove the model.
 - Effort: 3–5 days per engine.
 
@@ -251,21 +245,14 @@ the owner's machine (needs the owner's Spine licence).
 
 1. Spine version and runtime: which Spine version does the game use (4.2?), and which runtime/engine (PixiJS,
    Phaser, Unity, Godot via spine-godot, Cocos)?
-2. Who holds the Spine licence for the game (needed for the owner's validation runs from SP1 on)?
-3. Premultiplied alpha on or off (the runtime's setting), atlas page limit (2048 or 4096), target resolution of
+2. Premultiplied alpha on or off (the runtime's setting), atlas page limit (2048 or 4096), target resolution of
    symbols (e.g. 256 or 512 px) and of backgrounds.
-4. Order after SP1: symbols (SP2), then backgrounds (SP3) and effects (SP4), then characters (SP5)? Or characters
+3. Order after SP1: symbols (SP2), then backgrounds (SP3) and effects (SP4), then characters (SP5)? Or characters
    earlier? (SP6 is parked, §2.)
-5. Clip naming conventions and default durations the game's code expects.
+4. Clip naming conventions and default durations the game's code expects.
 
 ## Sources
 
-- Spine Runtimes License Agreement (2025-04-05): https://raw.github.com/EsotericSoftware/spine-runtimes/master/LICENSE
-- Spine Editor License Agreement: https://en.esotericsoftware.com/spine-editor-license
-- Esoteric, "Our new licensing explained": https://us.esotericsoftware.com/blog/Our-new-licensing-explained
-- Purchase Spine: https://esotericsoftware.com/spine-purchase
-- Forum, licence for runtimes: https://ru.esotericsoftware.com/forum/d/17246-license-for-runtimes ;
-  runtimes and licensing: https://ar.esotericsoftware.com/forum/d/4984-runtimes-ampamp-licensing
 - Spine JSON export format: https://esotericsoftware.com/spine-json-format ; binary format:
   https://esotericsoftware.com/spine-binary-format ; export: https://esotericsoftware.com/spine-export
 - spine-core 4.2 `SkeletonJson` (reference for field meanings only, not to be vendored):

@@ -188,7 +188,7 @@ of renders are candidates for the plan.**
 | frame interpolation | Practical-RIFE 4.26 (MIT code + weights), FILM (Apache-2.0, archived) | allowed | – | <2 GB | for frame-doubling *rendered* sprites before pixelizing; no evidence any interpolator works on hard-edged pixel art; GIMM-VFI is S-Lab NC → never |
 | **2D cutout rig** | Meta **Animated Drawings** (archived 2025-09): MIT end to end (detector + pose Apache-2.0 trained on the MIT Amateur Drawings set, numpy ARAP, BVH retarget configs; bundled BVH: CMU (free incl. commercial, acknowledgement) and Meta's own MIT clips) | MIT | allowed | CPU | reuse only the pure-Python ARAP + retarget; keypoints from our DWPose; **our 52-joint clips exported as BVH drive it** (the tool projects to 2D); Py 3.8/TorchServe parts are not needed |
 | 2D cutout, anime | Stretchy Studio (MIT: layered PSD → auto-rig via DWPose + mesh deform), See-through (Apache-2.0, SIGGRAPH 2026: single anime image → inpainted part layers, SDXL-based) | allowed | – | SDXL class | later, if 2D-native characters are wanted |
-| engine runtimes | Godot Skeleton2D/Bone2D/Polygon2D (MIT), Rive (MIT) | allowed | – | – | Spine runtimes need a Spine Editor licence → never in Effigy; writing Spine's documented JSON + atlas for a game that holds the licence is fine (research 20); DragonBones MIT but abandoned |
+| engine runtimes | Godot Skeleton2D/Bone2D/Polygon2D (MIT), Rive (MIT) | allowed | – | – | Spine: Effigy writes its documented JSON + atlas, never Spine's own code (research 20); DragonBones MIT but abandoned |
 
 ### 4.4 Why not 2D-native frame generation for characters (evidence)
 
@@ -323,8 +323,8 @@ No `video` step, no Wan2.2 download, no video group on the Setup page.
 
 **Revised by the owner, 2026-11-27:** *skeletal* animation of Effigy's own 2D assets is in scope: pictures,
 symbols, `layers` stacks and characters cut into parts, rigged with 2D bones and meshes, and given keyframed clips
-(procedural or converted from the 3D rig's clips), exported for Spine (its documented JSON + atlas; the game holds
-the Spine licence, Effigy never ships Spine's code) and engine 2D skeletons (Godot `Skeleton2D`). The plan is
+(procedural or converted from the 3D rig's clips), exported for Spine (its documented JSON + atlas; never Spine's own
+code) and engine 2D skeletons (Godot `Skeleton2D`). The plan is
 research 20. Still out: video-model animation (the paragraph below), and in-app animation editing beyond choosing
 and tuning generated clips: a timeline, curve or weight editor is the Spine editor's job, as Blender is for 3D
 (PLAN §1: not a full DCC tool). The research stays in §4.3; the trigger for
