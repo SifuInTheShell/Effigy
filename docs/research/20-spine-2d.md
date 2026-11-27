@@ -1,7 +1,8 @@
 # 20. Spine 2D skeletal animation for slot games: research and roadmap
 
-Status: proposal, 2026-11-27, nothing built. The milestones are named **SP1–SP7** here and get their M numbers when
-each one starts (M72 is taken by the Blender unwrapper, M73–M77 by research 19's low-VRAM plan).
+Status: proposal, 2026-11-27, nothing built. In scope since the owner's revision of research 15 §5.7 (2026-11-27):
+skeletal animation of Effigy's own 2D assets is in, video-model animation stays out (§2). The milestones are named
+**SP1–SP7** here and get their M numbers when each one starts (M72 is taken by the Blender unwrapper, M73–M77 by research 19's low-VRAM plan).
 
 ## 1. Bottom line
 
@@ -18,9 +19,39 @@ each one starts (M72 is taken by the Blender unwrapper, M73–M77 by research 19
   projected skeleton and converted clips: the hardest step of 2D rigging (splitting a picture into parts and painting
   what is hidden) disappears for characters made in 3D.
 - **Order:** format core + symbols (SP1–SP2) → backgrounds (SP3) → win effects (SP4) → 3D characters (SP5) →
-  picture-only characters (SP6, research-heavy) → other engines (SP7).
+  other engines (SP7). Picture-only characters (SP6) are parked (§2).
+- **Fit:** in scope after the owner's revision of research 15 §5.7; a new 2D task **Animate** and a `spine` export
+  profile in Finish; characters through the 3D Character task (§2). No in-app animation editor.
 
-## 2. What slot games animate
+## 2. Where it fits in Effigy's workflow
+
+Checked against WORKFLOW.md, PLAN §1 and research 15 (2026-11-27):
+
+- **Scope:** research 15 §5.7 was revised by the owner: skeletal animation (bones, meshes, keyframed clips) of
+  Effigy's own pictures, layers and characters is in scope; video models stay out. PLAN §1's non-goal still holds:
+  Effigy is not a DCC tool, so it generates the rig and clips and lets the user choose and tune them (template,
+  intensity, duration, loop); a timeline, curve or weight editor is the Spine editor's job, as Blender is for 3D
+  (WORKFLOW ⑦).
+- **3D asset journey** (Reference → Generate → Prepare → Textures → Character → Finish): SP5 sits in **Character**
+  beside `sprites` (the existing 3D → 2D route: an animated character drawn as 2D), its export in **Finish**.
+- **2D asset journey** (Picture → Pixelize → Layers → Tiles → Edit → Finish): a new task **Animate** between Edit and
+  Finish (`ui/src/workflow.ts` `TASKS_2D`) for symbols (from Picture), backgrounds (from Layers) and effects; the
+  Spine export in **Finish** beside `godot-2d`, `unreal-2d` and `aseprite`.
+- **Agents:** the same steps over MCP (`describe_steps`, `run_step`), like every step.
+
+| Part | Fit | Where |
+|---|---|---|
+| SP1 Spine export core | fits | Finish (export profile `spine`) + the first Animate task |
+| SP2 symbols, SP3 backgrounds, SP4 win effects | fits (after the §5.7 revision) | 2D: Animate → Finish |
+| SP5 characters from 3D | fits best: research 15's "2D characters from the 3D rig", skeletal instead of frames | 3D: Character → Finish |
+| SP6 characters from a single picture | **parked**: research 15 §4.4's identity finding and the 3D route (SP5) cover characters better | – |
+| SP7 Godot `Skeleton2D` (later Unity) | fits | Finish |
+| In-app clip/curve/weight editing | out (not a DCC) | the Spine editor |
+
+Worth building only if the game uses Spine (the owner's Spine licence); otherwise SP7 gives the same rigs to Godot
+without a licence.
+
+## 3. What slot games animate
 
 | Content | Typical animations | Spine features used |
 |---|---|---|
@@ -32,7 +63,7 @@ each one starts (M72 is taken by the Blender unwrapper, M73–M77 by research 19
 Spine has no particle system of its own: slot games either fake particles with many bones or use the engine's
 particles beside Spine. Frame-by-frame pieces (flames, sparkles) live inside Spine as sequence attachments.
 
-## 3. Licence
+## 4. Licence
 
 - **The game:** any product that integrates the Spine Runtimes needs a valid Spine Editor licence at integration time
   (Spine Runtimes License, 2025-04-05; Spine Editor License §2). Forum answers from Esoteric: Essential below
@@ -41,13 +72,13 @@ particles beside Spine. Frame-by-frame pieces (flames, sparkles) live inside Spi
 - **Effigy:** the JSON (and binary) format is publicly documented, and Spine imports data from other tools in it.
   Writing those files is our own code (MIT). Effigy must **not** bundle or depend on spine-runtimes (spine-ts,
   spine-core, spine-player), including as a dev or test dependency: the runtime licence ties every use to an editor
-  licence. Our preview renders our own data model (§5).
+  licence. Our preview renders our own data model (§6).
 - **Generated art:** the same models and licence profile as the rest of the 2D studio (PLAN §6; research 15): Z-Image,
   BiRefNet, our Blender renders; credits and `LICENSES.json` carried into the export like every other export.
 - **Research 15** listed "Spine runtimes need a Spine Editor licence → no": still true for Effigy using Spine's code;
   this plan only writes files a licensed game plays.
 
-## 4. What Effigy has today
+## 5. What Effigy has today
 
 | Need | Existing piece | Notes |
 |---|---|---|
@@ -63,7 +94,7 @@ particles beside Spine. Frame-by-frame pieces (flames, sparkles) live inside Spi
 Missing: a 2D rig data model, a Spine JSON writer, an atlas packer, 2D meshes and weights, 2D keyframe clips, a 2D rig
 player, and part splitting for flat pictures.
 
-## 5. Design
+## 6. Design
 
 - **One internal format, `rig2d.json`** (ours, versioned): bones (name, parent, length, rest x/y/rotation/scale),
   slots (name, bone, attachment, blend `normal|additive|multiply|screen`, colour, draw order), attachments (region:
@@ -74,7 +105,7 @@ player, and part splitting for flat pictures.
 - **Steps** (each a new version, append-only like every step):
   - `rig2d`: builds `rig2d.json` + part images from an input version (a picture, a `layers` version, a rigged 3D
     version); `params.kind` = `symbol|background|effect|character`, a template, and options.
-  - `clips2d`: adds or replaces animations in a `rig2d` version from the clip library (§6, SP2/SP4) or converts 3D
+  - `clips2d`: adds or replaces animations in a `rig2d` version from the clip library (§7, SP2/SP4) or converts 3D
     clips (SP5). Separate from `rig2d`, so re-timing never rebuilds the art.
   - `export` profile **`spine`**: `<asset>.json` (Spine JSON, pinned version), `<asset>.atlas` + page PNGs, optional
     `.skel` later, `CREDITS.txt`, `LICENSES.json`, `README.txt` (runtime version, premultiplied alpha or not, scale).
@@ -92,7 +123,7 @@ player, and part splitting for flat pictures.
 - **MCP and UI:** both steps and the export profile through the existing surfaces (describe_steps, run_step, the 2D
   task list); a "Spine" task in the 2D studio with kind, template, clip picker and preview.
 
-## 6. Roadmap
+## 7. Roadmap
 
 Effort is for code and tests here; every milestone ends with a check in the Spine editor and the target runtime on
 the owner's machine (needs the owner's Spine licence).
@@ -138,7 +169,7 @@ the owner's machine (needs the owner's Spine licence).
 - Clips: `ambient` (slow drift per layer by its depth), `sway` (mesh deform on a selected layer: foliage, cloth,
   water; a bone chain with weights falling off from the anchor edge), `flicker`/`pulse` (additive light layer),
   seamless loops (all timelines end where they start).
-- First 2D meshes and weights (§5), shared with SP5.
+- First 2D meshes and weights (§6), shared with SP5.
 - **Acceptance:** loop seams zero (sampled start = end), mesh checks (no flipped triangles at rest and at extreme
   keys, every vertex weighted, ≤ 4 bones per vertex, weights sum to 1), atlas size within the chosen page limit.
   **Owner:** a background behind the reels in the runtime, frame rate checked on the target device.
@@ -165,7 +196,7 @@ the owner's machine (needs the owner's Spine licence).
   toon or flat, outline, same resolution). Every part is complete; nothing needs inpainting. Overlap margins at the
   joints (render each part with its neighbours' faces near the joint) so bends do not open gaps.
 - **Skeleton:** the 3D joints projected to the screen plane; 2D bone lengths and rest rotations from the projection.
-- **Meshes and weights:** §5's meshes per part; weights from the projected 3D skin weights sampled at the mesh
+- **Meshes and weights:** §6's meshes per part; weights from the projected 3D skin weights sampled at the mesh
   vertices (or 2D heat diffusion where the projection is ambiguous).
 - **Clips:** each 3D clip sampled per frame, joint rotations projected to in-plane angles, root motion to translate,
   keys reduced (curve fitting within a tolerance), **draw-order keys** where depth order changes (an arm crossing in
@@ -176,9 +207,11 @@ the owner's machine (needs the owner's Spine licence).
   order follows depth. **Owner:** a mascot idle and celebrate clip in Spine and the runtime.
 - Effort: 8–12 days.
 
-### SP6: Characters from a single picture (2D-native art)
+### SP6: Characters from a single picture (2D-native art): parked
 
-- Research-gated; the model question is open. Pipeline: pose keypoints (DWPose) → part masks (SAM 2-class
+- **Parked (§2):** characters come from 3D (SP5); research 15 §4.4 found 2D-native characters drift in identity.
+  Reopen only if the owner wants characters from flat art that has no 3D model. Research-gated; the model question
+  is open. Pipeline: pose keypoints (DWPose) → part masks (SAM 2-class
   promptable segmentation with point prompts per limb, licence per PLAN §6; See-through and Stretchy Studio as
   references) → hidden-region inpainting per part (Z-Image inpaint, as `layers`) → SP5's skeleton, mesh, weight
   and clip machinery with 2D bones from the keypoints.
@@ -192,7 +225,7 @@ the owner's machine (needs the owner's Spine licence).
   then Unity 2D Animation if wanted. Only after SP1–SP3 prove the model.
 - Effort: 3–5 days per engine.
 
-## 7. Validation
+## 8. Validation
 
 - **Here, every milestone:** schema and golden-file tests of the JSON and atlas, the preview against a Python
   reference sampler (same transforms at the same times), mesh and loop checks, Playwright for the UI.
@@ -202,7 +235,7 @@ the owner's machine (needs the owner's Spine licence).
 - **Version pin:** one Spine version at a time (`spine` field in the JSON); a change of version is its own small
   milestone with the format diff checked.
 
-## 8. Risks
+## 9. Risks
 
 - **Format drift between Spine versions** (3.8 → 4.0 → 4.1 → 4.2 changed timelines and skins): pin one, test against
   the owner's editor and runtime.
@@ -214,7 +247,7 @@ the owner's machine (needs the owner's Spine licence).
 - **Picture → parts** (SP6): the open model question; gated by a spike.
 - **Performance budget on phones:** bone, vertex and draw-call counts reported per asset; limits set by the owner.
 
-## 9. Decisions for the owner
+## 10. Decisions for the owner
 
 1. Spine version and runtime: which Spine version does the game use (4.2?), and which runtime/engine (PixiJS,
    Phaser, Unity, Godot via spine-godot, Cocos)?
@@ -222,7 +255,7 @@ the owner's machine (needs the owner's Spine licence).
 3. Premultiplied alpha on or off (the runtime's setting), atlas page limit (2048 or 4096), target resolution of
    symbols (e.g. 256 or 512 px) and of backgrounds.
 4. Order after SP1: symbols (SP2), then backgrounds (SP3) and effects (SP4), then characters (SP5)? Or characters
-   earlier?
+   earlier? (SP6 is parked, §2.)
 5. Clip naming conventions and default durations the game's code expects.
 
 ## Sources
@@ -237,5 +270,6 @@ the owner's machine (needs the owner's Spine licence).
   https://esotericsoftware.com/spine-binary-format ; export: https://esotericsoftware.com/spine-export
 - spine-core 4.2 `SkeletonJson` (reference for field meanings only, not to be vendored):
   https://app.unpkg.com/@esotericsoftware/spine-core@4.2.84/files/dist/SkeletonJson.js
-- Research 15 §4.3 (2D cutout rig, engine runtimes), PLAN §6 (licence policy), IMPLEMENTATION §3 (`layers`,
+- Research 15 §4.3 (2D cutout rig, engine runtimes), §4.4 (identity drift), §5.7 (revised 2026-11-27), WORKFLOW.md,
+  PLAN §1 (non-goals), PLAN §6 (licence policy), IMPLEMENTATION §3 (`layers`,
   `sprites`, `rig_skin`, 2D `export` contracts).

@@ -8,7 +8,8 @@ every licence read at its primary source (HF licence field, GitHub LICENSE, EULA
 Owner, later the same day: **everything purely local** — no external editor (Aseprite, Pixelorama and the like are
 *orientation* for workflows, never launched, embedded or written to); and 2D assets are *created* here, while
 animating a picture (video models) is left to the user's own tools. Sprite animation from the 3D rig and hand-made
-frames in the in-app editor stay in scope. Decisions the owner must make: §9. The build plan: §8 (proposed
+frames in the in-app editor stay in scope. Revised 2026-11-27 (§5.7): procedural *skeletal* animation of Effigy's own
+assets (Spine and engine 2D skeletons, research 20) is in scope; video-model animation stays out. Decisions the owner must make: §9. The build plan: §8 (proposed
 **M50–M58**, not yet in IMPLEMENTATION.md §4; its §3.2 rows are listed in §8.0 as one contract PR). Nothing here has
 run on the laptop; every VRAM number is the source's or marked (est.).
 
@@ -36,6 +37,8 @@ run on the laptop; every VRAM number is the source's or marked (est.).
    16-GB-feasible video family if that ever changes; LTX-2.x, Stability's SVD and CogVideoX carry revenue or
    registration clauses; ToonCrafter's weights are non-commercial by lineage; everything Hunyuan is out. What stays
    in scope as animation: sprite frames rendered from the 3D rig (item 1) and frames drawn by hand in the editor (item 5).
+   Revised 2026-11-27 (§5.7): skeletal animation (bones, meshes, keyframed clips; Spine, Godot `Skeleton2D`) of
+   Effigy's own pictures, layers and characters is in scope too (research 20); video models stay out.
 5. **"A local Aseprite" = our own pixel editor in the app, purely local (owner).** No embeddable web editor is both
    permissively licensed and alive (Piskel: Apache-2.0, a 2012 grunt app, no embedding API; Lospec: GPL,
    discontinued), and no external program is launched or written to. So: a React + canvas editor on the frames of a
@@ -185,7 +188,7 @@ of renders are candidates for the plan.**
 | frame interpolation | Practical-RIFE 4.26 (MIT code + weights), FILM (Apache-2.0, archived) | allowed | – | <2 GB | for frame-doubling *rendered* sprites before pixelizing; no evidence any interpolator works on hard-edged pixel art; GIMM-VFI is S-Lab NC → never |
 | **2D cutout rig** | Meta **Animated Drawings** (archived 2025-09): MIT end to end (detector + pose Apache-2.0 trained on the MIT Amateur Drawings set, numpy ARAP, BVH retarget configs; bundled BVH: CMU (free incl. commercial, acknowledgement) and Meta's own MIT clips) | MIT | allowed | CPU | reuse only the pure-Python ARAP + retarget; keypoints from our DWPose; **our 52-joint clips exported as BVH drive it** (the tool projects to 2D); Py 3.8/TorchServe parts are not needed |
 | 2D cutout, anime | Stretchy Studio (MIT: layered PSD → auto-rig via DWPose + mesh deform), See-through (Apache-2.0, SIGGRAPH 2026: single anime image → inpainted part layers, SDXL-based) | allowed | – | SDXL class | later, if 2D-native characters are wanted |
-| engine runtimes | Godot Skeleton2D/Bone2D/Polygon2D (MIT), Rive (MIT) | allowed | – | – | Spine runtimes need a Spine Editor licence → no; DragonBones MIT but abandoned |
+| engine runtimes | Godot Skeleton2D/Bone2D/Polygon2D (MIT), Rive (MIT) | allowed | – | – | Spine runtimes need a Spine Editor licence → never in Effigy; writing Spine's documented JSON + atlas for a game that holds the licence is fine (research 20); DragonBones MIT but abandoned |
 
 ### 4.4 Why not 2D-native frame generation for characters (evidence)
 
@@ -313,10 +316,18 @@ params this way) → a new version `NNN_pixelize` (the outputs of §5.3, `metric
 the version event arrives (UI-001's rule). **Not in v1** (`ponytail:` rows): layers and blend modes, a lasso,
 dither and gradient brushes, tile mode, reference layers, 9-slice slices, a brush wider than 1 px.
 
-### 5.7 Animating a picture: out of scope
+### 5.7 Animating a picture: skeletal in scope, video out
 
 Owner, 2026-10-12: Effigy creates the 2D assets; animating a background or a picture is the user's own tool's job.
-No `video` step, no Wan2.2 download, no video group on the Setup page. The research stays in §4.3; the trigger for
+No `video` step, no Wan2.2 download, no video group on the Setup page.
+
+**Revised by the owner, 2026-11-27:** *skeletal* animation of Effigy's own 2D assets is in scope: pictures,
+symbols, `layers` stacks and characters cut into parts, rigged with 2D bones and meshes, and given keyframed clips
+(procedural or converted from the 3D rig's clips), exported for Spine (its documented JSON + atlas; the game holds
+the Spine licence, Effigy never ships Spine's code) and engine 2D skeletons (Godot `Skeleton2D`). The plan is
+research 20. Still out: video-model animation (the paragraph below), and in-app animation editing beyond choosing
+and tuning generated clips: a timeline, curve or weight editor is the Spine editor's job, as Blender is for 3D
+(PLAN §1: not a full DCC tool). The research stays in §4.3; the trigger for
 a `ponytail:` row is the owner asking for loops or VFX from a prompt (then: Wan2.2-TI2V-5B through diffusers in
 `.venv-ml`, measured first). Animated previews of a sheet (`preview.webp`, Pillow `save_all`) are still written by
 `_sheet.py` for the browser and the agent.
